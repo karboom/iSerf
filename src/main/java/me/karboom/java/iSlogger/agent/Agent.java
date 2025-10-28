@@ -1,12 +1,15 @@
 package me.karboom.java.iSlogger.agent;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.openai.models.chat.completions.ChatCompletionChunk;
-import me.karboom.java.iSlogger.Tool;
 import me.karboom.java.iSlogger.llm.text.BaseLLM;
 import me.karboom.java.iSlogger.memory.Item;
+import me.karboom.java.iSlogger.tool.Tool;
 import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 
 /**
@@ -54,19 +57,153 @@ public abstract class Agent {
 
                     if (toolCalls.isPresent()) {
                         return other.collectList().flatMapMany((list)-> {
-                            // Todo 合并ToolCall参数
+                            // 合并ToolCall参数
+                            var calls = mergeToolCalls(list);
 
-                            // Todo 通过cli调用MCP函数
+                            // 通过cli调用MCP函数
+                            var callResult = invokeToolCalls(calls);
 
-                            // Todo 解析函数返回的json，如果$.type = direct那么直接更新到memory，否则继续调用llm.send
+                            // 判断是否需要直接更新记忆
+                            var allDirect = true;
+                            for (Item.ToolCall call : callResult) {
+                                if (!"direct".equals(call.result.get("type").asText())) {
+                                    allDirect = false;
+                                }
+                            }
 
-                            return llm.send(memory, null, tools);
+                            if (allDirect) {
+                                // 构建合并后的响应文本
+                                var responseBuilder = new StringBuilder();
+                                for (Item.ToolCall call : callResult) {
+                                    responseBuilder.append(call.result.get("content").asText());
+                                    responseBuilder.append("\n");
+                                }
+                                var responseText = responseBuilder.toString().trim();
+
+                                // 构造完整的 ChatCompletionChunk
+                                var fake = ChatCompletionChunk.builder()
+                                        .id("chatcmpl-fake-" + System.currentTimeMillis())
+//                                        .object("chat.completion.chunk")
+                                        .created(System.currentTimeMillis() / 1000)
+                                        .model(llm.llmType)
+                                        .addChoice(
+                                            ChatCompletionChunk.Choice.builder()
+                                                .index(0)
+                                                .delta(
+                                                    ChatCompletionChunk.Choice.Delta.builder()
+                                                        .role(ChatCompletionChunk.Choice.Delta.Role.ASSISTANT)
+                                                        .content(responseText)
+                                                        .build()
+                                                )
+                                                .finishReason(ChatCompletionChunk.Choice.FinishReason.STOP)
+                                                .build()
+                                        )
+                                        .build();
+
+                                // 直接返回结果
+                                return Flux.just(fake);
+                            } else {
+
+                                return llm.send(memory, null, tools);
+                            }
+
                         });
 
                     } else {
-                        return other.skip(1);
+                        return other;
                     }
                 });
+    }
+
+    /**
+     * 合并函数调用chunk
+     * @param chunks 流式响应块列表
+     * @return 合并后的工具调用列表
+     */
+    private List<Item.ToolCall> mergeToolCalls(List<ChatCompletionChunk> chunks) {
+        // 使用 Map 存储每个 index 对应的 ToolCall
+        var toolCallsMap = new HashMap<Integer, Item.ToolCall>();
+        // 使用 StringBuilder 累积 arguments JSON 字符串
+        var argumentsMap = new HashMap<Integer, StringBuilder>();
+
+        for (var chunk : chunks) {
+            if (chunk.choices() != null && !chunk.choices().isEmpty()) {
+                var delta = chunk.choices().get(0).delta();
+                if (delta.toolCalls().isPresent()) {
+                    for (var toolCall : delta.toolCalls().get()) {
+                        int index = (int) toolCall.index();
+
+                        // 初始化 ToolCall 对象（如果不存在）
+                        if (!toolCallsMap.containsKey(index)) {
+                            toolCallsMap.put(index, Item.ToolCall.builder()
+                                .arguments(new HashMap<>())
+                                .build());
+                        }
+
+                        var currentToolCall = toolCallsMap.get(index);
+
+                        // 设置 id
+                        if (toolCall.id().isPresent()) {
+                            currentToolCall.id = toolCall.id().get();
+                        }
+
+                        // 设置 function 信息
+                        if (toolCall.function().isPresent()) {
+                            var function = toolCall.function().get();
+                            if (function.name().isPresent()) {
+                                currentToolCall.name = function.name().get();
+                            }
+                            if (function.arguments().isPresent()) {
+                                // 累积 arguments 字符串
+                                if (!argumentsMap.containsKey(index)) {
+                                    argumentsMap.put(index, new StringBuilder());
+                                }
+                                argumentsMap.get(index).append(function.arguments().get());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 解析累积的 arguments JSON 字符串为 HashMap
+        var objectMapper = new ObjectMapper();
+        for (var entry : argumentsMap.entrySet()) {
+            var index = entry.getKey();
+            var argsJson = entry.getValue().toString();
+            try {
+                @SuppressWarnings("unchecked")
+                var argsMap = objectMapper.readValue(argsJson, HashMap.class);
+                toolCallsMap.get(index).arguments = argsMap;
+            } catch (Exception e) {
+                // 如果解析失败，保持空的 HashMap
+                System.err.println("Failed to parse tool call arguments: " + e.getMessage());
+            }
+        }
+
+        return new ArrayList<>(toolCallsMap.values());
+    }
+
+    /**
+     * 调用函数
+     * @param calls 工具调用列表
+     * @return 带有调用结果的工具调用列表
+     */
+    private List<Item.ToolCall> invokeToolCalls(List<Item.ToolCall> calls) {
+        var objectMapper = new ObjectMapper();
+        
+        // 为每个工具调用创建假的结果
+        for (var call : calls) {
+            // 创建假的结果 ObjectNode
+            ObjectNode result = objectMapper.createObjectNode();
+            result.put("type", "direct");
+            result.put("content", "This is a mock result for " + call.name);
+            
+            // 设置结果
+            call.result = result;
+        }
+        
+        return calls;
     }
 
     /**

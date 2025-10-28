@@ -1,10 +1,8 @@
 package agent;
 
-import com.openai.models.chat.completions.ChatCompletionChunk;
-import me.karboom.java.iSlogger.Tool;
+import me.karboom.java.iSlogger.tool.Tool;
 import me.karboom.java.iSlogger.agent.Agent;
 import me.karboom.java.iSlogger.llm.text.OpenAI;
-import me.karboom.java.iSlogger.memory.Item;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
