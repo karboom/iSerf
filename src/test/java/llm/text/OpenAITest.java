@@ -1,6 +1,6 @@
 package llm.text;
 
-import me.karboom.java.iSlogger.Tool;
+import me.karboom.java.iSlogger.tool.Tool;
 import me.karboom.java.iSlogger.llm.text.OpenAI;
 import me.karboom.java.iSlogger.memory.Item;
 import org.junit.jupiter.api.BeforeEach;

@@ -3,12 +3,10 @@ package me.karboom.java.iSlogger.llm.text;
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
 import com.openai.core.JsonValue;
-import com.openai.core.http.AsyncStreamResponse;
-import com.openai.core.http.StreamResponse;
 import com.openai.models.FunctionDefinition;
 import com.openai.models.FunctionParameters;
 import com.openai.models.chat.completions.*;
-import me.karboom.java.iSlogger.Tool;
+import me.karboom.java.iSlogger.tool.Tool;
 import me.karboom.java.iSlogger.memory.Item;
 import reactor.core.publisher.Flux;
 
