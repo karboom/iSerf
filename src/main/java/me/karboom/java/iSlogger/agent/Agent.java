@@ -22,6 +22,7 @@ public abstract class Agent {
     protected Memory memory = new LocalMemory();
     protected List<Tool> tools;
     protected BaseLLM llm;
+    protected String prompt;
 
     /**
      * 构造函数
@@ -30,8 +31,9 @@ public abstract class Agent {
      * @param llm   LLM 实例
      * @param tools 工具列表
      */
-    public Agent(String id, BaseLLM llm, List<Tool> tools) {
+    public Agent(String id, String prompt, BaseLLM llm, List<Tool> tools) {
         this.id = id;
+        this.prompt = prompt;
         this.llm = llm;
         this.tools = tools != null ? tools : new ArrayList<>();
     }

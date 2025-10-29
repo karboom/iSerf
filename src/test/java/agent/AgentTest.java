@@ -59,7 +59,7 @@ class AgentTest {
     void testAgentTalk() {
         // 创建 Agent
         var llm = new OpenAI("qwen-plus", llmConfig, apiKey, url, 3);
-        var agent = new Agent("test-agent", llm, tools) {};
+        var agent = new Agent("test-agent", "", llm, tools) {};
 
 //        // 测试1: 基本 talk 方法，验证返回的是 Flux
 //        var message1 = "Hello, how are you?";
@@ -84,7 +84,7 @@ class AgentTest {
 //        assertNotNull(responseEmpty, "空消息响应不应为空");
 
         // 测试5: 带工具的 Agent，验证工具调用场景
-        var agentWithTools = new Agent("test-agent-tools", llm, tools) {};
+        var agentWithTools = new Agent("test-agent-tools", "", llm, tools) {};
         var responseWithTools = agentWithTools.talk("What's the weather in Beijing?").doOnNext(System.out::println);
         assertNotNull(responseWithTools, "带工具的响应不应为空");
         assertTrue(responseWithTools instanceof Flux, "带工具的响应应该是 Flux 类型");
