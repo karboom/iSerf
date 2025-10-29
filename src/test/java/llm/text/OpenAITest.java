@@ -70,7 +70,7 @@ class OpenAITest {
 
         var p1 = new Tool.Parameter("location", "string", "地点", true);
         var p2 = new Tool.Parameter("continent", "string", "欧洲还是亚洲", true);
-        var tool1 = new Tool("query", "当你需要查询天气，使用这个工具", List.of(p1, p2));
+        var tool1 = Tool.builder().name("query").description("当你需要查询天气，使用这个工具").parameters(List.of(p1, p2)).build();
 
 
         var response = llm.send(messages, null, List.of(tool1));

@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.openai.models.chat.completions.ChatCompletionChunk;
 import me.karboom.java.iSlogger.llm.text.BaseLLM;
 import me.karboom.java.iSlogger.memory.Item;
+import me.karboom.java.iSlogger.memory.LocalMemory;
+import me.karboom.java.iSlogger.memory.Memory;
 import me.karboom.java.iSlogger.tool.Tool;
 import reactor.core.publisher.Flux;
 
@@ -17,7 +19,7 @@ import java.util.List;
  */
 public abstract class Agent {
     protected String id;
-    protected List<Item> memory;
+    protected Memory memory = new LocalMemory();
     protected List<Tool> tools;
     protected BaseLLM llm;
 
@@ -32,7 +34,6 @@ public abstract class Agent {
         this.id = id;
         this.llm = llm;
         this.tools = tools != null ? tools : new ArrayList<>();
-        this.memory = new ArrayList<>();
     }
 
     /**
@@ -51,7 +52,7 @@ public abstract class Agent {
         // 添加到记忆中
         memory.add(userMessage);
 
-        return llm.send(memory, null, tools)
+        return llm.send(memory.get(), null, tools)
                 .switchOnFirst((first, other) -> {
                     var toolCalls = first.get().choices().get(0).delta().toolCalls();
 
@@ -104,7 +105,7 @@ public abstract class Agent {
                                 return Flux.just(fake);
                             } else {
 
-                                return llm.send(memory, null, tools);
+                                return llm.send(memory.get(), null, tools);
                             }
 
                         });
@@ -204,35 +205,6 @@ public abstract class Agent {
         }
         
         return calls;
-    }
-
-    /**
-     * 加载记忆
-     *
-     * @param messages 记忆消息列表
-     */
-    public void loadMemory(List<Item> messages) {
-        if (messages != null) {
-            this.memory = new ArrayList<>(messages);
-        } else {
-            this.memory = new ArrayList<>();
-        }
-    }
-
-    /**
-     * 导出记忆
-     *
-     * @return 记忆列表的副本
-     */
-    public List<Item> dumpMemory() {
-        return new ArrayList<>(this.memory);
-    }
-
-    /**
-     * 清空记忆
-     */
-    public void clearMemory() {
-        this.memory.clear();
     }
 
 

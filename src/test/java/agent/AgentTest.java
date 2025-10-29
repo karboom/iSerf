@@ -43,14 +43,15 @@ class AgentTest {
 
         // 创建测试工具
         tools = new ArrayList<>();
-        var weatherTool = new Tool(
-                "get-weather",
-                "Get the current weather for a location",
-                List.of(
+        var weatherTool = Tool.builder()
+                .name("get-weather")
+                .description("Get the current weather for a location")
+                .parameters(List.of(
                         new Tool.Parameter("location", "string", "The city name", true),
                         new Tool.Parameter("unit", "string", "Temperature unit (celsius or fahrenheit)", false)
-                )
-        );
+                ))
+                .type("")
+                .build();
         tools.add(weatherTool);
     }
 

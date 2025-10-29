@@ -1,5 +1,6 @@
 package me.karboom.java.iSlogger.memory;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -11,6 +12,7 @@ import java.util.List;
 @AllArgsConstructor
 @Builder
 public class Item {
+    public String id;
     /**
      * 角色： assistant | user | system | tool
      */
@@ -25,6 +27,6 @@ public class Item {
         public String id;
         public String name;
         public HashMap<String, Object> arguments;
-        public String result;
+        public ObjectNode result;
     }
 }
