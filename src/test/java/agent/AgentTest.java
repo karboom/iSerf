@@ -44,7 +44,7 @@ class AgentTest {
         // 创建测试工具
         tools = new ArrayList<>();
         var weatherTool = Tool.builder()
-                .name("get-weather")
+                .name("getWeather")
                 .description("Get the current weather for a location")
                 .parameters(List.of(
                         new Tool.Parameter("location", "string", "The city name", true),
@@ -89,5 +89,46 @@ class AgentTest {
         assertNotNull(responseWithTools, "带工具的响应不应为空");
         assertTrue(responseWithTools instanceof Flux, "带工具的响应应该是 Flux 类型");
         StepVerifier.create(responseWithTools).expectNextCount(3).verifyComplete();
+    }
+
+    @Test
+    void testUpdateTool() {
+        // 创建 Agent
+        var llm = new OpenAI("qwen-plus", llmConfig, apiKey, url, 3);
+        var agent = new Agent("test-agent", "", llm, tools) {};
+
+        // 测试用例1: 正常情况 - 工具存在且更新成功
+        var objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var resultNode = objectMapper.createObjectNode();
+        resultNode.put("type", "error");
+        resultNode.put("content", "这不是一个中国的地点");
+
+        var toolCall = me.karboom.java.iSlogger.memory.Item.ToolCall.builder()
+                .name("getWeather")
+                .arguments(new HashMap<>(){{
+                    put("location", "伦敦");
+                }})
+                .result(resultNode)
+                .build();
+
+        // 验证 Mono<Void> 返回值可以正确处理
+        var updateToolMono = agent.updateTool(toolCall);
+        assertNotNull(updateToolMono, "updateTool should return a Mono<Void>");
+        // 订阅 Mono 以触发执行，并验证不会抛出异常
+        assertDoesNotThrow(() -> updateToolMono.block(), "updateTool should not throw exception for valid tool");
+
+        // 测试用例2: 工具不存在的情况
+        var nonExistentToolCall = me.karboom.java.iSlogger.memory.Item.ToolCall.builder()
+                .name("non-existent-tool")
+                .arguments(new HashMap<>())
+                .result(resultNode)
+                .build();
+
+        // 验证 Mono<Void> 返回值可以正确处理
+        var errorMono = agent.updateTool(nonExistentToolCall);
+        assertNotNull(errorMono, "updateTool should return a Mono<Void> even for errors");
+        // 验证会抛出预期的异常
+        assertThrows(RuntimeException.class, () -> errorMono.block(), 
+                   "updateTool should throw RuntimeException for non-existent tool");
     }
 }

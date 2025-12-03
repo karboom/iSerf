@@ -8,9 +8,14 @@ import me.karboom.java.iSlogger.memory.Item;
 import me.karboom.java.iSlogger.memory.LocalMemory;
 import me.karboom.java.iSlogger.memory.Memory;
 import me.karboom.java.iSlogger.tool.Tool;
+import me.karboom.java.iSlogger.util.JSONUtil;
+import okhttp3.OkHttpClient;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 
@@ -74,6 +79,16 @@ public abstract class Agent {
                                 }
                             }
 
+
+                            // 判断是否需要直接更新记忆
+                            var hasError = false;
+                            for (Item.ToolCall call : callResult) {
+                                if (!"error".equals(call.result.get("type").asText())) {
+                                    hasError = true;
+                                }
+                            }
+
+
                             if (allDirect) {
                                 // 构建合并后的响应文本
                                 var responseBuilder = new StringBuilder();
@@ -105,6 +120,10 @@ public abstract class Agent {
 
                                 // 直接返回结果
                                 return Flux.just(fake);
+                            } else if (hasError) {
+                                // 更新代码
+
+                                return null;
                             } else {
 
                                 return llm.send(memory.get(), null, tools);
@@ -116,6 +135,101 @@ public abstract class Agent {
                         return other;
                     }
                 });
+    }
+
+    /**
+     * 根据错误反馈更新工具内容
+     */
+    public Mono<Void> updateTool(Item.ToolCall toolCall) {
+        // 1. 根据ToolCall 匹配tool
+        var matchedTool = tools.stream()
+                .filter(tool -> tool.getName().equals(toolCall.getName()))
+                .findFirst()
+                .orElse(null);
+
+        if (matchedTool == null) {
+            return Mono.error(new RuntimeException("Tool not found: " + toolCall.getName()));
+        }
+
+        // 2. 通过API获取代码
+        var apiUrl = "http://localhost:3000/query";
+        var toolName = matchedTool.getName();
+        var client = new OkHttpClient();
+
+        // 创建请求
+        var request = new okhttp3.Request.Builder()
+                .url(apiUrl + "?name=" + toolName)
+                .get()
+                .build();
+
+        // 异步执行HTTP请求并处理响应
+        return Mono.fromCallable(() -> client.newCall(request).execute())
+                .flatMap(response -> {
+                    if (!response.isSuccessful()) {
+                        return Mono.error(new RuntimeException("Failed to query tool code: " + response.code()));
+                    }
+
+                    try {
+                        var responseBody = response.body().string();
+                        var currentCode = JSONUtil.parse(responseBody).get("tool").get("content").asText();
+                        
+                        // 3. 调用LLM更新代码
+                        var prompt = "请根据以下错误信息更新代码:\n\n输入参数：\n\n%s\n\n错误信息: %s\n\n当前代码:\n%s\n\n 请修改runner里面的逻辑，仅需要告诉我最终的代码，不要带markdown标记"
+                                .formatted(toolCall.arguments.toString(), toolCall.getResult().toString(), currentCode);
+                        
+                        var userMessage = Item.builder()
+                                .role("user")
+                                .text(prompt)
+                                .build();
+                                
+                        var messages = new ArrayList<Item>();
+                        messages.add(userMessage);
+                        
+                        // 调用LLM生成更新后的代码
+                        return llm.send(messages, null, null)
+                                .map(chunk -> {
+                                    if (chunk.choices() != null && !chunk.choices().isEmpty()) {
+                                        var delta = chunk.choices().get(0).delta();
+                                        if (delta.content().isPresent()) {
+                                            return delta.content().get();
+                                        }
+                                    }
+                                    return "";
+                                })
+                                .reduce(new StringBuilder(), (sb, content) -> sb.append(content))
+                                .map(StringBuilder::toString)
+                                .flatMap(updatedCode -> {
+                                    // 4. 通过API上传更新后的代码
+                                    var updateApiUrl = "http://localhost:3000/update";
+                                    var encodedCode = Base64.getEncoder().encodeToString(updatedCode.getBytes(StandardCharsets.UTF_8));
+                                    var payload = "{\"name\": \"%s\", \"content\": \"%s\"}"
+                                            .formatted(toolName, encodedCode);
+                                    
+                                    var updateRequestBody = okhttp3.RequestBody.create(
+                                            payload, 
+                                            okhttp3.MediaType.get("application/json; charset=utf-8")
+                                    );
+                                    
+                                    var updateRequest = new okhttp3.Request.Builder()
+                                            .url(updateApiUrl)
+                                            .post(updateRequestBody)
+                                            .build();
+                                            
+                                    return Mono.fromCallable(() -> client.newCall(updateRequest).execute())
+                                            .flatMap(updateResponse -> {
+                                                if (!updateResponse.isSuccessful()) {
+                                                    return Mono.error(new RuntimeException("Failed to upload updated code: " + updateResponse.code()));
+                                                } else {
+                                                    return Mono.empty();
+                                                }
+                                            });
+                                })
+                                .onErrorResume(e -> Mono.error(e));
+                    } catch (Exception e) {
+                        return Mono.error(e);
+                    }
+                })
+                .then(); // 转换为Mono<Void>
     }
 
     /**
@@ -195,18 +309,109 @@ public abstract class Agent {
     private List<Item.ToolCall> invokeToolCalls(List<Item.ToolCall> calls) {
         var objectMapper = new ObjectMapper();
         
-        // 为每个工具调用创建假的结果
         for (var call : calls) {
-            // 创建假的结果 ObjectNode
+            // 根据 name 匹配对应的 Tool
+            Tool matchedTool = null;
+            for (Tool tool : tools) {
+                if (tool.getName().equals(call.name)) {
+                    matchedTool = tool;
+                    break;
+                }
+            }
+
             ObjectNode result = objectMapper.createObjectNode();
-            result.put("type", "direct");
-            result.put("content", "This is a mock result for " + call.name);
-            
-            // 设置结果
+
+            if (matchedTool == null) {
+                result.put("type", "error");
+                result.put("content", "Tool not found: " + call.name);
+            } else {
+                try {
+                    switch (matchedTool.getType()) {
+                        case "function":
+                            // 调用本地函数
+                            if (matchedTool.getFunction() != null) {
+                                String functionResult = matchedTool.getFunction().apply(call.arguments);
+                                result.put("type", "direct");
+                                result.put("content", functionResult != null ? functionResult : "");
+                            } else {
+                                result.put("type", "error");
+                                result.put("content", "Function not defined for tool: " + call.name);
+                            }
+                            break;
+                            
+                        case "mcp-http":
+                            // 调用 HTTP 工具
+                            result = invokeHttpTool(matchedTool, call.arguments);
+                            break;
+                            
+                        case "mcp-cli":
+                            // 调用 CLI 工具
+                            result = invokeCliTool(matchedTool, call.arguments);
+                            break;
+                            
+                        default:
+                            result.put("type", "error");
+                            result.put("content", "Unsupported tool type: " + matchedTool.getType());
+                            break;
+                    }
+                } catch (Exception e) {
+                    result.put("type", "error");
+                    result.put("content", "Error calling tool '" + call.name + "': " + e.getMessage());
+                }
+            }
+
             call.result = result;
         }
         
         return calls;
+    }
+
+    /**
+     * 调用 HTTP 工具
+     * @param tool 工具对象
+     * @param arguments 参数
+     * @return 调用结果
+     */
+    private ObjectNode invokeHttpTool(Tool tool, HashMap<String, Object> arguments) {
+        var objectMapper = new ObjectMapper();
+        var result = objectMapper.createObjectNode();
+        
+        try {
+            // 这里应该实现 HTTP 工具调用逻辑
+            // 由于需要与 MCP 服务器交互，实际实现会比较复杂
+            // 这里提供一个简化的示例实现
+            result.put("type", "direct");
+            result.put("content", "HTTP tool '" + tool.getName() + "' called with args: " + arguments.toString());
+        } catch (Exception e) {
+            result.put("type", "error");
+            result.put("content", "Error calling HTTP tool '" + tool.getName() + "': " + e.getMessage());
+        }
+        
+        return result;
+    }
+
+    /**
+     * 调用 CLI 工具
+     * @param tool 工具对象
+     * @param arguments 参数
+     * @return 调用结果
+     */
+    private ObjectNode invokeCliTool(Tool tool, HashMap<String, Object> arguments) {
+        var objectMapper = new ObjectMapper();
+        var result = objectMapper.createObjectNode();
+        
+        try {
+            // 这里应该实现 CLI 工具调用逻辑
+            // 需要构造命令行参数并执行命令
+            // 这里提供一个简化的示例实现
+            result.put("type", "direct");
+            result.put("content", "CLI tool '" + tool.getName() + "' called with args: " + arguments.toString());
+        } catch (Exception e) {
+            result.put("type", "error");
+            result.put("content", "Error calling CLI tool '" + tool.getName() + "': " + e.getMessage());
+        }
+        
+        return result;
     }
 
 
