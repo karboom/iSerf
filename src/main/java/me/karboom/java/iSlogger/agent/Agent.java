@@ -10,14 +10,15 @@ import me.karboom.java.iSlogger.memory.Memory;
 import me.karboom.java.iSlogger.tool.Tool;
 import me.karboom.java.iSlogger.util.JSONUtil;
 import okhttp3.OkHttpClient;
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
 import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.HashMap;
-import java.util.List;
+import java.util.*;
+import java.util.concurrent.PriorityBlockingQueue;
+import java.util.function.Consumer;
 
 /**
  * Agent 基类
@@ -28,6 +29,10 @@ public abstract class Agent {
     protected List<Tool> tools;
     protected BaseLLM llm;
     protected String prompt;
+    protected PriorityBlockingQueue<Item> queue;
+
+    protected FluxSink<Item> sink;
+    public Flux<Item> broadcast;
 
     /**
      * 构造函数
@@ -41,6 +46,130 @@ public abstract class Agent {
         this.prompt = prompt;
         this.llm = llm;
         this.tools = tools != null ? tools : new ArrayList<>();
+        this.queue = new PriorityBlockingQueue<>(100, Comparator.comparing(Item::getId));
+
+
+        Flux<Item> flux = Flux.create(s -> {
+            sink = s;
+        });
+
+        broadcast = flux.share();
+
+        run();
+    }
+
+
+    // Todo 支持3个入参的版本
+    public Disposable subscribe(Consumer<Item> consumer) {
+        return broadcast.subscribe(consumer);
+    }
+
+    private void run() {
+        new Thread(() -> {
+            while (!Thread.interrupted()) {
+                try {
+                    var item = queue.take();
+//                    System.out.println("\n1");
+                    var userMessage = Item.builder()
+                            .role("user")
+                            .text(item.getText())
+                            .build();
+
+                    // 添加到记忆中
+                    memory.add(userMessage);
+
+                    llm.send(memory.get(), null, tools)
+                            .switchOnFirst((first, other) -> {
+                                var toolCalls = first.get().choices().get(0).delta().toolCalls();
+
+                                if (toolCalls.isPresent()) {
+                                    return other
+                                            .collectList()
+                                            .flatMapMany((list) -> {
+                                                // 合并ToolCall参数
+                                                var calls = mergeToolCalls(list);
+
+                                                // 通过cli调用MCP函数
+                                                var callResult = invokeToolCalls(calls);
+
+                                                // 判断是否需要直接更新记忆
+                                                var allDirect = true;
+                                                for (Item.ToolCall call : callResult) {
+                                                    if (!"direct".equals(call.result.get("type").asText())) {
+                                                        allDirect = false;
+                                                    }
+                                                }
+
+
+                                                // 判断是否需要直接更新记忆
+                                                var hasError = false;
+                                                for (Item.ToolCall call : callResult) {
+                                                    if ("error".equals(call.result.get("type").asText())) {
+                                                        hasError = true;
+                                                    }
+                                                }
+
+
+                                                if (allDirect) {
+                                                    // 构建合并后的响应文本
+                                                    var responseBuilder = new StringBuilder();
+                                                    for (Item.ToolCall call : callResult) {
+                                                        responseBuilder.append(call.result.get("content").asText());
+                                                        responseBuilder.append("\n");
+                                                    }
+                                                    var responseText = responseBuilder.toString().trim();
+
+                                                    sink.next(Item.builder().text(responseText).build());
+                                                    // Todo 加入记忆
+
+                                                    return Flux.empty();
+                                                } else if (hasError) {
+                                                    sink.next(Item.builder().text("我正在更新代码，请您稍后").build());
+
+                                                    // 更新代码
+                                                    return Flux.empty();
+                                                } else {
+                                                    var messageInvoke = Item.builder().role("tool").build();
+                                                    var messageRes = Item.builder().build();
+
+                                                    memory.update(messageInvoke);
+                                                    memory.update(messageRes);
+
+                                                    return llm.send(memory.get(), null, tools);
+                                                }
+
+                                            });
+                                } else {
+                                    return other;
+                                }
+                            })
+                            .reduce("", (acc, chunk) -> {
+                                var text = ((ChatCompletionChunk) chunk).choices().get(0).delta().content().get();
+                                sink.next(Item.builder().text(text).isSegment(1).build());
+                                acc += text;
+                                return acc;
+                            })
+                            .map(f -> {
+                                var message = (Item.builder().role("assistant").text(f).isSegment(0).build());
+
+                                sink.next(message);
+                                memory.update(message);
+
+                                return f;
+                            })
+                            .block();
+
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+
+            }
+        }).start();
+    }
+
+    public void send(String message) {
+        queue.offer(Item.builder().id("").text(message).build());
     }
 
     /**
@@ -64,7 +193,7 @@ public abstract class Agent {
                     var toolCalls = first.get().choices().get(0).delta().toolCalls();
 
                     if (toolCalls.isPresent()) {
-                        return other.collectList().flatMapMany((list)-> {
+                        return other.collectList().flatMapMany((list) -> {
                             // 合并ToolCall参数
                             var calls = mergeToolCalls(list);
 
@@ -105,16 +234,16 @@ public abstract class Agent {
                                         .created(System.currentTimeMillis() / 1000)
                                         .model(llm.llmType)
                                         .addChoice(
-                                            ChatCompletionChunk.Choice.builder()
-                                                .index(0)
-                                                .delta(
-                                                    ChatCompletionChunk.Choice.Delta.builder()
-                                                        .role(ChatCompletionChunk.Choice.Delta.Role.ASSISTANT)
-                                                        .content(responseText)
+                                                ChatCompletionChunk.Choice.builder()
+                                                        .index(0)
+                                                        .delta(
+                                                                ChatCompletionChunk.Choice.Delta.builder()
+                                                                        .role(ChatCompletionChunk.Choice.Delta.Role.ASSISTANT)
+                                                                        .content(responseText)
+                                                                        .build()
+                                                        )
+                                                        .finishReason(ChatCompletionChunk.Choice.FinishReason.STOP)
                                                         .build()
-                                                )
-                                                .finishReason(ChatCompletionChunk.Choice.FinishReason.STOP)
-                                                .build()
                                         )
                                         .build();
 
@@ -172,19 +301,19 @@ public abstract class Agent {
                     try {
                         var responseBody = response.body().string();
                         var currentCode = JSONUtil.parse(responseBody).get("tool").get("content").asText();
-                        
+
                         // 3. 调用LLM更新代码
                         var prompt = "请根据以下错误信息更新代码:\n\n输入参数：\n\n%s\n\n错误信息: %s\n\n当前代码:\n%s\n\n 请修改runner里面的逻辑，仅需要告诉我最终的代码，不要带markdown标记"
                                 .formatted(toolCall.arguments.toString(), toolCall.getResult().toString(), currentCode);
-                        
+
                         var userMessage = Item.builder()
                                 .role("user")
                                 .text(prompt)
                                 .build();
-                                
+
                         var messages = new ArrayList<Item>();
                         messages.add(userMessage);
-                        
+
                         // 调用LLM生成更新后的代码
                         return llm.send(messages, null, null)
                                 .map(chunk -> {
@@ -204,17 +333,17 @@ public abstract class Agent {
                                     var encodedCode = Base64.getEncoder().encodeToString(updatedCode.getBytes(StandardCharsets.UTF_8));
                                     var payload = "{\"name\": \"%s\", \"content\": \"%s\"}"
                                             .formatted(toolName, encodedCode);
-                                    
+
                                     var updateRequestBody = okhttp3.RequestBody.create(
-                                            payload, 
+                                            payload,
                                             okhttp3.MediaType.get("application/json; charset=utf-8")
                                     );
-                                    
+
                                     var updateRequest = new okhttp3.Request.Builder()
                                             .url(updateApiUrl)
                                             .post(updateRequestBody)
                                             .build();
-                                            
+
                                     return Mono.fromCallable(() -> client.newCall(updateRequest).execute())
                                             .flatMap(updateResponse -> {
                                                 if (!updateResponse.isSuccessful()) {
@@ -234,6 +363,7 @@ public abstract class Agent {
 
     /**
      * 合并函数调用chunk
+     *
      * @param chunks 流式响应块列表
      * @return 合并后的工具调用列表
      */
@@ -253,8 +383,8 @@ public abstract class Agent {
                         // 初始化 ToolCall 对象（如果不存在）
                         if (!toolCallsMap.containsKey(index)) {
                             toolCallsMap.put(index, Item.ToolCall.builder()
-                                .arguments(new HashMap<>())
-                                .build());
+                                    .arguments(new HashMap<>())
+                                    .build());
                         }
 
                         var currentToolCall = toolCallsMap.get(index);
@@ -303,12 +433,13 @@ public abstract class Agent {
 
     /**
      * 调用函数
+     *
      * @param calls 工具调用列表
      * @return 带有调用结果的工具调用列表
      */
     private List<Item.ToolCall> invokeToolCalls(List<Item.ToolCall> calls) {
         var objectMapper = new ObjectMapper();
-        
+
         for (var call : calls) {
             // 根据 name 匹配对应的 Tool
             Tool matchedTool = null;
@@ -331,24 +462,24 @@ public abstract class Agent {
                             // 调用本地函数
                             if (matchedTool.getFunction() != null) {
                                 String functionResult = matchedTool.getFunction().apply(call.arguments);
-                                result.put("type", "direct");
+                                result.put("type", "A");
                                 result.put("content", functionResult != null ? functionResult : "");
                             } else {
                                 result.put("type", "error");
                                 result.put("content", "Function not defined for tool: " + call.name);
                             }
                             break;
-                            
+
                         case "mcp-http":
                             // 调用 HTTP 工具
                             result = invokeHttpTool(matchedTool, call.arguments);
                             break;
-                            
+
                         case "mcp-cli":
                             // 调用 CLI 工具
                             result = invokeCliTool(matchedTool, call.arguments);
                             break;
-                            
+
                         default:
                             result.put("type", "error");
                             result.put("content", "Unsupported tool type: " + matchedTool.getType());
@@ -362,20 +493,21 @@ public abstract class Agent {
 
             call.result = result;
         }
-        
+
         return calls;
     }
 
     /**
      * 调用 HTTP 工具
-     * @param tool 工具对象
+     *
+     * @param tool      工具对象
      * @param arguments 参数
      * @return 调用结果
      */
     private ObjectNode invokeHttpTool(Tool tool, HashMap<String, Object> arguments) {
         var objectMapper = new ObjectMapper();
         var result = objectMapper.createObjectNode();
-        
+
         try {
             // 这里应该实现 HTTP 工具调用逻辑
             // 由于需要与 MCP 服务器交互，实际实现会比较复杂
@@ -386,20 +518,21 @@ public abstract class Agent {
             result.put("type", "error");
             result.put("content", "Error calling HTTP tool '" + tool.getName() + "': " + e.getMessage());
         }
-        
+
         return result;
     }
 
     /**
      * 调用 CLI 工具
-     * @param tool 工具对象
+     *
+     * @param tool      工具对象
      * @param arguments 参数
      * @return 调用结果
      */
     private ObjectNode invokeCliTool(Tool tool, HashMap<String, Object> arguments) {
         var objectMapper = new ObjectMapper();
         var result = objectMapper.createObjectNode();
-        
+
         try {
             // 这里应该实现 CLI 工具调用逻辑
             // 需要构造命令行参数并执行命令
@@ -410,7 +543,7 @@ public abstract class Agent {
             result.put("type", "error");
             result.put("content", "Error calling CLI tool '" + tool.getName() + "': " + e.getMessage());
         }
-        
+
         return result;
     }
 

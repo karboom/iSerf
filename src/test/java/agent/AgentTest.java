@@ -3,12 +3,14 @@ package agent;
 import me.karboom.java.iSlogger.tool.Tool;
 import me.karboom.java.iSlogger.agent.Agent;
 import me.karboom.java.iSlogger.llm.text.OpenAI;
+import me.karboom.java.iSlogger.util.JSONUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 
 import java.util.*;
+import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -20,6 +22,11 @@ class AgentTest {
     private String url;
     private Map<String, Object> llmConfig;
     private List<Tool> tools;
+
+    private Function<HashMap<String, Object>, String> getWeather = (args) -> {
+
+        return "28摄氏度";
+    };
 
     @BeforeEach
     void setUp() {
@@ -50,7 +57,9 @@ class AgentTest {
                         new Tool.Parameter("location", "string", "The city name", true),
                         new Tool.Parameter("unit", "string", "Temperature unit (celsius or fahrenheit)", false)
                 ))
-                .type("")
+                .type("function")
+                .function(getWeather)
+
                 .build();
         tools.add(weatherTool);
     }
@@ -61,34 +70,49 @@ class AgentTest {
         var llm = new OpenAI("qwen-plus", llmConfig, apiKey, url, 3);
         var agent = new Agent("test-agent", "", llm, tools) {};
 
-//        // 测试1: 基本 talk 方法，验证返回的是 Flux
-//        var message1 = "Hello, how are you?";
-//        var response1 = agent.talk(message1);
-//        assertNotNull(response1, "响应不应为空");
-//        assertTrue(response1 instanceof Flux, "响应应该是 Flux 类型");
-//
-//        // 测试2: 验证 Flux 可以正常消费（使用 StepVerifier）
-//        StepVerifier.create(response1)
-//                .expectNextMatches(chunk -> chunk != null)
-//                .thenCancel()
-//                .verify();
-//
-//        // 测试3: 多条消息
-//        var response2 = agent.talk("How are you?");
-//        assertNotNull(response2, "第二条消息响应不应为空");
-//        var response3 = agent.talk("What's your name?");
-//        assertNotNull(response3, "第三条消息响应不应为空");
-//
-//        // 测试4: 空消息
-//        var responseEmpty = agent.talk("");
-//        assertNotNull(responseEmpty, "空消息响应不应为空");
-
         // 测试5: 带工具的 Agent，验证工具调用场景
         var agentWithTools = new Agent("test-agent-tools", "", llm, tools) {};
         var responseWithTools = agentWithTools.talk("What's the weather in Beijing?").doOnNext(System.out::println);
         assertNotNull(responseWithTools, "带工具的响应不应为空");
         assertTrue(responseWithTools instanceof Flux, "带工具的响应应该是 Flux 类型");
         StepVerifier.create(responseWithTools).expectNextCount(3).verifyComplete();
+    }
+
+    @Test
+
+    void testAgentBroadcast() throws InterruptedException {
+        // 创建 Agent
+        var llm = new OpenAI("qwen-plus", llmConfig, apiKey, url, 3);
+        var agent = new Agent("test-agent", "", llm, tools) {};
+
+        // 创建一个列表来收集广播的消息
+        var receivedMessages = new ArrayList<String>();
+        
+        // 订阅 broadcast 流
+        var subscription = agent.subscribe(
+            item -> {
+                System.out.println(JSONUtil.stringify(item));
+                receivedMessages.add(JSONUtil.stringify(item));
+            }
+//            error -> fail("Broadcast stream should not emit errors: " + error.getMessage()),
+//            () -> receivedMessages.add("COMPLETED")
+        );
+
+        // 使用 send 方法发送消息
+//        agent.send("写一个100字散文，关于宇宙");
+        agent.send("杭州的天气如何");
+        
+        // 等待一段时间让消息被处理
+        Thread.sleep(10000);
+
+        System.out.println(receivedMessages);
+        // 验证是否收到了消息
+        assertEquals(2, receivedMessages.size(), "Should have received 2 messages");
+        assertEquals("Hello, broadcast!", receivedMessages.get(0), "First message should match");
+        assertEquals("Hello, subscriber!", receivedMessages.get(1), "Second message should match");
+        
+        // 清理订阅
+        subscription.dispose();
     }
 
     @Test

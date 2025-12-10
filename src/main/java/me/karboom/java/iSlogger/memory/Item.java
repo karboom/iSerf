@@ -12,13 +12,6 @@ import java.util.List;
 @AllArgsConstructor
 @Builder
 public class Item {
-    public String id;
-    /**
-     * 角色： assistant | user | system | tool
-     */
-    public String role;
-    public String text;
-    public List<ToolCall> toolCalls;
 
     @Data
     @AllArgsConstructor
@@ -29,4 +22,31 @@ public class Item {
         public HashMap<String, Object> arguments;
         public ObjectNode result;
     }
+
+    public String id;
+
+    public String agentId;
+    public String userId;
+
+
+    /**
+     * 类型  text | image | video | audio | toolCalls | mixed | custom
+     */
+    public String type;
+
+    public String text;
+    public String image;
+    public List<ToolCall> toolCalls;
+    public List<Item> mixed;
+
+    public ObjectNode custom;
+
+    /**
+     * LLM角色： assistant | user | system | tool
+     */
+    public String role;
+
+
+    public Integer isSegment;
+
 }
