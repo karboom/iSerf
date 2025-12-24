@@ -48,6 +48,7 @@ public abstract class Agent {
         this.tools = tools != null ? tools : new ArrayList<>();
         this.queue = new PriorityBlockingQueue<>(100, Comparator.comparing(Item::getId));
 
+        this.memory.add(Item.builder().id(id).role("system").text(this.prompt).build());
 
         Flux<Item> flux = Flux.create(s -> {
             sink = s;
@@ -472,12 +473,42 @@ public abstract class Agent {
 
                         case "mcp-http":
                             // 调用 HTTP 工具
-                            result = invokeHttpTool(matchedTool, call.arguments);
+                            {
+                                var httpResult = objectMapper.createObjectNode();
+
+                                try {
+                                    // 这里应该实现 HTTP 工具调用逻辑
+                                    // 由于需要与 MCP 服务器交互，实际实现会比较复杂
+                                    // 这里提供一个简化的示例实现
+                                    httpResult.put("type", "direct");
+                                    httpResult.put("content", "HTTP tool '" + matchedTool.getName() + "' called with args: " + call.arguments.toString());
+                                } catch (Exception e) {
+                                    httpResult.put("type", "error");
+                                    httpResult.put("content", "Error calling HTTP tool '" + matchedTool.getName() + "': " + e.getMessage());
+                                }
+
+                                result = httpResult;
+                            }
                             break;
 
                         case "mcp-cli":
                             // 调用 CLI 工具
-                            result = invokeCliTool(matchedTool, call.arguments);
+                            {
+                                var cliResult = objectMapper.createObjectNode();
+
+                                try {
+                                    // 这里应该实现 CLI 工具调用逻辑
+                                    // 需要构造命令行参数并执行命令
+                                    // 这里提供一个简化的示例实现
+                                    cliResult.put("type", "direct");
+                                    cliResult.put("content", "CLI tool '" + matchedTool.getName() + "' called with args: " + call.arguments.toString());
+                                } catch (Exception e) {
+                                    cliResult.put("type", "error");
+                                    cliResult.put("content", "Error calling CLI tool '" + matchedTool.getName() + "': " + e.getMessage());
+                                }
+
+                                result = cliResult;
+                            }
                             break;
 
                         default:
@@ -495,56 +526,6 @@ public abstract class Agent {
         }
 
         return calls;
-    }
-
-    /**
-     * 调用 HTTP 工具
-     *
-     * @param tool      工具对象
-     * @param arguments 参数
-     * @return 调用结果
-     */
-    private ObjectNode invokeHttpTool(Tool tool, HashMap<String, Object> arguments) {
-        var objectMapper = new ObjectMapper();
-        var result = objectMapper.createObjectNode();
-
-        try {
-            // 这里应该实现 HTTP 工具调用逻辑
-            // 由于需要与 MCP 服务器交互，实际实现会比较复杂
-            // 这里提供一个简化的示例实现
-            result.put("type", "direct");
-            result.put("content", "HTTP tool '" + tool.getName() + "' called with args: " + arguments.toString());
-        } catch (Exception e) {
-            result.put("type", "error");
-            result.put("content", "Error calling HTTP tool '" + tool.getName() + "': " + e.getMessage());
-        }
-
-        return result;
-    }
-
-    /**
-     * 调用 CLI 工具
-     *
-     * @param tool      工具对象
-     * @param arguments 参数
-     * @return 调用结果
-     */
-    private ObjectNode invokeCliTool(Tool tool, HashMap<String, Object> arguments) {
-        var objectMapper = new ObjectMapper();
-        var result = objectMapper.createObjectNode();
-
-        try {
-            // 这里应该实现 CLI 工具调用逻辑
-            // 需要构造命令行参数并执行命令
-            // 这里提供一个简化的示例实现
-            result.put("type", "direct");
-            result.put("content", "CLI tool '" + tool.getName() + "' called with args: " + arguments.toString());
-        } catch (Exception e) {
-            result.put("type", "error");
-            result.put("content", "Error calling CLI tool '" + tool.getName() + "': " + e.getMessage());
-        }
-
-        return result;
     }
 
 
