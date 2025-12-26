@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.function.Function;
@@ -27,10 +28,12 @@ public class Tool {
     public String description;
     public List<Parameter> parameters;
 
-    // mcp-http  mcp-cli  function
+    // mcp-http  mcp-cli  function  iClass  clazz
     public String type;
 
     public Function<HashMap<String, Object>, String> function;
+
+    public String iClass;
 
     public String url;
     public HashMap<String, String> headers;

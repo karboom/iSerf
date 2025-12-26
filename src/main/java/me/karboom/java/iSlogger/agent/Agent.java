@@ -15,6 +15,11 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
 import reactor.core.publisher.Mono;
 
+import me.karboom.java.iSlogger.tool.FunctionWrapper;
+
+import java.io.File;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.PriorityBlockingQueue;
@@ -268,6 +273,53 @@ public abstract class Agent {
                 .then(); // 转换为Mono<Void>
     }
 
+    public Mono<Void> updateToolLocal(Item.ToolCall toolCall) {
+        var matchedTool = tools.stream()
+                .filter(tool -> tool.getName().equals(toolCall.getName()))
+                .findFirst()
+                .orElse(null);
+
+        if (matchedTool == null) {
+            return Mono.error(new RuntimeException("Tool not found: %s".formatted(toolCall.getName())));
+        }
+
+        var javaFilePath = "%s/current/%s.java".formatted(matchedTool.getIClass(), matchedTool.getName());
+        var javaFile = new File(javaFilePath);
+
+        return Mono.fromCallable(() -> {
+                    if (!javaFile.exists()) {
+                        throw new RuntimeException("Java file not found: %s".formatted(javaFilePath));
+                    }
+                    return java.nio.file.Files.readString(javaFile.toPath(), StandardCharsets.UTF_8);
+                })
+                .flatMap(currentCode -> {
+                    var prompt = "请根据以下错误信息更新代码:\n\n输入参数：\n\n%s\n\n错误信息: %s\n\n当前代码:\n%s\n\n 请修改runner里面的逻辑，仅需要告诉我最终的代码，不要带markdown标记"
+                            .formatted(toolCall.arguments.toString(), toolCall.getResult().toString(), currentCode);
+
+                    var userMessage = Item.builder()
+                            .role("user")
+                            .text(prompt)
+                            .build();
+
+                    return llm.send(List.of(userMessage), null, null)
+                            .map(chunk -> {
+                                if (chunk.choices() != null && !chunk.choices().isEmpty()) {
+                                    var delta = chunk.choices().get(0).delta();
+                                    if (delta.content().isPresent()) {
+                                        return delta.content().get();
+                                    }
+                                }
+                                return "";
+                            })
+                            .reduce(new StringBuilder(), StringBuilder::append)
+                            .map(StringBuilder::toString)
+                            .flatMap(updatedCode -> Mono.fromRunnable(() -> {
+                                me.karboom.java.iSlogger.util.CodeUtil.run(updatedCode, matchedTool.getIClass());
+                            }));
+                })
+                .then();
+    }
+
     /**
      * 合并函数调用chunk
      *
@@ -404,7 +456,7 @@ public abstract class Agent {
 
                                 try {
                                     // 这里应该实现 CLI 工具调用逻辑
-                                    // 需要构造命令行参数并执行命令
+                                    // 需要构造命令行参数 attend 并执行命令
                                     // 这里提供一个简化的示例实现
                                     cliResult.put("type", "direct");
                                     cliResult.put("content", "CLI tool '" + matchedTool.getName() + "' called with args: " + call.arguments.toString());
@@ -414,6 +466,20 @@ public abstract class Agent {
                                 }
 
                                 result = cliResult;
+                            }
+                            break;
+
+                        case "iClass":
+                            // 调用 iClass 类型工具
+                            {
+                                var classPath = "%s/current/".formatted(matchedTool.getIClass());
+                                try (var classLoader = new URLClassLoader(new URL[]{new File(classPath).toURI().toURL()})) {
+                                    var clazz = classLoader.loadClass(matchedTool.getName());
+                                    var instance = (FunctionWrapper) clazz.getDeclaredConstructor().newInstance();
+                                    var classResult = instance.run(call.arguments);
+                                    result.put("type", "direct");
+                                    result.put("content", classResult != null ? classResult : "");
+                                }
                             }
                             break;
 
