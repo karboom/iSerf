@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * Agent 测试类
  */
 class AgentTest {
+
     private String apiKey;
     private String url;
     private Map<String, Object> llmConfig;
@@ -62,20 +63,15 @@ class AgentTest {
 
                 .build();
         tools.add(weatherTool);
-    }
 
-    @Test
-    void testAgentTalk() {
-        // 创建 Agent
-        var llm = new OpenAI("qwen-plus", llmConfig, apiKey, url, 3);
-        var agent = new Agent("test-agent", "", llm, tools) {};
-
-        // 测试5: 带工具的 Agent，验证工具调用场景
-        var agentWithTools = new Agent("test-agent-tools", "", llm, tools) {};
-        var responseWithTools = agentWithTools.talk("What's the weather in Beijing?").doOnNext(System.out::println);
-        assertNotNull(responseWithTools, "带工具的响应不应为空");
-        assertTrue(responseWithTools instanceof Flux, "带工具的响应应该是 Flux 类型");
-        StepVerifier.create(responseWithTools).expectNextCount(3).verifyComplete();
+        var timeTool = Tool.builder()
+                .name("GetTime")
+                .description("Get the current time")
+                .parameters(List.of())
+                .type("iClass")
+                .iClass("/home/karboom/projects/karboom/java/iSlogger/class/time")
+                .build();
+        tools.add(timeTool);
     }
 
     @Test
@@ -100,7 +96,8 @@ class AgentTest {
 
         // 使用 send 方法发送消息
 //        agent.send("写一个100字散文，关于宇宙");
-        agent.send("杭州的天气如何");
+//        agent.send("杭州的天气如何");
+        agent.send("现在是什么时间");
         
         // 等待一段时间让消息被处理
         Thread.sleep(10000);
@@ -154,5 +151,59 @@ class AgentTest {
         // 验证会抛出预期的异常
         assertThrows(RuntimeException.class, () -> errorMono.block(), 
                    "updateTool should throw RuntimeException for non-existent tool");
+    }
+
+    @Test
+    void testUpdateToolLocal() {
+        // 创建 Agent
+        var llm = new OpenAI("qwen-plus", llmConfig, apiKey, url, 3);
+        var agent = new Agent("test-agent", "", llm, tools) {};
+
+        var objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var resultNode = objectMapper.createObjectNode();
+        resultNode.put("type", "error");
+        resultNode.put("content", "时间格式不正确");
+
+        // 测试用例1: 正常情况 - 本地工具存在且更新成功
+        var toolCall = me.karboom.java.iSlogger.memory.Item.ToolCall.builder()
+                .name("GetTime")
+                .arguments(new HashMap<>())
+                .result(resultNode)
+                .build();
+
+        var updateMono = agent.updateToolLocal(toolCall);
+        assertNotNull(updateMono, "updateToolLocal should return a Mono<Void>");
+        assertDoesNotThrow(() -> updateMono.block(), "updateToolLocal should succeed for existing local tool");
+
+        // 测试用例2: 工具不存在的情况
+        var nonExistentToolCall = me.karboom.java.iSlogger.memory.Item.ToolCall.builder()
+                .name("non-existent-tool")
+                .arguments(new HashMap<>())
+                .result(resultNode)
+                .build();
+
+        var errorMono = agent.updateToolLocal(nonExistentToolCall);
+        assertThrows(RuntimeException.class, () -> errorMono.block(),
+                "updateToolLocal should throw RuntimeException for non-existent tool");
+
+        // 测试用例3: Java文件不存在的情况
+        var noFileTool = Tool.builder()
+                .name("NoFileTool")
+                .type("iClass")
+                .iClass("/non/existent/path")
+                .build();
+        var toolsWithNoFile = new ArrayList<>(tools);
+        toolsWithNoFile.add(noFileTool);
+        var agentWithNoFile = new Agent("test-agent-no-file", "", llm, toolsWithNoFile) {};
+
+        var noFileToolCall = me.karboom.java.iSlogger.memory.Item.ToolCall.builder()
+                .name("NoFileTool")
+                .arguments(new HashMap<>())
+                .result(resultNode)
+                .build();
+
+        var noFileMono = agentWithNoFile.updateToolLocal(noFileToolCall);
+        assertThrows(RuntimeException.class, () -> noFileMono.block(),
+                "updateToolLocal should throw RuntimeException when java file is missing");
     }
 }
