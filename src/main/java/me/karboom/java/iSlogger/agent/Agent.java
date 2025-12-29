@@ -3,6 +3,7 @@ package me.karboom.java.iSlogger.agent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.openai.models.chat.completions.ChatCompletionChunk;
+import lombok.SneakyThrows;
 import me.karboom.java.iSlogger.llm.text.BaseLLM;
 import me.karboom.java.iSlogger.memory.Item;
 import me.karboom.java.iSlogger.memory.LocalMemory;
@@ -29,7 +30,7 @@ import java.util.function.Consumer;
  * Agent 基类
  */
 public abstract class Agent {
-    protected String id;
+    public String id;
     protected Memory memory = new LocalMemory();
     protected List<Tool> tools;
     protected BaseLLM llm;
@@ -84,7 +85,9 @@ public abstract class Agent {
                     // 添加到记忆中
                     memory.add(userMessage);
 
-                    llm.send(memory.get(), null, tools)
+                    var format = item.getFormatted() == null ? null : item.getFormatted().getClass();
+
+                    llm.send(memory.get(), format, tools)
                             .switchOnFirst((first, other) -> {
                                 var toolCalls = first.get().choices().get(0).delta().toolCalls();
 
@@ -151,12 +154,18 @@ public abstract class Agent {
                             })
                             .reduce("", (acc, chunk) -> {
                                 var text = ((ChatCompletionChunk) chunk).choices().get(0).delta().content().get();
-                                sink.next(Item.builder().text(text).isSegment(1).build());
+                                if (format == null) {
+                                    sink.next(Item.builder().text(text).isSegment(1).build());
+                                }
                                 acc += text;
                                 return acc;
                             })
                             .map(f -> {
-                                var message = (Item.builder().role("assistant").text(f).isSegment(0).build());
+                                var message = Item.builder().role("assistant").text(f).isSegment(0).build();
+
+                                if (format != null) {
+                                    message.setFormatted(JSONUtil.parse(f,  format));
+                                }
 
                                 sink.next(message);
                                 memory.update(message);
@@ -174,8 +183,22 @@ public abstract class Agent {
         }).start();
     }
 
+    @SneakyThrows
+    public void send(String message, Class<?> cls) {
+        var item = Item
+                .builder()
+                .id("")
+                .text(message).build();
+
+        if (cls != null) {
+            item.setFormatted(cls.getConstructors()[0].newInstance());
+        }
+
+        queue.offer(item);
+    }
+
     public void send(String message) {
-        queue.offer(Item.builder().id("").text(message).build());
+        send(message, null);
     }
 
     /**
@@ -283,7 +306,7 @@ public abstract class Agent {
             return Mono.error(new RuntimeException("Tool not found: %s".formatted(toolCall.getName())));
         }
 
-        var javaFilePath = "%s/current/%s.java".formatted(matchedTool.getIClass(), matchedTool.getName());
+        var javaFilePath = "%s/current/%s.java".formatted(matchedTool.getIFunction(), matchedTool.getName());
         var javaFile = new File(javaFilePath);
 
         return Mono.fromCallable(() -> {
@@ -314,7 +337,7 @@ public abstract class Agent {
                             .reduce(new StringBuilder(), StringBuilder::append)
                             .map(StringBuilder::toString)
                             .flatMap(updatedCode -> Mono.fromRunnable(() -> {
-                                me.karboom.java.iSlogger.util.CodeUtil.run(updatedCode, matchedTool.getIClass());
+                                me.karboom.java.iSlogger.util.CodeUtil.run(updatedCode, matchedTool.getIFunction());
                             }));
                 })
                 .then();
@@ -420,7 +443,7 @@ public abstract class Agent {
                         case "function":
                             // 调用本地函数
                             if (matchedTool.getFunction() != null) {
-                                String functionResult = matchedTool.getFunction().apply(call.arguments);
+                                String functionResult = matchedTool.getFunction().run(call.arguments);
                                 result.put("type", "A");
                                 result.put("content", functionResult != null ? functionResult : "");
                             } else {
@@ -428,6 +451,20 @@ public abstract class Agent {
                                 result.put("content", "Function not defined for tool: " + call.name);
                             }
                             break;
+
+                        case "iFunction":
+                            // 调用 iClass 类型工具
+                        {
+                            var classPath = "%s/current/".formatted(matchedTool.getIFunction());
+                            try (var classLoader = new URLClassLoader(new URL[]{new File(classPath).toURI().toURL()})) {
+                                var clazz = classLoader.loadClass(matchedTool.getName());
+                                var instance = (FunctionWrapper) clazz.getDeclaredConstructor().newInstance();
+                                var classResult = instance.run(call.arguments);
+                                result.put("type", "direct");
+                                result.put("content", classResult != null ? classResult : "");
+                            }
+                        }
+                        break;
 
                         case "mcp-http":
                             // 调用 HTTP 工具
@@ -469,19 +506,7 @@ public abstract class Agent {
                             }
                             break;
 
-                        case "iClass":
-                            // 调用 iClass 类型工具
-                            {
-                                var classPath = "%s/current/".formatted(matchedTool.getIClass());
-                                try (var classLoader = new URLClassLoader(new URL[]{new File(classPath).toURI().toURL()})) {
-                                    var clazz = classLoader.loadClass(matchedTool.getName());
-                                    var instance = (FunctionWrapper) clazz.getDeclaredConstructor().newInstance();
-                                    var classResult = instance.run(call.arguments);
-                                    result.put("type", "direct");
-                                    result.put("content", classResult != null ? classResult : "");
-                                }
-                            }
-                            break;
+
 
                         default:
                             result.put("type", "error");

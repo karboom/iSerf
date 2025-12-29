@@ -30,7 +30,7 @@ public class Item {
 
 
     /**
-     * 类型  text | image | video | audio | toolCalls | mixed | custom
+     * 类型  text | image | video | audio | toolCalls | mixed | custom | tip
      */
     public String type;
 
@@ -49,4 +49,6 @@ public class Item {
 
     public Integer isSegment;
 
+
+    public Object formatted;
 }

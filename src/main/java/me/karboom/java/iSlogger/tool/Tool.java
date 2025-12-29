@@ -28,16 +28,20 @@ public class Tool {
     public String description;
     public List<Parameter> parameters;
 
-    // mcp-http  mcp-cli  function  iClass  clazz
+    // mcp-http  mcp-cli  function  iFunction
     public String type;
 
-    public Function<HashMap<String, Object>, String> function;
+    // function 特有
+    public FunctionWrapper function;
 
-    public String iClass;
+    // iFunction 特有
+    public String iFunction;
 
+    // mcp-http特有
     public String url;
     public HashMap<String, String> headers;
 
+    // mcp-cli 特有
     public String command;
     public HashMap<String, String> environment;
 }

@@ -1,5 +1,6 @@
-package agent;
+package me.karboom.java.iSlogger.agent;
 
+import me.karboom.java.iSlogger.tool.FunctionWrapper;
 import me.karboom.java.iSlogger.tool.Tool;
 import me.karboom.java.iSlogger.agent.Agent;
 import me.karboom.java.iSlogger.llm.text.OpenAI;
@@ -19,15 +20,18 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class AgentTest {
 
+
+    static class Result {
+        public List<String> items;
+
+        public Result() {}
+    }
+
     private String apiKey;
     private String url;
     private Map<String, Object> llmConfig;
     private List<Tool> tools;
 
-    private Function<HashMap<String, Object>, String> getWeather = (args) -> {
-
-        return "28摄氏度";
-    };
 
     @BeforeEach
     void setUp() {
@@ -59,7 +63,7 @@ class AgentTest {
                         new Tool.Parameter("unit", "string", "Temperature unit (celsius or fahrenheit)", false)
                 ))
                 .type("function")
-                .function(getWeather)
+                .function(params -> "28摄氏度")
 
                 .build();
         tools.add(weatherTool);
@@ -69,7 +73,7 @@ class AgentTest {
                 .description("Get the current time")
                 .parameters(List.of())
                 .type("iClass")
-                .iClass("/home/karboom/projects/karboom/java/iSlogger/class/time")
+                .iFunction("/home/karboom/projects/karboom/java/iSlogger/class/time")
                 .build();
         tools.add(timeTool);
     }
@@ -98,7 +102,9 @@ class AgentTest {
 //        agent.send("写一个100字散文，关于宇宙");
 //        agent.send("杭州的天气如何");
         agent.send("现在是什么时间");
-        
+        agent.send("列举三个哺乳动物", Result.class);
+        agent.send("写首五言律诗");
+
         // 等待一段时间让消息被处理
         Thread.sleep(10000);
 
@@ -190,7 +196,7 @@ class AgentTest {
         var noFileTool = Tool.builder()
                 .name("NoFileTool")
                 .type("iClass")
-                .iClass("/non/existent/path")
+                .iFunction("/non/existent/path")
                 .build();
         var toolsWithNoFile = new ArrayList<>(tools);
         toolsWithNoFile.add(noFileTool);

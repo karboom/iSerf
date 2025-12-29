@@ -1,4 +1,4 @@
-package llm.text;
+package me.karboom.java.iSlogger.llm.text;
 
 import me.karboom.java.iSlogger.tool.Tool;
 import me.karboom.java.iSlogger.llm.text.OpenAI;
@@ -45,6 +45,39 @@ class OpenAITest {
         llm = new OpenAI("qwen-plus", llmConfig, apiKey, url, 1);
     }
 
+
+    static class WeatherResponse {
+        public String location;
+        public String weather;
+        public Integer temperature;
+    }
+
+    @Test
+    void testOutputFormat() throws InterruptedException {
+        var messages = new ArrayList<Item>();
+        messages.add(Item.builder()
+                .role("system")
+                .text("You are a helpful assistant.")
+                .build());
+        messages.add(Item.builder()
+                .role("user")
+                .text("What is the weather in Paris? Give me a random temperature.")
+                .build());
+
+        var response = llm.send(messages, WeatherResponse.class, null);
+
+        var content = new StringBuilder();
+        response.doOnNext(chunk -> {
+            var delta = chunk.choices().getFirst().delta().content();
+            if (delta.isPresent()) {
+                content.append(delta.get());
+            }
+        }).blockLast();
+
+        System.out.println("Response content: " + content);
+        assertNotNull(content.toString());
+        assertTrue(content.toString().contains("Paris"));
+    }
 
     @Test
     void testSendWithMultipleMessages() throws InterruptedException {

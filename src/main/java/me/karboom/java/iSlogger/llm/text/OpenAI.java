@@ -51,6 +51,10 @@ public class OpenAI extends BaseLLM {
         var paramsBuilder = ChatCompletionCreateParams.builder()
                 .model(llmType);
 
+        if (outputFormat != null) {
+            paramsBuilder.responseFormat(outputFormat);
+        }
+
         // 添加工具调用
         if (tools != null && !tools.isEmpty()) {
             for (var tool : tools) {
@@ -122,13 +126,18 @@ public class OpenAI extends BaseLLM {
                     paramsBuilder.addUserMessage(item.text);
                     break;
                 case "assistant":
-                    paramsBuilder.addAssistantMessage(item.text);
+//                    paramsBuilder.addAssistantMessage(item.text);
+                    paramsBuilder.addMessage(ChatCompletionAssistantMessageParam.builder()
+                                    .content(item.text)
+                            .build());
                     break;
                 case "system":
                     paramsBuilder.addSystemMessage(item.text);
                     break;
                 case "tool":
+                    paramsBuilder.addMessage(ChatCompletionToolMessageParam.builder()
 
+                            .build());
                     break;
                 default:
                     break;
