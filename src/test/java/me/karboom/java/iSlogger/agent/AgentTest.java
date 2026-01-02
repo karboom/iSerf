@@ -100,10 +100,10 @@ class AgentTest {
 
         // 使用 send 方法发送消息
 //        agent.send("写一个100字散文，关于宇宙");
-//        agent.send("杭州的天气如何");
-        agent.send("现在是什么时间");
-        agent.send("列举三个哺乳动物", Result.class);
-        agent.send("写首五言律诗");
+        agent.send("杭州的天气如何，上海的天气如何");
+//        agent.send("现在是什么时间");
+//        agent.send("列举三个哺乳动物", Result.class);
+//        agent.send("写首五言律诗");
 
         // 等待一段时间让消息被处理
         Thread.sleep(10000);

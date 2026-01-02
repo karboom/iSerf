@@ -17,6 +17,7 @@ import reactor.core.publisher.FluxSink;
 import reactor.core.publisher.Mono;
 
 import me.karboom.java.iSlogger.tool.FunctionWrapper;
+import reactor.core.publisher.Sinks;
 
 import java.io.File;
 import java.net.URL;
@@ -37,7 +38,7 @@ public abstract class Agent {
     protected String prompt;
     protected PriorityBlockingQueue<Item> queue;
 
-    protected FluxSink<Item> sink;
+    protected Sinks.Many<Item> sink;
     public Flux<Item> broadcast;
 
     /**
@@ -56,11 +57,8 @@ public abstract class Agent {
 
         this.memory.add(Item.builder().id(id).role("system").text(this.prompt).build());
 
-        Flux<Item> flux = Flux.create(s -> {
-            sink = s;
-        });
-
-        broadcast = flux.share();
+        this.sink = Sinks.many().multicast().onBackpressureBuffer();
+        this.broadcast = sink.asFlux();
 
         run();
     }
@@ -128,12 +126,12 @@ public abstract class Agent {
                                                     }
                                                     var responseText = responseBuilder.toString().trim();
 
-                                                    sink.next(Item.builder().text(responseText).build());
+                                                    sink.tryEmitNext(Item.builder().text(responseText).build());
                                                     // Todo 加入记忆
 
                                                     return Flux.empty();
                                                 } else if (hasError) {
-                                                    sink.next(Item.builder().text("我正在更新代码，请您稍后").build());
+                                                    sink.tryEmitNext(Item.builder().text("我正在更新代码，请您稍后").build());
 
                                                     // 更新代码
                                                     return Flux.empty();
@@ -155,7 +153,7 @@ public abstract class Agent {
                             .reduce("", (acc, chunk) -> {
                                 var text = ((ChatCompletionChunk) chunk).choices().get(0).delta().content().get();
                                 if (format == null) {
-                                    sink.next(Item.builder().text(text).isSegment(1).build());
+                                    sink.tryEmitNext(Item.builder().text(text).isSegment(1).build());
                                 }
                                 acc += text;
                                 return acc;
@@ -167,7 +165,7 @@ public abstract class Agent {
                                     message.setFormatted(JSONUtil.parse(f,  format));
                                 }
 
-                                sink.next(message);
+                                sink.tryEmitNext(message);
                                 memory.update(message);
 
                                 return f;
