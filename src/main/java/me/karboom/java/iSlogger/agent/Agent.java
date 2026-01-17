@@ -26,6 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * Agent 基类
@@ -99,43 +100,42 @@ public abstract class Agent {
                                                 // 通过cli调用MCP函数
                                                 var callResult = invokeToolCalls(calls);
 
-                                                // 判断是否需要直接更新记忆
-                                                var allDirect = true;
-                                                for (Item.ToolCall call : callResult) {
-                                                    if (!"direct".equals(call.result.get("type").asText())) {
-                                                        allDirect = false;
+                                                // 按结果类型分组处理
+                                                var directCalls = new ArrayList<Item.ToolCall>();
+                                                var errorCalls = new ArrayList<Item.ToolCall>();
+                                                var llmCalls = new ArrayList<Item.ToolCall>();
+
+                                                for (var call : callResult) {
+                                                    if (call.result.getDirect() != null) {
+                                                        directCalls.add(call);
+                                                    } else if (call.result.getError() != null) {
+                                                        errorCalls.add(call);
+                                                    } else if (call.result.getLlm() != null) {
+                                                        llmCalls.add(call);
                                                     }
                                                 }
 
+                                                var holder = Flux.empty();
 
-                                                // 判断是否需要直接更新记忆
-                                                var hasError = false;
-                                                for (Item.ToolCall call : callResult) {
-                                                    if ("error".equals(call.result.get("type").asText())) {
-                                                        hasError = true;
-                                                    }
-                                                }
-
-
-                                                if (allDirect) {
-                                                    // 构建合并后的响应文本
+                                                // 处理DIRECT类型
+                                                if (!directCalls.isEmpty()) {
                                                     var responseBuilder = new StringBuilder();
-                                                    for (Item.ToolCall call : callResult) {
-                                                        responseBuilder.append(call.result.get("content").asText());
+                                                    for (Item.ToolCall call : directCalls) {
+                                                        responseBuilder.append(call.result.getDirect().get("content").asText());
                                                         responseBuilder.append("\n");
                                                     }
                                                     var responseText = responseBuilder.toString().trim();
-
                                                     sink.tryEmitNext(Item.builder().text(responseText).build());
-                                                    // Todo 加入记忆
+                                                }
 
-                                                    return Flux.empty();
-                                                } else if (hasError) {
+                                                // 处理ERROR类型
+                                                if (!errorCalls.isEmpty()) {
                                                     sink.tryEmitNext(Item.builder().text("我正在更新代码，请您稍后").build());
+                                                    // 更新代码逻辑可以在这里添加
+                                                }
 
-                                                    // 更新代码
-                                                    return Flux.empty();
-                                                } else {
+                                                // 处理LLM类型
+                                                if (!llmCalls.isEmpty()) {
                                                     var messageInvoke = Item.builder().role("tool").build();
                                                     var messageRes = Item.builder().build();
 
@@ -145,6 +145,7 @@ public abstract class Agent {
                                                     return llm.send(memory.get(), null, tools);
                                                 }
 
+                                                return holder;
                                             });
                                 } else {
                                     return other;
@@ -430,11 +431,10 @@ public abstract class Agent {
                 }
             }
 
-            ObjectNode result = objectMapper.createObjectNode();
+            var result = Item.ToolCall.Result.builder().build();
 
             if (matchedTool == null) {
-                result.put("type", "error");
-                result.put("content", "Tool not found: " + call.name);
+                result.setError("Tool not found: " + call.name);
             } else {
                 try {
                     switch (matchedTool.getType()) {
@@ -442,11 +442,11 @@ public abstract class Agent {
                             // 调用本地函数
                             if (matchedTool.getFunction() != null) {
                                 String functionResult = matchedTool.getFunction().run(call.arguments);
-                                result.put("type", "A");
-                                result.put("content", functionResult != null ? functionResult : "");
+                                // 使用新的处理函数处理directResult
+                                result = handleToolCallResult(functionResult);
+
                             } else {
-                                result.put("type", "error");
-                                result.put("content", "Function not defined for tool: " + call.name);
+                                result.setError("Function not defined for tool: " + call.name);
                             }
                             break;
 
@@ -458,8 +458,9 @@ public abstract class Agent {
                                 var clazz = classLoader.loadClass(matchedTool.getName());
                                 var instance = (FunctionWrapper) clazz.getDeclaredConstructor().newInstance();
                                 var classResult = instance.run(call.arguments);
-                                result.put("type", "direct");
-                                result.put("content", classResult != null ? classResult : "");
+                                // 使用新的处理函数处理directResult
+                                result = handleToolCallResult(classResult);
+
                             }
                         }
                         break;
@@ -467,53 +468,41 @@ public abstract class Agent {
                         case "mcp-http":
                             // 调用 HTTP 工具
                             {
-                                var httpResult = objectMapper.createObjectNode();
-
                                 try {
                                     // 这里应该实现 HTTP 工具调用逻辑
                                     // 由于需要与 MCP 服务器交互，实际实现会比较复杂
                                     // 这里提供一个简化的示例实现
-                                    httpResult.put("type", "direct");
-                                    httpResult.put("content", "HTTP tool '" + matchedTool.getName() + "' called with args: " + call.arguments.toString());
-                                } catch (Exception e) {
-                                    httpResult.put("type", "error");
-                                    httpResult.put("content", "Error calling HTTP tool '" + matchedTool.getName() + "': " + e.getMessage());
-                                }
+                                    result = handleToolCallResult("{\"content\":\"HTTP tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
 
-                                result = httpResult;
+                                } catch (Exception e) {
+                                    result.setError("Error calling HTTP tool '" + matchedTool.getName() + "': " + e.getMessage());
+                                }
                             }
                             break;
 
                         case "mcp-cli":
                             // 调用 CLI 工具
                             {
-                                var cliResult = objectMapper.createObjectNode();
-
                                 try {
                                     // 这里应该实现 CLI 工具调用逻辑
                                     // 需要构造命令行参数 attend 并执行命令
                                     // 这里提供一个简化的示例实现
-                                    cliResult.put("type", "direct");
-                                    cliResult.put("content", "CLI tool '" + matchedTool.getName() + "' called with args: " + call.arguments.toString());
-                                } catch (Exception e) {
-                                    cliResult.put("type", "error");
-                                    cliResult.put("content", "Error calling CLI tool '" + matchedTool.getName() + "': " + e.getMessage());
-                                }
+                                    result = handleToolCallResult("{\"content\":\"CLI tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
 
-                                result = cliResult;
+                                } catch (Exception e) {
+                                    result.setError("Error calling CLI tool '" + matchedTool.getName() + "': " + e.getMessage());
+                                }
                             }
                             break;
 
 
 
                         default:
-                            result.put("type", "error");
-                            result.put("content", "Unsupported tool type: " + matchedTool.getType());
+                            result.setError("Unsupported tool type: " + matchedTool.getType());
                             break;
                     }
                 } catch (Exception e) {
-                    result.put("type", "error");
-                    result.put("content", "Error calling tool '" + call.name + "': " + e.getMessage());
+                    result.setError("Error calling tool '" + call.name + "': " + e.getMessage());
                 }
             }
 
@@ -523,5 +512,18 @@ public abstract class Agent {
         return calls;
     }
 
-
+    /**
+     * 处理工具调用结果
+     * 尝试解析为JSON，如果失败则将字符串作为llm返回
+     */
+    private Item.ToolCall.Result handleToolCallResult(String resultString) {
+        try {
+            return JSONUtil.parse(resultString != null ? resultString : "{}", Item.ToolCall.Result.class);
+        } catch (Exception e) {
+            // 解析失败时，创建包含原始字符串的Result对象，将字符串设置为llm字段
+            var result = Item.ToolCall.Result.builder().build();
+            result.setLlm(resultString);
+            return result;
+        }
+    }
 }

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.util.HashMap;
 import java.util.List;
@@ -17,10 +18,21 @@ public class Item {
     @AllArgsConstructor
     @Builder
     public static class ToolCall {
+
+        @Data
+        @AllArgsConstructor
+        @Builder
+        @NoArgsConstructor
+        public static class Result {
+            public ObjectNode direct;
+            public String error;
+            public String llm;
+        }
+
         public String id;
         public String name;
         public HashMap<String, Object> arguments;
-        public ObjectNode result;
+        public Result result;
     }
 
     public String id;
