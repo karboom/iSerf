@@ -136,12 +136,20 @@ public abstract class Agent {
 
                                                 // 处理LLM类型
                                                 if (!llmCalls.isEmpty()) {
-                                                    var messageInvoke = Item.builder().role("tool").build();
-                                                    var messageRes = Item.builder().build();
+                                                    var messageInvoke = Item.builder()
+                                                            .role("assistant")
+                                                            .toolCalls(llmCalls)
+                                                            .build();
+                                                    
+                                                    var messageRes = Item.builder()
+                                                            .role("tool")
+                                                            .toolCalls(llmCalls)
+                                                            .build();
 
-                                                    memory.update(messageInvoke);
-                                                    memory.update(messageRes);
+                                                    memory.add(messageInvoke);
+                                                    memory.add(messageRes);
 
+                                                    // Todo 这里的tools参数是否可以去掉，节省token
                                                     return llm.send(memory.get(), null, tools);
                                                 }
 
@@ -167,7 +175,7 @@ public abstract class Agent {
                                 }
 
                                 sink.tryEmitNext(message);
-                                memory.update(message);
+                                memory.add(message);
 
                                 return f;
                             })
@@ -371,7 +379,7 @@ public abstract class Agent {
                         var currentToolCall = toolCallsMap.get(index);
 
                         // 设置 id
-                        if (toolCall.id().isPresent()) {
+                        if (toolCall.id().isPresent() && !toolCall.id().get().isEmpty()) {
                             currentToolCall.id = toolCall.id().get();
                         }
 
@@ -414,7 +422,7 @@ public abstract class Agent {
 
     /**
      * 调用函数
-     *
+     * Todo 工具串行调用，和并行调用
      * @param calls 工具调用列表
      * @return 带有调用结果的工具调用列表
      */

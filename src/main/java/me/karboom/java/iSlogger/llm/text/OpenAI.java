@@ -126,18 +126,37 @@ public class OpenAI extends BaseLLM {
                     paramsBuilder.addUserMessage(item.text);
                     break;
                 case "assistant":
-//                    paramsBuilder.addAssistantMessage(item.text);
-                    paramsBuilder.addMessage(ChatCompletionAssistantMessageParam.builder()
-                                    .content(item.text)
-                            .build());
+                    var params = ChatCompletionAssistantMessageParam.builder()
+
+                            ;
+                    // Todo 更多情况的区分
+                    if (item.toolCalls != null) {
+                        for (var toolCall : item.toolCalls) {
+                            params.addToolCall(ChatCompletionMessageFunctionToolCall.builder()
+                                            .id(toolCall.getId())
+                                            .function(ChatCompletionMessageFunctionToolCall.Function.builder()
+                                                    .arguments("")
+                                                    .name(toolCall.getName())
+                                                    .build())
+                                    .build());
+                        }
+                    } else {
+                        params.content(item.text);
+                    }
+
+                    paramsBuilder.addMessage(params.build());
                     break;
                 case "system":
                     paramsBuilder.addSystemMessage(item.text);
                     break;
                 case "tool":
-                    paramsBuilder.addMessage(ChatCompletionToolMessageParam.builder()
-
-                            .build());
+                    // 循环toolCalls，每个call调用一次addMessage
+                    for (var toolCall : item.toolCalls) {
+                        paramsBuilder.addMessage(ChatCompletionToolMessageParam.builder()
+                                .toolCallId(toolCall.getId())
+                                .content(toolCall.getResult().getLlm())
+                                .build());
+                    }
                     break;
                 default:
                     break;
