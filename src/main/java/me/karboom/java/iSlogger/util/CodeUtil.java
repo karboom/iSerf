@@ -43,4 +43,52 @@ public class CodeUtil {
             method.invoke(instance);
         }
     }
+
+    /**
+     * 将代码编译到指定目录
+     * @param code
+     * @param path
+     */
+    @SneakyThrows
+    public static void compile(String code, String path) {
+        var codeDirectory = new File(path);
+        if (!codeDirectory.exists()) {
+            codeDirectory.mkdirs();
+        }
+
+        var classNameMatcher = Pattern.compile("class\\s+([a-zA-Z0-9_]+)").matcher(code);
+        if (!classNameMatcher.find()) {
+            throw new RuntimeException("Could not find class name in code");
+        }
+        var className = classNameMatcher.group(1);
+
+        var sourceFile = new File(codeDirectory, "%s.java".formatted(className));
+        Files.writeString(sourceFile.toPath(), code);
+
+        var compiler = ToolProvider.getSystemJavaCompiler();
+        if (compiler == null) {
+            throw new RuntimeException("Java Compiler not found. Please ensure you are running on a JDK.");
+        }
+
+        var result = compiler.run(null, null, null, sourceFile.getPath());
+        if (result != 0) {
+            throw new RuntimeException("Compilation failed");
+        }
+    }
+
+
+    /**
+     * 从指定目录加载类
+     * @param path
+     * @param className
+     * @return
+     */
+    @SneakyThrows
+    public static Object load(String path, String className) {
+        try (var classLoader = new URLClassLoader(new URL[]{new File(path).toURI().toURL()}, CodeUtil.class.getClassLoader())) {
+            var clazz = classLoader.loadClass(className);
+
+            return clazz.getDeclaredConstructor().newInstance();
+        }
+    }
 }

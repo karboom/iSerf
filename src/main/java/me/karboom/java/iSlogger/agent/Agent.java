@@ -9,6 +9,7 @@ import me.karboom.java.iSlogger.memory.Item;
 import me.karboom.java.iSlogger.memory.LocalMemory;
 import me.karboom.java.iSlogger.memory.Memory;
 import me.karboom.java.iSlogger.tool.Tool;
+import me.karboom.java.iSlogger.util.CodeUtil;
 import me.karboom.java.iSlogger.util.JSONUtil;
 import okhttp3.OkHttpClient;
 import reactor.core.Disposable;
@@ -23,6 +24,7 @@ import java.io.File;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.function.Consumer;
@@ -132,6 +134,11 @@ public abstract class Agent {
                                                 if (!errorCalls.isEmpty()) {
                                                     sink.tryEmitNext(Item.builder().text("我正在更新代码，请您稍后").build());
                                                     // 更新代码逻辑可以在这里添加
+
+                                                    for (var toolCall: errorCalls) {
+                                                        updateToolLocal(toolCall);
+                                                        invokeToolCalls(List.of(toolCall));
+                                                    }
                                                 }
 
                                                 // 处理LLM类型
@@ -316,12 +323,11 @@ public abstract class Agent {
         var javaFilePath = "%s/current/%s.java".formatted(matchedTool.getIFunction(), matchedTool.getName());
         var javaFile = new File(javaFilePath);
 
-        return Mono.fromCallable(() -> {
-                    if (!javaFile.exists()) {
-                        throw new RuntimeException("Java file not found: %s".formatted(javaFilePath));
-                    }
-                    return java.nio.file.Files.readString(javaFile.toPath(), StandardCharsets.UTF_8);
-                })
+        if (!javaFile.exists()) {
+            throw new RuntimeException("Java file not found: %s".formatted(javaFilePath));
+        }
+
+        return Mono.fromCallable(() -> Files.readString(javaFile.toPath(), StandardCharsets.UTF_8))
                 .flatMap(currentCode -> {
                     var prompt = "请根据以下错误信息更新代码:\n\n输入参数：\n\n%s\n\n错误信息: %s\n\n当前代码:\n%s\n\n 请修改runner里面的逻辑，仅需要告诉我最终的代码，不要带markdown标记"
                             .formatted(toolCall.arguments.toString(), toolCall.getResult().toString(), currentCode);
@@ -344,7 +350,7 @@ public abstract class Agent {
                             .reduce(new StringBuilder(), StringBuilder::append)
                             .map(StringBuilder::toString)
                             .flatMap(updatedCode -> Mono.fromRunnable(() -> {
-                                me.karboom.java.iSlogger.util.CodeUtil.run(updatedCode, matchedTool.getIFunction());
+                                CodeUtil.run(updatedCode, matchedTool.getIFunction());
                             }));
                 })
                 .then();
@@ -462,14 +468,8 @@ public abstract class Agent {
                             // 调用 iClass 类型工具
                         {
                             var classPath = "%s/current/".formatted(matchedTool.getIFunction());
-                            try (var classLoader = new URLClassLoader(new URL[]{new File(classPath).toURI().toURL()})) {
-                                var clazz = classLoader.loadClass(matchedTool.getName());
-                                var instance = (FunctionWrapper) clazz.getDeclaredConstructor().newInstance();
-                                var classResult = instance.run(call.arguments);
-                                // 使用新的处理函数处理directResult
-                                result = handleToolCallResult(classResult);
-
-                            }
+                            var cls = (FunctionWrapper) CodeUtil.load(classPath, matchedTool.getName());
+                            result = handleToolCallResult(cls.run(call.arguments));
                         }
                         break;
 
