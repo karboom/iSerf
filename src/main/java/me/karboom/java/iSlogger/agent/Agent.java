@@ -1,14 +1,12 @@
 package me.karboom.java.iSlogger.agent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.openai.models.chat.completions.ChatCompletionChunk;
 import lombok.SneakyThrows;
 import me.karboom.java.iSlogger.llm.text.BaseLLM;
 import me.karboom.java.iSlogger.memory.Item;
 import me.karboom.java.iSlogger.memory.LocalMemory;
 import me.karboom.java.iSlogger.memory.Memory;
-import me.karboom.java.iSlogger.team.Event;
 import me.karboom.java.iSlogger.tool.Tool;
 import me.karboom.java.iSlogger.util.CodeUtil;
 import me.karboom.java.iSlogger.util.JSONUtil;
@@ -18,22 +16,20 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.FluxSink;
 import reactor.core.publisher.Mono;
 
 import me.karboom.java.iSlogger.tool.FunctionWrapper;
 import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
+import reactor.util.function.Tuple3;
+import reactor.util.function.Tuples;
 
 import java.io.File;
-import java.net.URL;
-import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
 /**
  * Agent 基类
@@ -89,6 +85,80 @@ public abstract class Agent {
         return broadcast.subscribe(consumer);
     }
 
+    private Mono<Tuple3<Item, List<ChatCompletionChunk>, Item>> fluxHandle(Flux<ChatCompletionChunk> flux, Class format) {
+        return flux
+                .reduce(Tuples.of(
+                        Item.builder().type(Item.TYPE.THINKING).text("").isSegment(0).build(),
+                        new ArrayList<>(),
+                        Item.builder().type(Item.TYPE.TEXT).text("").isSegment(0).build()
+                ), (acc, chunk) -> {
+                    var thinkingItem = acc.getT1();
+                    var toolCall = acc.getT2();
+                    var contentItem = acc.getT3();
+
+                    var usage = chunk.usage();
+                    var choices = chunk.choices();
+
+                    if (!choices.isEmpty()) {
+                        var delta = choices.get(0).delta();
+
+                        var toolCalls = delta.toolCalls();
+                        var thinking = delta._additionalProperties().get("reasoning_content");
+                        var content = delta.content();
+
+                        if (thinking != null && !thinking.toString().equals("null")) {
+                            thinkingItem.setId(UUID.randomUUID().toString()); // 为thinkingItem设置ID
+                            thinkingItem.setText(thinkingItem.getText() + thinking);
+
+                            var thinkingSegment = Item.builder().text(thinking.toString()).isSegment(1).build();
+
+                            sink.tryEmitNext(thinkingSegment);
+                        } else if (toolCalls.isPresent()) {
+                            if (thinkingItem.getId() != null) {
+                                // thinking阶段结束，更新thinkingItem为非片段并发送
+                                sink.tryEmitNext(thinkingItem);
+                            }
+                            // 将当前chunk添加到toolCall列表中用于后续处理
+                            toolCall.add(chunk);
+                        } else if (content.isPresent()) {
+
+                            if (thinkingItem.getId() != null) {
+                                // thinking阶段结束，更新thinkingItem为非片段并发送
+                                sink.tryEmitNext(thinkingItem);
+                            }
+
+                            var contentText = content.get();
+
+                            contentItem.setId(UUID.randomUUID().toString());
+                            contentItem.setText(contentItem.getText() + contentText);
+
+
+                            if (format == null) {
+                                var contentItemSegment = Item.builder().type(Item.TYPE.TEXT).text(contentText).isSegment(1).build();
+                                sink.tryEmitNext(contentItemSegment);
+                            }
+                        } else {
+                            // 其他情况，可能需要处理其他类型的响应
+                            // 目前暂不处理
+                        }
+
+                    } else if (usage.isPresent()) {
+                        if (contentItem.getId() != null) {
+                            contentItem.setUsage((int) usage.get().totalTokens());
+
+                            if (format != null) {
+                                contentItem.setFormatted(JSONUtil.parse(contentItem.getText(), format));
+                            }
+                            sink.tryEmitNext(contentItem);
+                        }
+                    } else {
+
+                    }
+
+                    return acc;
+                });
+    }
+
     private void run() {
         this.itemBroadcast.subscribe((item -> {
             var userMessage = Item.builder()
@@ -101,111 +171,186 @@ public abstract class Agent {
 
             var format = item.getFormatted() == null ? null : item.getFormatted().getClass();
 
-            llm.send(memory.get(), format, tools)
-                    .switchOnFirst((first, other) -> {
-                        var delta = first.get().choices().get(0).delta();
-                        var toolCalls = delta.toolCalls();
-                        var thinking = delta._additionalProperties().get("reasoning_content");
+            var flux = llm.send(memory.get(), format, tools);
 
-                        if (toolCalls.isPresent()) {
-                            return other
-                                    .collectList()
-                                    .flatMapMany((list) -> {
-                                        // 合并ToolCall参数
-                                        var calls = mergeToolCalls(list);
+            fluxHandle(flux, format)
+                    .flatMapMany(holder -> {
+                        var toolCallHolder = holder.getT2();
 
-                                        // 通过cli调用MCP函数
-                                        var callResult = invokeToolCalls(calls);
+                        if (!toolCallHolder.isEmpty()) {
+                            var calls = mergeToolCalls(toolCallHolder);
 
-                                        // 按结果类型分组处理
-                                        var directCalls = new ArrayList<Item.ToolCall>();
-                                        var errorCalls = new ArrayList<Item.ToolCall>();
-                                        var llmCalls = new ArrayList<Item.ToolCall>();
+                            // 通过cli调用MCP函数
+                            var callResult = invokeToolCalls(calls);
 
-                                        for (var call : callResult) {
-                                            if (call.result.getDirect() != null) {
-                                                directCalls.add(call);
-                                            } else if (call.result.getError() != null) {
-                                                errorCalls.add(call);
-                                            } else if (call.result.getLlm() != null) {
-                                                llmCalls.add(call);
-                                            }
-                                        }
+                            // 按结果类型分组处理
+                            var directCalls = new ArrayList<Item.ToolCall>();
+                            var errorCalls = new ArrayList<Item.ToolCall>();
+                            var llmCalls = new ArrayList<Item.ToolCall>();
 
-                                        var holder = Flux.empty();
+                            for (var call : callResult) {
+                                if (call.result.getDirect() != null) {
+                                    directCalls.add(call);
+                                } else if (call.result.getError() != null) {
+                                    errorCalls.add(call);
+                                } else if (call.result.getLlm() != null) {
+                                    llmCalls.add(call);
+                                }
+                            }
 
-                                        // 处理DIRECT类型
-                                        if (!directCalls.isEmpty()) {
-                                            for (Item.ToolCall call : directCalls) {
-                                                sink.tryEmitNext(Item.builder().text(JSONUtil.stringify(call.getResult().getDirect())).isSegment(0).build());
-                                            }
-                                        }
 
-                                        // 处理ERROR类型
-                                        if (!errorCalls.isEmpty()) {
-                                            sink.tryEmitNext(Item.builder().text("我正在更新代码，请您稍后").build());
-                                            // Todo 判断IFunction
+                            // 处理DIRECT类型
+                            if (!directCalls.isEmpty()) {
+                                for (Item.ToolCall call : directCalls) {
+                                    sink.tryEmitNext(Item.builder().text(JSONUtil.stringify(call.getResult().getDirect())).isSegment(0).build());
+                                }
+                            }
 
-                                            for (var toolCall: errorCalls) {
-                                                updateToolLocal(toolCall);
-                                                invokeToolCalls(List.of(toolCall));
-                                            }
-                                        }
+                            // 处理ERROR类型
+                            if (!errorCalls.isEmpty()) {
+                                sink.tryEmitNext(Item.builder().text("我正在更新代码，请您稍后").build());
+                                // Todo 判断IFunction
 
-                                        // 处理LLM类型
-                                        if (!llmCalls.isEmpty()) {
-                                            var messageInvoke = Item.builder()
-                                                    .role(Item.ROLE.ASSISTANT)
-                                                    .toolCalls(llmCalls)
-                                                    .build();
+                                for (var toolCall : errorCalls) {
+                                    updateToolLocal(toolCall);
+                                    invokeToolCalls(List.of(toolCall));
+                                }
+                            }
 
-                                            var messageRes = Item.builder()
-                                                    .role(Item.ROLE.TOOL)
-                                                    .toolCalls(llmCalls)
-                                                    .build();
+                            // 处理LLM类型
+                            if (!llmCalls.isEmpty()) {
+                                var messageInvoke = Item.builder()
+                                        .role(Item.ROLE.ASSISTANT)
+                                        .toolCalls(llmCalls)
+                                        .build();
 
-                                            memory.add(messageInvoke);
-                                            memory.add(messageRes);
+                                var messageRes = Item.builder()
+                                        .role(Item.ROLE.TOOL)
+                                        .toolCalls(llmCalls)
+                                        .build();
 
-                                            // Todo 这里的tools参数是否可以去掉，节省token
-                                            return llm.send(memory.get(), null, tools);
-                                        }
+                                memory.add(messageInvoke);
+                                memory.add(messageRes);
 
-                                        return holder;
-                                    });
-                        } else if (thinking != null) {
-                            return other;
+                                // Todo 这里的tools参数是否可以去掉，节省token
+                                var newFlux = llm.send(memory.get(), null, tools);
+
+                                return fluxHandle(newFlux, format).thenMany(Flux.empty());
+                            } else {
+                                return Flux.empty();
+                            }
                         } else {
-                            return other;
+                            return Flux.empty();
                         }
                     })
-                    .reduce(Item.builder().build(), (acc, chunk) -> {
+                    .blockLast()
+            ;
 
-                        var text = ((ChatCompletionChunk) chunk).choices().get(0).delta().content().get();
-                        if (format == null) {
-                            sink.tryEmitNext(Item.builder().text(text).isSegment(1).build());
-                        }
-                        acc.setText(acc.getText() + text);
-
-                        var usage = ((ChatCompletionChunk) chunk).usage();
-                        usage.ifPresent(completionUsage -> item.setUsage(((int) completionUsage.totalTokens())));
-
-                        return acc;
-                    })
-                    .map(f -> {
-                        f.setIsSegment(0);
-                        f.setRole(Item.ROLE.ASSISTANT);
-
-                        if (format != null) {
-                            f.setFormatted(JSONUtil.parse(f.getText(),  format));
-                        }
-
-                        sink.tryEmitNext(f);
-                        memory.add(f);
-
-                        return f;
-                    })
-                    .block();
+//            llm.send(memory.get(), format, tools)
+//                    .switchOnFirst((first, other) -> {
+//                        var delta = first.get().choices().get(0).delta();
+//                        var toolCalls = delta.toolCalls();
+//                        var thinking = delta._additionalProperties().get("reasoning_content");
+//
+//                        if (toolCalls.isPresent()) {
+//                            return other
+//                                    .collectList()
+//                                    .flatMapMany((list) -> {
+//                                        // 合并ToolCall参数
+//                                        var calls = mergeToolCalls(list);
+//
+//                                        // 通过cli调用MCP函数
+//                                        var callResult = invokeToolCalls(calls);
+//
+//                                        // 按结果类型分组处理
+//                                        var directCalls = new ArrayList<Item.ToolCall>();
+//                                        var errorCalls = new ArrayList<Item.ToolCall>();
+//                                        var llmCalls = new ArrayList<Item.ToolCall>();
+//
+//                                        for (var call : callResult) {
+//                                            if (call.result.getDirect() != null) {
+//                                                directCalls.add(call);
+//                                            } else if (call.result.getError() != null) {
+//                                                errorCalls.add(call);
+//                                            } else if (call.result.getLlm() != null) {
+//                                                llmCalls.add(call);
+//                                            }
+//                                        }
+//
+//                                        var holder = Flux.empty();
+//
+//                                        // 处理DIRECT类型
+//                                        if (!directCalls.isEmpty()) {
+//                                            for (Item.ToolCall call : directCalls) {
+//                                                sink.tryEmitNext(Item.builder().text(JSONUtil.stringify(call.getResult().getDirect())).isSegment(0).build());
+//                                            }
+//                                        }
+//
+//                                        // 处理ERROR类型
+//                                        if (!errorCalls.isEmpty()) {
+//                                            sink.tryEmitNext(Item.builder().text("我正在更新代码，请您稍后").build());
+//                                            // Todo 判断IFunction
+//
+//                                            for (var toolCall : errorCalls) {
+//                                                updateToolLocal(toolCall);
+//                                                invokeToolCalls(List.of(toolCall));
+//                                            }
+//                                        }
+//
+//                                        // 处理LLM类型
+//                                        if (!llmCalls.isEmpty()) {
+//                                            var messageInvoke = Item.builder()
+//                                                    .role(Item.ROLE.ASSISTANT)
+//                                                    .toolCalls(llmCalls)
+//                                                    .build();
+//
+//                                            var messageRes = Item.builder()
+//                                                    .role(Item.ROLE.TOOL)
+//                                                    .toolCalls(llmCalls)
+//                                                    .build();
+//
+//                                            memory.add(messageInvoke);
+//                                            memory.add(messageRes);
+//
+//                                            // Todo 这里的tools参数是否可以去掉，节省token
+//                                            return llm.send(memory.get(), null, tools);
+//                                        }
+//
+//                                        return holder;
+//                                    });
+//                        } else if (thinking != null) {
+//                            return other;
+//                        } else {
+//                            return other;
+//                        }
+//                    })
+//                    .reduce(Item.builder().build(), (acc, chunk) -> {
+//
+//                        var text = ((ChatCompletionChunk) chunk).choices().get(0).delta().content().get();
+//                        if (format == null) {
+//                            sink.tryEmitNext(Item.builder().text(text).isSegment(1).build());
+//                        }
+//                        acc.setText(acc.getText() + text);
+//
+//                        var usage = ((ChatCompletionChunk) chunk).usage();
+//                        usage.ifPresent(completionUsage -> item.setUsage(((int) completionUsage.totalTokens())));
+//
+//                        return acc;
+//                    })
+//                    .map(f -> {
+//                        f.setIsSegment(0);
+//                        f.setRole(Item.ROLE.ASSISTANT);
+//
+//                        if (format != null) {
+//                            f.setFormatted(JSONUtil.parse(f.getText(), format));
+//                        }
+//
+//                        sink.tryEmitNext(f);
+//                        memory.add(f);
+//
+//                        return f;
+//                    })
+//                    .block();
         }));
     }
 
@@ -342,7 +487,7 @@ public abstract class Agent {
 
         var maxAttempts = 5;
         var attempt = 0;
-        
+
         return updateToolWithRetry(javaFile, toolCall, matchedTool, attempt, maxAttempts);
     }
 
@@ -376,16 +521,16 @@ public abstract class Agent {
                             .flatMap(updatedCode -> {
                                 // 尝试编译、加载和运行代码
                                 return Mono.fromRunnable(() -> {
-                                    CodeUtil.compile(updatedCode, matchedTool.getIFunction());
-                                    var obj = CodeUtil.load(matchedTool.getIFunction(), toolCall.getName());
-                                    if (obj instanceof FunctionWrapper wrapper) {
-                                        wrapper.run(toolCall.arguments);
-                                    }
-                                })
-                                .onErrorResume(throwable -> {
-                                    // 如果编译、加载或运行失败，递归调用重试
-                                    return updateToolWithRetry(javaFile, toolCall, matchedTool, attempt + 1, maxAttempts);
-                                });
+                                            CodeUtil.compile(updatedCode, matchedTool.getIFunction());
+                                            var obj = CodeUtil.load(matchedTool.getIFunction(), toolCall.getName());
+                                            if (obj instanceof FunctionWrapper wrapper) {
+                                                wrapper.run(toolCall.arguments);
+                                            }
+                                        })
+                                        .onErrorResume(throwable -> {
+                                            // 如果编译、加载或运行失败，递归调用重试
+                                            return updateToolWithRetry(javaFile, toolCall, matchedTool, attempt + 1, maxAttempts);
+                                        });
                             });
                 })
                 .then();
@@ -464,6 +609,7 @@ public abstract class Agent {
     /**
      * 调用函数
      * Todo 工具串行调用，和并行调用
+     *
      * @param calls 工具调用列表
      * @return 带有调用结果的工具调用列表
      */
@@ -509,34 +655,33 @@ public abstract class Agent {
 
                         case Tool.TYPE.MCP_HTTP:
                             // 调用 HTTP 工具
-                            {
-                                try {
-                                    // 这里应该实现 HTTP 工具调用逻辑
-                                    // 由于需要与 MCP 服务器交互，实际实现会比较复杂
-                                    // 这里提供一个简化的示例实现
-                                    result = handleToolCallResult("{\"content\":\"HTTP tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
+                        {
+                            try {
+                                // 这里应该实现 HTTP 工具调用逻辑
+                                // 由于需要与 MCP 服务器交互，实际实现会比较复杂
+                                // 这里提供一个简化的示例实现
+                                result = handleToolCallResult("{\"content\":\"HTTP tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
 
-                                } catch (Exception e) {
-                                    result.setError("Error calling HTTP tool '" + matchedTool.getName() + "': " + e.getMessage());
-                                }
+                            } catch (Exception e) {
+                                result.setError("Error calling HTTP tool '" + matchedTool.getName() + "': " + e.getMessage());
                             }
-                            break;
+                        }
+                        break;
 
                         case Tool.TYPE.MCP_CLI:
                             // 调用 CLI 工具
-                            {
-                                try {
-                                    // 这里应该实现 CLI 工具调用逻辑
-                                    // 需要构造命令行参数 attend 并执行命令
-                                    // 这里提供一个简化的示例实现
-                                    result = handleToolCallResult("{\"content\":\"CLI tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
+                        {
+                            try {
+                                // 这里应该实现 CLI 工具调用逻辑
+                                // 需要构造命令行参数 attend 并执行命令
+                                // 这里提供一个简化的示例实现
+                                result = handleToolCallResult("{\"content\":\"CLI tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
 
-                                } catch (Exception e) {
-                                    result.setError("Error calling CLI tool '" + matchedTool.getName() + "': " + e.getMessage());
-                                }
+                            } catch (Exception e) {
+                                result.setError("Error calling CLI tool '" + matchedTool.getName() + "': " + e.getMessage());
                             }
-                            break;
-
+                        }
+                        break;
 
 
                         default:

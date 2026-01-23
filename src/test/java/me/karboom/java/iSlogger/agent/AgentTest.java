@@ -73,11 +73,13 @@ class AgentTest {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
             // 创建 Agent
             var llm = llmTest.getLlm();
+//            llm.llmConfig.put("thinking", true);
 
             // 定义输入列表
             var inputs = List.of(
-                    "杭州的天气如何，上海的天气如何",
-                    "写首五言律诗"
+                    "杭州的天气如何，上海的天气如何"
+//                    "写首五言律诗，中文的",
+//                    "你好"
             );
 
             // 创建表格
@@ -96,9 +98,9 @@ class AgentTest {
 
                 // 订阅 broadcast
                 agent.subscribe(item -> {
+                    System.out.println("Index " + i + " received: " + item);
                     if (item.getIsSegment() == 0) {
                         outputColumn.set(i, item.getText());
-                        System.out.println("Index " + i + " received: " + item);
                         completedCount.incrementAndGet();
                     }
                 });

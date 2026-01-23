@@ -10,7 +10,7 @@ import java.util.Map;
 
 public abstract class BaseLLM {
     public String llmType;
-    protected Map<String, Object> llmConfig;
+    public Map<String, Object> llmConfig;
     protected String apiKey;
     protected String url;
     protected Integer maxRetries;

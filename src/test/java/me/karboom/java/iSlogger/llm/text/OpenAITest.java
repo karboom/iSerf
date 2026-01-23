@@ -6,7 +6,11 @@ import me.karboom.java.iSlogger.memory.Item;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.*;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -14,19 +18,21 @@ import static org.junit.jupiter.api.Assertions.*;
  * OpenAI 测试类
  * 注意：这些测试需要真实的 API Key 才能运行
  */
-class OpenAITest {
-    private String apiKey;
-    private String url;
-    private Map<String, Object> llmConfig;
+public class OpenAITest {
 
     private OpenAI llm;
 
     @BeforeEach
     void setUp() {
+        llm = getLlm();
+    }
+
+    public OpenAI getLlm() {
+
         // 从环境变量获取 API Key（测试时需要设置）
-        apiKey = System.getenv("OPENAI_API_KEY");
-        url = System.getenv("OPENAI_API_URL");
-        
+        var apiKey = System.getenv("OPENAI_API_KEY");
+        var url = System.getenv("OPENAI_API_URL");
+
         // 如果环境变量未设置，使用测试默认值
         if (apiKey == null || apiKey.isEmpty()) {
             apiKey = "sk-1d926b2b2c614ca09e3a6d89a9851ea4";
@@ -36,13 +42,14 @@ class OpenAITest {
         }
 
         // 配置 LLM 参数
-        llmConfig = new HashMap<>();
-        llmConfig.put("model", "gpt-4");
+        var llmConfig = new HashMap<String, Object>();
         llmConfig.put("temperature", 0.7);
         llmConfig.put("max_tokens", 1000);
         llmConfig.put("top_p", 0.9);
 
-        llm = new OpenAI("qwen-plus", llmConfig, apiKey, url, 1);
+        var llm = new OpenAI("qwen-plus", llmConfig, apiKey, url, 1);
+
+        return llm;
     }
 
 
@@ -56,11 +63,11 @@ class OpenAITest {
     void testOutputFormat() throws InterruptedException {
         var messages = new ArrayList<Item>();
         messages.add(Item.builder()
-                .role("system")
+                .role(Item.ROLE.SYSTEM)
                 .text("You are a helpful assistant.")
                 .build());
         messages.add(Item.builder()
-                .role("user")
+                .role(Item.ROLE.USER)
                 .text("What is the weather in Paris? Give me a random temperature.")
                 .build());
 
@@ -85,19 +92,19 @@ class OpenAITest {
         // 创建多条测试消息
         var messages = new ArrayList<Item>();
         messages.add(Item.builder()
-                .role("system")
+                .role(Item.ROLE.SYSTEM)
                 .text("You are a helpful assistant.")
                 .build());
         messages.add(Item.builder()
-                .role("user")
+                .role(Item.ROLE.USER)
                 .text("What is the capital of France?")
                 .build());
         messages.add(Item.builder()
-                .role("assistant")
+                .role(Item.ROLE.ASSISTANT)
                 .text("The capital of France is Paris.")
                 .build());
         messages.add(Item.builder()
-                .role("user")
+                .role(Item.ROLE.USER)
                 .text("柏林天气如何")
                 .build());
 
@@ -108,21 +115,42 @@ class OpenAITest {
 
         var response = llm.send(messages, null, List.of(tool1));
 
-//        response.subscribe(chunk -> {
-//
-//            System.out.println(chunk);
-//            System.out.println(chunk.choices().getFirst().delta().content());
-//        }).onCompleteFuture().whenComplete((result, error) -> {
-//            if (error == null) {
-//                System.out.println("done");
-//            } else {
-//                System.out.println(error);
-//            }
-//        });
-
         Thread.sleep(10000);
 
         assertNotNull(response);
     }
 
+    @Test
+    void testThinking() {
+        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+            var messages = new ArrayList<Item>();
+            messages.add(Item.builder()
+                    .role(Item.ROLE.USER)
+                    .text("弄一幅对联")
+                    .build());
+
+            var response = llm.send(messages, null, null);
+
+            var content = new StringBuilder();
+            var finished = new AtomicBoolean(false);
+
+            response.subscribe(
+                    chunk -> {
+                        var delta = chunk.choices().getFirst().delta();
+                        var x = delta._additionalProperties();
+                        var y = x.get("reasoning_content");
+
+                    }
+            );
+
+            // 等待完成或超时
+            while (!finished.get()) {
+                Thread.sleep(100);
+            }
+
+            System.out.println("Thinking response: " + content);
+            assertNotNull(content.toString());
+            assertTrue(content.toString().length() > 0);
+        });
+    }
 }

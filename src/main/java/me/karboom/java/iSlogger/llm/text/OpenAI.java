@@ -10,6 +10,7 @@ import me.karboom.java.iSlogger.tool.Tool;
 import me.karboom.java.iSlogger.memory.Item;
 import reactor.core.publisher.Flux;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +28,7 @@ public class OpenAI extends BaseLLM {
         var builder = OpenAIOkHttpClient.builder()
                 .apiKey(this.apiKey)
                 .baseUrl(this.url)
+                .timeout(Duration.ofSeconds(60))
                 ;
 
         // 如果提供了最大重试次数，设置重试次数
@@ -122,10 +124,10 @@ public class OpenAI extends BaseLLM {
         for (var item : messages) {
             ChatCompletionMessageParam param;
             switch (item.role) {
-                case "user":
+                case Item.ROLE.USER:
                     paramsBuilder.addUserMessage(item.text);
                     break;
-                case "assistant":
+                case Item.ROLE.ASSISTANT:
                     var params = ChatCompletionAssistantMessageParam.builder()
 
                             ;
@@ -146,10 +148,10 @@ public class OpenAI extends BaseLLM {
 
                     paramsBuilder.addMessage(params.build());
                     break;
-                case "system":
+                case Item.ROLE.SYSTEM:
                     paramsBuilder.addSystemMessage(item.text);
                     break;
-                case "tool":
+                case Item.ROLE.TOOL:
                     // 循环toolCalls，每个call调用一次addMessage
                     for (var toolCall : item.toolCalls) {
                         paramsBuilder.addMessage(ChatCompletionToolMessageParam.builder()
@@ -174,6 +176,13 @@ public class OpenAI extends BaseLLM {
 
         if (llmConfig.containsKey("top_p")) {
             paramsBuilder.topP(((Number) llmConfig.get("top_p")).doubleValue());
+        }
+
+        paramsBuilder.streamOptions(ChatCompletionStreamOptions.builder().includeUsage(true).build());
+
+        if (llmConfig.containsKey("thinking")) {
+            // Todo 千问是这么用的，其他还需要调查
+            paramsBuilder.putAdditionalBodyProperty("enable_thinking", JsonValue.from(true));
         }
 
         var params = paramsBuilder.build();

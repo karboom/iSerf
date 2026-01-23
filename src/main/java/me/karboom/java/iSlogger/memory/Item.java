@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 
@@ -13,6 +14,26 @@ import java.util.List;
 @AllArgsConstructor
 @Builder
 public class Item {
+    static public class TYPE {
+        public static final String TEXT = "TEXT";
+        public static final String IMAGE = "IMAGE";
+        public static final String VIDEO = "VIDEO";
+        public static final String AUDIO = "AUDIO";
+        public static final String TOOL_CALLS = "TOOL_CALLS";
+        public static final String MIXED = "MIXED";
+        public static final String CUSTOM = "CUSTOM";
+        public static final String TIP = "TIP";
+        public static final String THINKING = "THINKING";
+        public static final String ERROR = "ERROR";
+    }
+
+    static public class ROLE {
+        public static final String ASSISTANT = "ASSISTANT";
+        public static final String USER = "USER";
+        public static final String SYSTEM = "SYSTEM";
+        public static final String TOOL = "TOOL";
+    }
+
 
     @Data
     @AllArgsConstructor
@@ -40,10 +61,6 @@ public class Item {
     public String agentId;
     public String userId;
 
-
-    /**
-     * 类型  text | image | video | audio | toolCalls | mixed | custom | tip
-     */
     public String type;
 
     public String text;
@@ -53,9 +70,6 @@ public class Item {
 
     public ObjectNode custom;
 
-    /**
-     * LLM角色： assistant | user | system | tool
-     */
     public String role;
 
 
@@ -63,4 +77,6 @@ public class Item {
 
 
     public Object formatted;
+
+    public Integer usage;
 }
