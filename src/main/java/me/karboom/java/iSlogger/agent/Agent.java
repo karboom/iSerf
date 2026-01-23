@@ -8,6 +8,7 @@ import me.karboom.java.iSlogger.llm.text.BaseLLM;
 import me.karboom.java.iSlogger.memory.Item;
 import me.karboom.java.iSlogger.memory.LocalMemory;
 import me.karboom.java.iSlogger.memory.Memory;
+import me.karboom.java.iSlogger.team.Event;
 import me.karboom.java.iSlogger.tool.Tool;
 import me.karboom.java.iSlogger.util.CodeUtil;
 import me.karboom.java.iSlogger.util.JSONUtil;
@@ -19,6 +20,7 @@ import reactor.core.publisher.Mono;
 
 import me.karboom.java.iSlogger.tool.FunctionWrapper;
 import reactor.core.publisher.Sinks;
+import reactor.core.scheduler.Schedulers;
 
 import java.io.File;
 import java.net.URL;
@@ -40,11 +42,12 @@ public abstract class Agent {
     protected List<Tool> tools;
     protected BaseLLM llm;
     public String prompt;
-    // Todo 这里也可以改为事件总线模式，支持多订阅？
     protected PriorityBlockingQueue<Item> queue;
+    public Flux<Item> itemBroadcast;
 
     protected Sinks.Many<Item> sink;
     public Flux<Item> broadcast;
+
 
     /**
      * 构造函数
@@ -65,6 +68,15 @@ public abstract class Agent {
         this.sink = Sinks.many().multicast().onBackpressureBuffer();
         this.broadcast = sink.asFlux();
 
+        this.itemBroadcast = Flux.<Item>generate(sink -> {
+            try {
+                var event = queue.take();
+                sink.next(event);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }).subscribeOn(Schedulers.boundedElastic()).share();
+
         run();
     }
 
@@ -75,124 +87,113 @@ public abstract class Agent {
     }
 
     private void run() {
-        new Thread(() -> {
-            while (!Thread.interrupted()) {
-                try {
-                    var item = queue.take();
-//                    System.out.println("\n1");
-                    var userMessage = Item.builder()
-                            .role("user")
-                            .text(item.getText())
-                            .build();
+        this.itemBroadcast.subscribe((item -> {
+            var userMessage = Item.builder()
+                    .role("user")
+                    .text(item.getText())
+                    .build();
 
-                    // 添加到记忆中
-                    memory.add(userMessage);
+            // 添加到记忆中
+            memory.add(userMessage);
 
-                    var format = item.getFormatted() == null ? null : item.getFormatted().getClass();
+            var format = item.getFormatted() == null ? null : item.getFormatted().getClass();
 
-                    llm.send(memory.get(), format, tools)
-                            .switchOnFirst((first, other) -> {
-                                var toolCalls = first.get().choices().get(0).delta().toolCalls();
+            llm.send(memory.get(), format, tools)
+                    .switchOnFirst((first, other) -> {
+                        var toolCalls = first.get().choices().get(0).delta().toolCalls();
 
-                                if (toolCalls.isPresent()) {
-                                    return other
-                                            .collectList()
-                                            .flatMapMany((list) -> {
-                                                // 合并ToolCall参数
-                                                var calls = mergeToolCalls(list);
+                        if (toolCalls.isPresent()) {
+                            return other
+                                    .collectList()
+                                    .flatMapMany((list) -> {
+                                        // 合并ToolCall参数
+                                        var calls = mergeToolCalls(list);
 
-                                                // 通过cli调用MCP函数
-                                                var callResult = invokeToolCalls(calls);
+                                        // 通过cli调用MCP函数
+                                        var callResult = invokeToolCalls(calls);
 
-                                                // 按结果类型分组处理
-                                                var directCalls = new ArrayList<Item.ToolCall>();
-                                                var errorCalls = new ArrayList<Item.ToolCall>();
-                                                var llmCalls = new ArrayList<Item.ToolCall>();
+                                        // 按结果类型分组处理
+                                        var directCalls = new ArrayList<Item.ToolCall>();
+                                        var errorCalls = new ArrayList<Item.ToolCall>();
+                                        var llmCalls = new ArrayList<Item.ToolCall>();
 
-                                                for (var call : callResult) {
-                                                    if (call.result.getDirect() != null) {
-                                                        directCalls.add(call);
-                                                    } else if (call.result.getError() != null) {
-                                                        errorCalls.add(call);
-                                                    } else if (call.result.getLlm() != null) {
-                                                        llmCalls.add(call);
-                                                    }
-                                                }
+                                        for (var call : callResult) {
+                                            if (call.result.getDirect() != null) {
+                                                directCalls.add(call);
+                                            } else if (call.result.getError() != null) {
+                                                errorCalls.add(call);
+                                            } else if (call.result.getLlm() != null) {
+                                                llmCalls.add(call);
+                                            }
+                                        }
 
-                                                var holder = Flux.empty();
+                                        var holder = Flux.empty();
 
-                                                // 处理DIRECT类型
-                                                if (!directCalls.isEmpty()) {
-                                                    for (Item.ToolCall call : directCalls) {
-                                                        sink.tryEmitNext(Item.builder().text(JSONUtil.stringify(call.getResult().getDirect())).isSegment(0).build());
-                                                    }
-                                                }
+                                        // 处理DIRECT类型
+                                        if (!directCalls.isEmpty()) {
+                                            for (Item.ToolCall call : directCalls) {
+                                                sink.tryEmitNext(Item.builder().text(JSONUtil.stringify(call.getResult().getDirect())).isSegment(0).build());
+                                            }
+                                        }
 
-                                                // 处理ERROR类型
-                                                if (!errorCalls.isEmpty()) {
-                                                    sink.tryEmitNext(Item.builder().text("我正在更新代码，请您稍后").build());
-                                                    // Todo 判断IFunction
+                                        // 处理ERROR类型
+                                        if (!errorCalls.isEmpty()) {
+                                            sink.tryEmitNext(Item.builder().text("我正在更新代码，请您稍后").build());
+                                            // Todo 判断IFunction
 
-                                                    for (var toolCall: errorCalls) {
-                                                        updateToolLocal(toolCall);
-                                                        invokeToolCalls(List.of(toolCall));
-                                                    }
-                                                }
+                                            for (var toolCall: errorCalls) {
+                                                updateToolLocal(toolCall);
+                                                invokeToolCalls(List.of(toolCall));
+                                            }
+                                        }
 
-                                                // 处理LLM类型
-                                                if (!llmCalls.isEmpty()) {
-                                                    var messageInvoke = Item.builder()
-                                                            .role("assistant")
-                                                            .toolCalls(llmCalls)
-                                                            .build();
-                                                    
-                                                    var messageRes = Item.builder()
-                                                            .role("tool")
-                                                            .toolCalls(llmCalls)
-                                                            .build();
+                                        // 处理LLM类型
+                                        if (!llmCalls.isEmpty()) {
+                                            var messageInvoke = Item.builder()
+                                                    .role("assistant")
+                                                    .toolCalls(llmCalls)
+                                                    .build();
 
-                                                    memory.add(messageInvoke);
-                                                    memory.add(messageRes);
+                                            var messageRes = Item.builder()
+                                                    .role("tool")
+                                                    .toolCalls(llmCalls)
+                                                    .build();
 
-                                                    // Todo 这里的tools参数是否可以去掉，节省token
-                                                    return llm.send(memory.get(), null, tools);
-                                                }
+                                            memory.add(messageInvoke);
+                                            memory.add(messageRes);
 
-                                                return holder;
-                                            });
-                                } else {
-                                    return other;
-                                }
-                            })
-                            .reduce("", (acc, chunk) -> {
-                                var text = ((ChatCompletionChunk) chunk).choices().get(0).delta().content().get();
-                                if (format == null) {
-                                    sink.tryEmitNext(Item.builder().text(text).isSegment(1).build());
-                                }
-                                acc += text;
-                                return acc;
-                            })
-                            .map(f -> {
-                                var message = Item.builder().role("assistant").text(f).isSegment(0).build();
+                                            // Todo 这里的tools参数是否可以去掉，节省token
+                                            return llm.send(memory.get(), null, tools);
+                                        }
 
-                                if (format != null) {
-                                    message.setFormatted(JSONUtil.parse(f,  format));
-                                }
+                                        return holder;
+                                    });
+                        } else {
+                            return other;
+                        }
+                    })
+                    .reduce("", (acc, chunk) -> {
+                        var text = ((ChatCompletionChunk) chunk).choices().get(0).delta().content().get();
+                        if (format == null) {
+                            sink.tryEmitNext(Item.builder().text(text).isSegment(1).build());
+                        }
+                        acc += text;
+                        return acc;
+                    })
+                    .map(f -> {
+                        var message = Item.builder().role("assistant").text(f).isSegment(0).build();
 
-                                sink.tryEmitNext(message);
-                                memory.add(message);
+                        if (format != null) {
+                            message.setFormatted(JSONUtil.parse(f,  format));
+                        }
 
-                                return f;
-                            })
-                            .block();
+                        sink.tryEmitNext(message);
+                        memory.add(message);
 
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-
-            }
-        }).start();
+                        return f;
+                    })
+                    .block();
+        }));
     }
 
     @SneakyThrows
@@ -453,7 +454,6 @@ public abstract class Agent {
      * @return 带有调用结果的工具调用列表
      */
     private List<Item.ToolCall> invokeToolCalls(List<Item.ToolCall> calls) {
-        var objectMapper = new ObjectMapper();
 
         for (var call : calls) {
             // 根据 name 匹配对应的 Tool

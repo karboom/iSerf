@@ -1,5 +1,6 @@
 package me.karboom.java.iSlogger.agent;
 
+import me.karboom.java.iSlogger.llm.text.OpenAITest;
 import me.karboom.java.iSlogger.memory.Item;
 import me.karboom.java.iSlogger.tool.FunctionWrapper;
 import me.karboom.java.iSlogger.tool.Tool;
@@ -10,8 +11,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
+import tech.tablesaw.api.StringColumn;
+import tech.tablesaw.api.Table;
 
+import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -28,31 +33,15 @@ class AgentTest {
         public Result() {}
     }
 
-    private String apiKey;
-    private String url;
     private Map<String, Object> llmConfig;
     private List<Tool> tools;
+    private OpenAITest llmTest;
 
 
     @BeforeEach
     void setUp() {
-        // 从环境变量获取 API Key
-        apiKey = System.getenv("OPENAI_API_KEY");
-        url = System.getenv("OPENAI_API_URL");
-
-        // 如果环境变量未设置，使用测试默认值
-        if (apiKey == null || apiKey.isEmpty()) {
-            apiKey = "sk-1d926b2b2c614ca09e3a6d89a9851ea4";
-        }
-        if (url == null || url.isEmpty()) {
-            url = "https://dashscope.aliyuncs.com/compatible-mode/v1";
-        }
-
-
-        // 配置 LLM 参数
-        llmConfig = new HashMap<>();
-        llmConfig.put("temperature", 0.7);
-        llmConfig.put("max_tokens", 1000);
+        // 初始化 llmTest
+        llmTest = new OpenAITest();
 
         // 创建测试工具
         tools = new ArrayList<>();
@@ -63,7 +52,7 @@ class AgentTest {
                         new Tool.Parameter("location", "string", "The city name", true),
                         new Tool.Parameter("unit", "string", "Temperature unit (celsius or fahrenheit)", false)
                 ))
-                .type("function")
+                .type(Tool.TYPE.FUNCTION)
                 .function(params -> (Math.random() * 15 + 15) + "摄氏度")
 
                 .build();
@@ -73,56 +62,65 @@ class AgentTest {
                 .name("GetTime")
                 .description("Get the current time")
                 .parameters(List.of())
-                .type("iFunction")
+                .type(Tool.TYPE.IFUNCTION)
                 .iFunction("/home/karboom/projects/karboom/java/iSlogger/class/time")
                 .build();
         tools.add(timeTool);
     }
 
     @Test
+    public void testAgentBroadcast() {
+        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+            // 创建 Agent
+            var llm = llmTest.getLlm();
 
-    void testAgentBroadcast() throws InterruptedException {
-        // 创建 Agent
-        var llm = new OpenAI("qwen-plus", llmConfig, apiKey, url, 3);
-        var agent = new Agent("test-agent", "", llm, tools) {};
+            // 定义输入列表
+            var inputs = List.of(
+                    "杭州的天气如何，上海的天气如何",
+                    "写首五言律诗"
+            );
 
-        // 创建一个列表来收集广播的消息
-        var receivedMessages = new ArrayList<String>();
-        
-        // 订阅 broadcast 流
-        var subscription = agent.subscribe(
-            item -> {
-                System.out.println(JSONUtil.stringify(item));
-                receivedMessages.add(JSONUtil.stringify(item));
+            // 创建表格
+            var inputColumn = StringColumn.create("input", inputs);
+            var outputColumn = StringColumn.create("output", new String[inputs.size()]);
+            var table = Table.create("agent_broadcast_test", inputColumn, outputColumn);
+
+            // 完成计数器
+            var completedCount = new AtomicInteger(0);
+
+            // 对于每个输入，发送消息并订阅响应
+            inputs.forEach(input -> {
+                var i = inputs.indexOf(input);
+
+                var agent = new Agent("test-agent-" + i, "", llm, tools) {};
+
+                // 订阅 broadcast
+                agent.subscribe(item -> {
+                    if (item.getIsSegment() == 0) {
+                        outputColumn.set(i, item.getText());
+                        System.out.println("Index " + i + " received: " + item);
+                        completedCount.incrementAndGet();
+                    }
+                });
+
+                // 发送消息
+                agent.send(input);
+            });
+
+            // 等待所有输出完成
+            while (completedCount.get() < inputs.size()) {
+                Thread.sleep(100);
             }
-//            error -> fail("Broadcast stream should not emit errors: " + error.getMessage()),
-//            () -> receivedMessages.add("COMPLETED")
-        );
 
-        // 使用 send 方法发送消息
-//        agent.send("写一个100字散文，关于宇宙");
-        agent.send("杭州的天气如何，上海的天气如何");
-//        agent.send("现在是什么时间");
-//        agent.send("列举三个哺乳动物", Result.class);
-        agent.send("写首五言律诗");
-
-        // 等待一段时间让消息被处理
-        Thread.sleep(10000);
-
-        System.out.println(receivedMessages);
-        // 验证是否收到了消息
-        assertEquals(2, receivedMessages.size(), "Should have received 2 messages");
-        assertEquals("Hello, broadcast!", receivedMessages.get(0), "First message should match");
-        assertEquals("Hello, subscriber!", receivedMessages.get(1), "Second message should match");
-        
-        // 清理订阅
-        subscription.dispose();
+            // 输出表格
+            System.out.println(table.print());
+        });
     }
 
     @Test
     void testUpdateTool() {
         // 创建 Agent
-        var llm = new OpenAI("qwen-plus", llmConfig, apiKey, url, 3);
+        var llm = llmTest.getLlm();
         var agent = new Agent("test-agent", "", llm, tools) {};
 
         // 测试用例1: 正常情况 - 工具存在且更新成功
@@ -162,7 +160,7 @@ class AgentTest {
     @Test
     void testUpdateToolLocal() {
         // 创建 Agent
-        var llm = new OpenAI("qwen-plus", llmConfig, apiKey, url, 3);
+        var llm = llmTest.getLlm();
         var agent = new Agent("test-agent", "", llm, tools) {};
 
         var result = Item.ToolCall.Result.builder()
@@ -185,7 +183,7 @@ class AgentTest {
     @Test
     void testEvolution() throws InterruptedException {
         // 创建 Agent
-        var llm = new OpenAI("qwen-plus", llmConfig, apiKey, url, 3);
+        var llm = llmTest.getLlm();
         var agent = new Agent("test-agent", "", llm, tools) {};
 
         // 创建一个列表来收集广播的消息
