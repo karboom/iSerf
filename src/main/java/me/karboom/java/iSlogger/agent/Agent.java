@@ -12,7 +12,10 @@ import me.karboom.java.iSlogger.team.Event;
 import me.karboom.java.iSlogger.tool.Tool;
 import me.karboom.java.iSlogger.util.CodeUtil;
 import me.karboom.java.iSlogger.util.JSONUtil;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
@@ -63,7 +66,7 @@ public abstract class Agent {
         this.tools = tools != null ? tools : new ArrayList<>();
         this.queue = new PriorityBlockingQueue<>(100, Comparator.comparing(Item::getId));
 
-        this.memory.add(Item.builder().id(id).role("system").text(this.prompt).build());
+        this.memory.add(Item.builder().id(id).role(Item.ROLE.SYSTEM).text(this.prompt).build());
 
         this.sink = Sinks.many().multicast().onBackpressureBuffer();
         this.broadcast = sink.asFlux();
@@ -89,7 +92,7 @@ public abstract class Agent {
     private void run() {
         this.itemBroadcast.subscribe((item -> {
             var userMessage = Item.builder()
-                    .role("user")
+                    .role(Item.ROLE.USER)
                     .text(item.getText())
                     .build();
 
@@ -100,7 +103,9 @@ public abstract class Agent {
 
             llm.send(memory.get(), format, tools)
                     .switchOnFirst((first, other) -> {
-                        var toolCalls = first.get().choices().get(0).delta().toolCalls();
+                        var delta = first.get().choices().get(0).delta();
+                        var toolCalls = delta.toolCalls();
+                        var thinking = delta._additionalProperties().get("reasoning_content");
 
                         if (toolCalls.isPresent()) {
                             return other
@@ -150,12 +155,12 @@ public abstract class Agent {
                                         // 处理LLM类型
                                         if (!llmCalls.isEmpty()) {
                                             var messageInvoke = Item.builder()
-                                                    .role("assistant")
+                                                    .role(Item.ROLE.ASSISTANT)
                                                     .toolCalls(llmCalls)
                                                     .build();
 
                                             var messageRes = Item.builder()
-                                                    .role("tool")
+                                                    .role(Item.ROLE.TOOL)
                                                     .toolCalls(llmCalls)
                                                     .build();
 
@@ -168,27 +173,35 @@ public abstract class Agent {
 
                                         return holder;
                                     });
+                        } else if (thinking != null) {
+                            return other;
                         } else {
                             return other;
                         }
                     })
-                    .reduce("", (acc, chunk) -> {
+                    .reduce(Item.builder().build(), (acc, chunk) -> {
+
                         var text = ((ChatCompletionChunk) chunk).choices().get(0).delta().content().get();
                         if (format == null) {
                             sink.tryEmitNext(Item.builder().text(text).isSegment(1).build());
                         }
-                        acc += text;
+                        acc.setText(acc.getText() + text);
+
+                        var usage = ((ChatCompletionChunk) chunk).usage();
+                        usage.ifPresent(completionUsage -> item.setUsage(((int) completionUsage.totalTokens())));
+
                         return acc;
                     })
                     .map(f -> {
-                        var message = Item.builder().role("assistant").text(f).isSegment(0).build();
+                        f.setIsSegment(0);
+                        f.setRole(Item.ROLE.ASSISTANT);
 
                         if (format != null) {
-                            message.setFormatted(JSONUtil.parse(f,  format));
+                            f.setFormatted(JSONUtil.parse(f.getText(),  format));
                         }
 
-                        sink.tryEmitNext(message);
-                        memory.add(message);
+                        sink.tryEmitNext(f);
+                        memory.add(f);
 
                         return f;
                     })
@@ -200,6 +213,7 @@ public abstract class Agent {
     public void send(String message, Class<?> cls) {
         var item = Item
                 .builder()
+                .role(Item.ROLE.USER)
                 .id("")
                 .text(message).build();
 
@@ -234,7 +248,7 @@ public abstract class Agent {
         var client = new OkHttpClient();
 
         // 创建请求
-        var request = new okhttp3.Request.Builder()
+        var request = new Request.Builder()
                 .url(apiUrl + "?name=" + toolName)
                 .get()
                 .build();
@@ -282,12 +296,12 @@ public abstract class Agent {
                                     var payload = "{\"name\": \"%s\", \"content\": \"%s\"}"
                                             .formatted(toolName, encodedCode);
 
-                                    var updateRequestBody = okhttp3.RequestBody.create(
+                                    var updateRequestBody = RequestBody.create(
                                             payload,
-                                            okhttp3.MediaType.get("application/json; charset=utf-8")
+                                            MediaType.get("application/json; charset=utf-8")
                                     );
 
-                                    var updateRequest = new okhttp3.Request.Builder()
+                                    var updateRequest = new Request.Builder()
                                             .url(updateApiUrl)
                                             .post(updateRequestBody)
                                             .build();
