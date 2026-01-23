@@ -32,13 +32,15 @@ import java.util.stream.Collectors;
 
 /**
  * Agent 基类
+ * Todo 增加一个retry方法？方便直接重试上一条
  */
 public abstract class Agent {
     public String id;
     protected Memory memory = new LocalMemory();
     protected List<Tool> tools;
     protected BaseLLM llm;
-    protected String prompt;
+    public String prompt;
+    // Todo 这里也可以改为事件总线模式，支持多订阅？
     protected PriorityBlockingQueue<Item> queue;
 
     protected Sinks.Many<Item> sink;
@@ -121,19 +123,15 @@ public abstract class Agent {
 
                                                 // 处理DIRECT类型
                                                 if (!directCalls.isEmpty()) {
-                                                    var responseBuilder = new StringBuilder();
                                                     for (Item.ToolCall call : directCalls) {
-                                                        responseBuilder.append(call.result.getDirect().get("content").asText());
-                                                        responseBuilder.append("\n");
+                                                        sink.tryEmitNext(Item.builder().text(JSONUtil.stringify(call.getResult().getDirect())).isSegment(0).build());
                                                     }
-                                                    var responseText = responseBuilder.toString().trim();
-                                                    sink.tryEmitNext(Item.builder().text(responseText).build());
                                                 }
 
                                                 // 处理ERROR类型
                                                 if (!errorCalls.isEmpty()) {
                                                     sink.tryEmitNext(Item.builder().text("我正在更新代码，请您稍后").build());
-                                                    // 更新代码逻辑可以在这里添加
+                                                    // Todo 判断IFunction
 
                                                     for (var toolCall: errorCalls) {
                                                         updateToolLocal(toolCall);
@@ -327,6 +325,17 @@ public abstract class Agent {
             throw new RuntimeException("Java file not found: %s".formatted(javaFilePath));
         }
 
+        var maxAttempts = 5;
+        var attempt = 0;
+        
+        return updateToolWithRetry(javaFile, toolCall, matchedTool, attempt, maxAttempts);
+    }
+
+    private Mono<Void> updateToolWithRetry(File javaFile, Item.ToolCall toolCall, Tool matchedTool, int attempt, int maxAttempts) {
+        if (attempt >= maxAttempts) {
+            return Mono.error(new RuntimeException("Max attempts reached for updating tool: %s".formatted(toolCall.getName())));
+        }
+
         return Mono.fromCallable(() -> Files.readString(javaFile.toPath(), StandardCharsets.UTF_8))
                 .flatMap(currentCode -> {
                     var prompt = "请根据以下错误信息更新代码:\n\n输入参数：\n\n%s\n\n错误信息: %s\n\n当前代码:\n%s\n\n 请修改runner里面的逻辑，仅需要告诉我最终的代码，不要带markdown标记"
@@ -349,9 +358,20 @@ public abstract class Agent {
                             })
                             .reduce(new StringBuilder(), StringBuilder::append)
                             .map(StringBuilder::toString)
-                            .flatMap(updatedCode -> Mono.fromRunnable(() -> {
-                                CodeUtil.run(updatedCode, matchedTool.getIFunction());
-                            }));
+                            .flatMap(updatedCode -> {
+                                // 尝试编译、加载和运行代码
+                                return Mono.fromRunnable(() -> {
+                                    CodeUtil.compile(updatedCode, matchedTool.getIFunction());
+                                    var obj = CodeUtil.load(matchedTool.getIFunction(), toolCall.getName());
+                                    if (obj instanceof FunctionWrapper wrapper) {
+                                        wrapper.run(toolCall.arguments);
+                                    }
+                                })
+                                .onErrorResume(throwable -> {
+                                    // 如果编译、加载或运行失败，递归调用重试
+                                    return updateToolWithRetry(javaFile, toolCall, matchedTool, attempt + 1, maxAttempts);
+                                });
+                            });
                 })
                 .then();
     }
@@ -452,7 +472,7 @@ public abstract class Agent {
             } else {
                 try {
                     switch (matchedTool.getType()) {
-                        case "function":
+                        case Tool.TYPE.FUNCTION:
                             // 调用本地函数
                             if (matchedTool.getFunction() != null) {
                                 String functionResult = matchedTool.getFunction().run(call.arguments);
@@ -464,7 +484,7 @@ public abstract class Agent {
                             }
                             break;
 
-                        case "iFunction":
+                        case Tool.TYPE.IFUNCTION:
                             // 调用 iClass 类型工具
                         {
                             var classPath = "%s/current/".formatted(matchedTool.getIFunction());
@@ -473,7 +493,7 @@ public abstract class Agent {
                         }
                         break;
 
-                        case "mcp-http":
+                        case Tool.TYPE.MCP_HTTP:
                             // 调用 HTTP 工具
                             {
                                 try {
@@ -488,7 +508,7 @@ public abstract class Agent {
                             }
                             break;
 
-                        case "mcp-cli":
+                        case Tool.TYPE.MCP_CLI:
                             // 调用 CLI 工具
                             {
                                 try {

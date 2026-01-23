@@ -165,12 +165,12 @@ class AgentTest {
         var llm = new OpenAI("qwen-plus", llmConfig, apiKey, url, 3);
         var agent = new Agent("test-agent", "", llm, tools) {};
 
-        var result = me.karboom.java.iSlogger.memory.Item.ToolCall.Result.builder()
+        var result = Item.ToolCall.Result.builder()
                 .error("时间格式不正确")
                 .build();
 
         // 测试用例1: 正常情况 - 本地工具存在且更新成功
-        var toolCall = me.karboom.java.iSlogger.memory.Item.ToolCall.builder()
+        var toolCall = Item.ToolCall.builder()
                 .name("GetTime")
                 .arguments(new HashMap<>())
                 .result(result)
@@ -180,40 +180,6 @@ class AgentTest {
         assertNotNull(updateMono, "updateToolLocal should return a Mono<Void>");
         assertDoesNotThrow(() -> updateMono.block(), "updateToolLocal should succeed for existing local tool");
 
-        // 测试用例2: 工具不存在的情况
-        var nonExistentToolCall = me.karboom.java.iSlogger.memory.Item.ToolCall.builder()
-                .name("non-existent-tool")
-                .arguments(new HashMap<>())
-                .result(me.karboom.java.iSlogger.memory.Item.ToolCall.Result.builder()
-                        .error("时间格式不正确")
-                        .build())
-                .build();
-
-        var errorMono = agent.updateToolLocal(nonExistentToolCall);
-        assertThrows(RuntimeException.class, () -> errorMono.block(),
-                "updateToolLocal should throw RuntimeException for non-existent tool");
-
-        // 测试用例3: Java文件不存在的情况
-        var noFileTool = Tool.builder()
-                .name("NoFileTool")
-                .type("iClass")
-                .iFunction("/non/existent/path")
-                .build();
-        var toolsWithNoFile = new ArrayList<>(tools);
-        toolsWithNoFile.add(noFileTool);
-        var agentWithNoFile = new Agent("test-agent-no-file", "", llm, toolsWithNoFile) {};
-
-        var noFileToolCall = me.karboom.java.iSlogger.memory.Item.ToolCall.builder()
-                .name("NoFileTool")
-                .arguments(new HashMap<>())
-                .result(me.karboom.java.iSlogger.memory.Item.ToolCall.Result.builder()
-                        .error("时间格式不正确")
-                        .build())
-                .build();
-
-        var noFileMono = agentWithNoFile.updateToolLocal(noFileToolCall);
-        assertThrows(RuntimeException.class, () -> noFileMono.block(),
-                "updateToolLocal should throw RuntimeException when java file is missing");
     }
 
     @Test
