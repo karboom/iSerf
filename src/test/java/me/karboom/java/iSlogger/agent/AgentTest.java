@@ -167,6 +167,7 @@ class AgentTest {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
             // 创建 Agent
             var llm = llmTest.getLlm();
+//            llm.llmConfig.put("thinking", true);
             
             var tools = new Loader(2000).fromIFunction("/home/karboom/projects/karboom/java/iSlogger/src/main/java/me/karboom/java/iSlogger/iFunction", null, null);
 
@@ -224,8 +225,8 @@ class AgentTest {
                     }
             );
 
-            agent.send("我想直到用户最近一周创建订单数量的趋势");
-            agent.send("2");
+//            agent.send("我想直到用户最近一周创建订单数量的趋势");
+            agent.send("你好");
             agent.send("3");
 
             Thread.sleep(1000*20);

@@ -150,7 +150,21 @@ public abstract class Agent {
 
                     } else if (usage.isPresent()) {
                         if (contentItem.getId() != null) {
-                            contentItem.setUsage((int) usage.get().totalTokens());
+                            var usageData = usage.get();
+                            var completionDetails = usageData.completionTokensDetails();
+                            var usageBuilder = Item.Usage.builder()
+                                    .total((int) usageData.totalTokens())
+                                    .promptTotal((int) usageData.promptTokens())
+                                    .completionTotal((int) usageData.completionTokens())
+                                    .build();
+
+                            completionDetails.ifPresent(completionTokensDetails -> {
+                                completionTokensDetails.reasoningTokens().ifPresent(obj -> {
+                                    usageBuilder.setCompletionThinking(Integer.valueOf(obj.toString()));
+                                });
+                            });
+                            
+                            contentItem.setUsage(usageBuilder);
 
                             if (format != null) {
                                 contentItem.setFormatted(JSONUtil.parse(contentItem.getText(), format));

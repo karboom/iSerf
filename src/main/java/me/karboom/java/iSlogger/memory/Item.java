@@ -56,6 +56,19 @@ public class Item {
         public Result result;
     }
 
+    @Data
+    @AllArgsConstructor
+    @NoArgsConstructor
+    @Builder
+    static public class Usage {
+        public Integer total;
+
+        public Integer promptTotal;
+
+        public Integer completionTotal;
+        public Integer completionThinking;
+    }
+
     public String id;
 
     public String agentId;
@@ -78,5 +91,5 @@ public class Item {
 
     public Object formatted;
 
-    public Integer usage;
+    public Usage usage;
 }
