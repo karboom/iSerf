@@ -15,6 +15,13 @@ import java.util.function.Function;
 @NoArgsConstructor
 @Builder
 public class Tool {
+    static public class TYPE {
+        public static final String MCP_HTTP = "MCP-HTTP";
+        public static final String MCP_CLI = "MCP-CLI";
+        public static final String FUNCTION = "FUNCTION";
+        public static final String IFUNCTION = "IFUNCTION";
+    }
+
     @Data
     @AllArgsConstructor
     static public class Parameter {
@@ -28,14 +35,13 @@ public class Tool {
     public String description;
     public List<Parameter> parameters;
 
-    // mcp-http  mcp-cli  function  iFunction
     public String type;
 
     // function 特有
     public FunctionWrapper function;
 
     // iFunction 特有
-    public String iFunction;
+    public String iDirectory;
 
     // mcp-http特有
     public String url;
