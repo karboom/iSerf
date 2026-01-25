@@ -1,5 +1,6 @@
 package me.karboom.java.iSlogger.agent;
 
+import cn.hutool.core.util.StrUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.models.chat.completions.ChatCompletionChunk;
 import lombok.SneakyThrows;
@@ -46,6 +47,8 @@ public abstract class Agent {
 
     protected Sinks.Many<Item> sink;
     public Flux<Item> broadcast;
+
+    public Integer maxEvoRetry = 5;
 
 
     /**
@@ -114,6 +117,8 @@ public abstract class Agent {
 
                             sink.tryEmitNext(thinkingSegment);
                         } else if (toolCalls.isPresent()) {
+                            // Todo toolcall返回不及预期的时候，有可能先出问题再出toolCall
+                            // Todo toolcall可能被循环触发
                             if (thinkingItem.getId() != null) {
                                 // thinking阶段结束，更新thinkingItem为非片段并发送
                                 sink.tryEmitNext(thinkingItem);
@@ -212,7 +217,7 @@ public abstract class Agent {
                                 // Todo 判断IFunction
 
                                 for (var toolCall : errorCalls) {
-                                    updateToolLocal(toolCall);
+                                    updateToolWithRetry(toolCall, 1).subscribe();
                                     invokeToolCalls(List.of(toolCall));
                                 }
                             }
@@ -468,72 +473,69 @@ public abstract class Agent {
                 .then(); // 转换为Mono<Void>
     }
 
-    public Mono<Void> updateToolLocal(Item.ToolCall toolCall) {
+    @SneakyThrows
+    private Mono<Void> updateToolWithRetry(Item.ToolCall toolCall, Integer attempt) {
         var matchedTool = tools.stream()
                 .filter(tool -> tool.getName().equals(toolCall.getName()))
                 .findFirst()
                 .orElse(null);
-
         if (matchedTool == null) {
-            return Mono.error(new RuntimeException("Tool not found: %s".formatted(toolCall.getName())));
+            throw (new RuntimeException("Tool not found: %s".formatted(toolCall.getName())));
         }
 
-        var javaFilePath = "%s/current/%s.java".formatted(matchedTool.getIFunction(), matchedTool.getName());
+        var functionPath = getIFunctionPath(matchedTool);
+        var javaFilePath = "%s/%s/%s.java".formatted(functionPath.get(0), functionPath.get(1), functionPath.get(2));
         var javaFile = new File(javaFilePath);
 
         if (!javaFile.exists()) {
             throw new RuntimeException("Java file not found: %s".formatted(javaFilePath));
         }
 
-        var maxAttempts = 5;
-        var attempt = 0;
+        var currentCode = Files.readString(javaFile.toPath(), StandardCharsets.UTF_8);
 
-        return updateToolWithRetry(javaFile, toolCall, matchedTool, attempt, maxAttempts);
-    }
+        var prompt = "请根据以下错误信息更新代码:\n\n输入参数：\n\n%s\n\n错误信息: %s\n\n当前代码:\n%s\n\n 请修改runner里面的逻辑，仅需要告诉我最终的代码，不要带markdown标记"
+                .formatted(toolCall.arguments.toString(), toolCall.getResult().toString(), currentCode);
 
-    private Mono<Void> updateToolWithRetry(File javaFile, Item.ToolCall toolCall, Tool matchedTool, int attempt, int maxAttempts) {
-        if (attempt >= maxAttempts) {
-            return Mono.error(new RuntimeException("Max attempts reached for updating tool: %s".formatted(toolCall.getName())));
-        }
+        var userMessage = Item.builder()
+                .role(Item.ROLE.USER)
+                .text(prompt)
+                .build();
 
-        return Mono.fromCallable(() -> Files.readString(javaFile.toPath(), StandardCharsets.UTF_8))
-                .flatMap(currentCode -> {
-                    var prompt = "请根据以下错误信息更新代码:\n\n输入参数：\n\n%s\n\n错误信息: %s\n\n当前代码:\n%s\n\n 请修改runner里面的逻辑，仅需要告诉我最终的代码，不要带markdown标记"
-                            .formatted(toolCall.arguments.toString(), toolCall.getResult().toString(), currentCode);
-
-                    var userMessage = Item.builder()
-                            .role("user")
-                            .text(prompt)
-                            .build();
-
-                    return llm.send(List.of(userMessage), null, null)
-                            .map(chunk -> {
-                                if (chunk.choices() != null && !chunk.choices().isEmpty()) {
-                                    var delta = chunk.choices().get(0).delta();
-                                    if (delta.content().isPresent()) {
-                                        return delta.content().get();
-                                    }
-                                }
-                                return "";
-                            })
-                            .reduce(new StringBuilder(), StringBuilder::append)
-                            .map(StringBuilder::toString)
-                            .flatMap(updatedCode -> {
-                                // 尝试编译、加载和运行代码
-                                return Mono.fromRunnable(() -> {
-                                            CodeUtil.compile(updatedCode, matchedTool.getIFunction());
-                                            var obj = CodeUtil.load(matchedTool.getIFunction(), toolCall.getName());
-                                            if (obj instanceof FunctionWrapper wrapper) {
-                                                wrapper.run(toolCall.arguments);
-                                            }
-                                        })
-                                        .onErrorResume(throwable -> {
-                                            // 如果编译、加载或运行失败，递归调用重试
-                                            return updateToolWithRetry(javaFile, toolCall, matchedTool, attempt + 1, maxAttempts);
-                                        });
-                            });
+        // Todo 这里直接给format
+        return llm.send(List.of(userMessage), null, null)
+                .reduce("", (acc, chunk) -> {
+                    var text = "";
+                    if (chunk.choices() != null && !chunk.choices().isEmpty()) {
+                        var delta = chunk.choices().get(0).delta();
+                        if (delta.content().isPresent()) {
+                            text = delta.content().get();
+                        }
+                    }
+                    return acc + text;
                 })
-                .then();
+
+                .flatMap(updatedCode -> {
+                    // 尝试编译、加载和运行代码
+                    try {
+                        var timestamp = System.currentTimeMillis();
+                        var targetDir = "%s/%s".formatted(functionPath.get(0), timestamp);
+
+                        CodeUtil.compile(updatedCode, targetDir);
+                        var obj = CodeUtil.load(targetDir, StrUtil.upperFirst(StrUtil.toCamelCase(toolCall.getName())));
+                        if (obj instanceof FunctionWrapper wrapper) {
+                            wrapper.run(toolCall.arguments);
+                        } else {
+                            throw new RuntimeException();
+                        }
+                        return Mono.empty();
+                    } catch (Exception e) {
+                        if (attempt >= this.maxEvoRetry) {
+                            throw (new RuntimeException("Max attempts reached for updating tool: %s".formatted(toolCall.getName())));
+                        }
+                        // 如果编译、加载或运行失败，递归调用重试
+                        return updateToolWithRetry(toolCall, attempt + 1);
+                    }
+                });
     }
 
     /**
@@ -647,8 +649,19 @@ public abstract class Agent {
                         case Tool.TYPE.IFUNCTION:
                             // 调用 iClass 类型工具
                         {
-                            var classPath = "%s/current/".formatted(matchedTool.getIFunction());
-                            var cls = (FunctionWrapper) CodeUtil.load(classPath, matchedTool.getName());
+                            var functionPath = getIFunctionPath(matchedTool);
+
+                            var classPath = "%s/%s/%s".formatted(functionPath.get(0), functionPath.get(1), functionPath.get(2));
+                            var versionDir = "%s/%s".formatted(functionPath.get(0), functionPath.get(1));
+
+                            // 判断 versionDir下面是否有.class文件，否则先编译
+                            if (!new File("%s.class".formatted(classPath)).exists()) {
+                                var javaFile = new File("%s.java".formatted(classPath));
+                                CodeUtil.compile(Files.readString(javaFile.toPath()), versionDir);
+                            }
+
+                            // 加载类
+                            var cls = (FunctionWrapper) CodeUtil.load(versionDir, functionPath.get(2));
                             result = handleToolCallResult(cls.run(call.arguments));
                         }
                         break;
@@ -697,6 +710,39 @@ public abstract class Agent {
         }
 
         return calls;
+    }
+
+    /**
+     * 构建类名路径，不带后缀名，格式为 IDirectory/驼峰toolName/从info.json解析current字段/首字母大写驼峰toolName
+     *
+     * @return  List.of(工具目录, 版本号, 类名)
+     */
+    @SneakyThrows
+    private List<String> getIFunctionPath(Tool tool) {
+        // 获取工具的目录
+        var directory = tool.getIDirectory();
+        // 获取工具名的驼峰形式
+        var camelCaseName = StrUtil.toCamelCase(tool.getName());
+        
+        // 构建 info.json 文件路径
+        var infoFilePath = "%s/%s/info.json".formatted(directory, camelCaseName);
+        var infoFile = new File(infoFilePath);
+
+
+        // 读取 info.json 中的 current 字段值，默认为 "current"
+        var info = JSONUtil.parse("""
+                                    {"current":"fallback"}
+                                    """);
+        if (infoFile.exists()) {
+            info = JSONUtil.parse(Files.readString(infoFile.toPath()));
+        }
+        var currentVersion = info.get("current").asText();
+
+        // 获取首字母大写的驼峰工具名
+        var upperFirstCamelCaseName = StrUtil.upperFirst(camelCaseName);
+        
+        // 构建最终路径
+        return List.of("%s/%s".formatted(directory, camelCaseName), currentVersion, upperFirstCamelCaseName);
     }
 
     /**
