@@ -3,6 +3,7 @@ package me.karboom.java.iSlogger.agent;
 import me.karboom.java.iSlogger.llm.text.OpenAITest;
 import me.karboom.java.iSlogger.memory.Item;
 import me.karboom.java.iSlogger.tool.FunctionWrapper;
+import me.karboom.java.iSlogger.tool.Loader;
 import me.karboom.java.iSlogger.tool.Tool;
 import me.karboom.java.iSlogger.agent.Agent;
 import me.karboom.java.iSlogger.llm.text.OpenAI;
@@ -10,6 +11,7 @@ import me.karboom.java.iSlogger.util.JSONUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.SignalType;
 import reactor.test.StepVerifier;
 import tech.tablesaw.api.StringColumn;
 import tech.tablesaw.api.Table;
@@ -18,6 +20,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.logging.Level;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -63,7 +66,7 @@ class AgentTest {
                 .description("Get the current time")
                 .parameters(List.of())
                 .type(Tool.TYPE.IFUNCTION)
-                .iFunction("/home/karboom/projects/karboom/java/iSlogger/class/time")
+                .iDirectory("/home/karboom/projects/karboom/java/iSlogger/class")
                 .build();
         tools.add(timeTool);
     }
@@ -160,64 +163,76 @@ class AgentTest {
     }
 
     @Test
-    void testUpdateToolLocal() {
-        // 创建 Agent
-        var llm = llmTest.getLlm();
-        var agent = new Agent("test-agent", "", llm, tools) {};
+    void testEvolution() {
+        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+            // 创建 Agent
+            var llm = llmTest.getLlm();
+            
+            var tools = new Loader(2000).fromIFunction("/home/karboom/projects/karboom/java/iSlogger/src/main/java/me/karboom/java/iSlogger/iFunction", null, null);
 
-        var result = Item.ToolCall.Result.builder()
-                .error("时间格式不正确")
-                .build();
+            var prompt = """
+                    CREATE TABLE users (
+                        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '用户ID（主键）',
+                        username VARCHAR(64) NOT NULL UNIQUE COMMENT '用户名（登录用）',
+                        email VARCHAR(128) NOT NULL UNIQUE COMMENT '邮箱',
+                        password_hash CHAR(60) NOT NULL COMMENT '密码哈希（如 bcrypt）',
+                        real_name VARCHAR(64) DEFAULT NULL COMMENT '真实姓名',
+                        phone VARCHAR(20) DEFAULT NULL COMMENT '手机号',
+                        status TINYINT NOT NULL DEFAULT 1 COMMENT '状态：1-正常，0-禁用',
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                    
+                        PRIMARY KEY (id),
+                        INDEX idx_username (username),
+                        INDEX idx_email (email),
+                        INDEX idx_status (status)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表';
+                    
+                    CREATE TABLE operation_logs (
+                        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '日志ID（主键）',
+                        user_id BIGINT UNSIGNED NOT NULL COMMENT '操作用户ID（关联 users.id）',
+                        action VARCHAR(64) NOT NULL COMMENT '操作类型（如 login, create_order, delete_user）',
+                        resource_type VARCHAR(64) NOT NULL COMMENT '资源类型（如 user, order, product）',
+                        resource_id VARCHAR(64) DEFAULT NULL COMMENT '资源ID（如订单号、用户ID，支持非数字ID）',
+                        description TEXT DEFAULT NULL COMMENT '操作描述（如 "删除用户张三"）',
+                        ip_address VARCHAR(45) DEFAULT NULL COMMENT '客户端IP（支持IPv6）',
+                        user_agent TEXT DEFAULT NULL COMMENT 'User-Agent',
+                        result TINYINT NOT NULL DEFAULT 1 COMMENT '结果：1-成功，0-失败',
+                        error_message TEXT DEFAULT NULL COMMENT '错误信息（仅失败时记录）',
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '操作时间',
+                    
+                        PRIMARY KEY (id),
+                        INDEX idx_user_id (user_id),
+                        INDEX idx_action (action),
+                        INDEX idx_resource (resource_type, resource_id),
+                        INDEX idx_created_at (created_at),
+                        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='操作日志表';
+                    """;
 
-        // 测试用例1: 正常情况 - 本地工具存在且更新成功
-        var toolCall = Item.ToolCall.builder()
-                .name("GetTime")
-                .arguments(new HashMap<>())
-                .result(result)
-                .build();
+            var agent = new Agent("test-agent", prompt, llm, tools) {};
 
-        var updateMono = agent.updateToolLocal(toolCall);
-        assertNotNull(updateMono, "updateToolLocal should return a Mono<Void>");
-        assertDoesNotThrow(() -> updateMono.block(), "updateToolLocal should succeed for existing local tool");
+            // 创建一个列表来收集广播的消息
+            var receivedMessages = new ArrayList<Item>();
 
+            // 订阅 broadcast 流
+            agent.broadcast
+                    .log()
+                    .subscribe(
+                    item -> {
+                        receivedMessages.add(item);
+                    }
+            );
+
+            agent.send("我想直到用户最近一周创建订单数量的趋势");
+            agent.send("2");
+            agent.send("3");
+
+            Thread.sleep(1000*20);
+
+            System.out.println(receivedMessages);
+        });
     }
+    
 
-    @Test
-    void testEvolution() throws InterruptedException {
-        // 创建 Agent
-        var llm = llmTest.getLlm();
-        var agent = new Agent("test-agent", "", llm, tools) {};
-
-        // 创建一个列表来收集广播的消息
-        var receivedMessages = new ArrayList<String>();
-
-        // 订阅 broadcast 流
-        var subscription = agent.subscribe(
-                item -> {
-                    System.out.println(JSONUtil.stringify(item));
-                    receivedMessages.add(JSONUtil.stringify(item));
-                }
-//            error -> fail("Broadcast stream should not emit errors: " + error.getMessage()),
-//            () -> receivedMessages.add("COMPLETED")
-        );
-
-        // 使用 send 方法发送消息
-//        agent.send("写一个100字散文，关于宇宙");
-        agent.send("杭州的天气如何，上海的天气如何");
-//        agent.send("现在是什么时间");
-//        agent.send("列举三个哺乳动物", Result.class);
-//        agent.send("写首五言律诗");
-
-        // 等待一段时间让消息被处理
-        Thread.sleep(10000);
-
-        System.out.println(receivedMessages);
-        // 验证是否收到了消息
-        assertEquals(2, receivedMessages.size(), "Should have received 2 messages");
-        assertEquals("Hello, broadcast!", receivedMessages.get(0), "First message should match");
-        assertEquals("Hello, subscriber!", receivedMessages.get(1), "Second message should match");
-
-        // 清理订阅
-        subscription.dispose();
-    }
 }
