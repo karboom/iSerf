@@ -186,7 +186,6 @@ public abstract class Agent {
                 try {
                     var item = queue.take();
 
-                    System.out.println("xxx" + Thread.currentThread().getName() + item);
                     var userMessage = Item.builder()
                             .role(Item.ROLE.USER)
                             .text(item.getText())
@@ -273,7 +272,7 @@ public abstract class Agent {
                     ;
 
                 } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
+                    sink.tryEmitError(e);
                 }
             }
         });
@@ -617,17 +616,15 @@ public abstract class Agent {
         }
 
         // 解析累积的 arguments JSON 字符串为 HashMap
-        var objectMapper = new ObjectMapper();
         for (var entry : argumentsMap.entrySet()) {
             var index = entry.getKey();
             var argsJson = entry.getValue().toString();
             try {
-                @SuppressWarnings("unchecked")
-                var argsMap = objectMapper.readValue(argsJson, HashMap.class);
+                var argsMap = JSONUtil.parse(argsJson, HashMap.class);
                 toolCallsMap.get(index).arguments = argsMap;
             } catch (Exception e) {
                 // 如果解析失败，保持空的 HashMap
-                System.err.println("Failed to parse tool call arguments: " + e.getMessage());
+                sink.tryEmitError(e);
             }
         }
 
@@ -656,25 +653,25 @@ public abstract class Agent {
             var result = Item.ToolCall.Result.builder().build();
 
             if (matchedTool == null) {
-                result.setError("Tool not found: " + call.name);
-            } else {
-                try {
-                    switch (matchedTool.getType()) {
-                        case Tool.TYPE.FUNCTION:
-                            // 调用本地函数
-                            if (matchedTool.getFunction() != null) {
-                                String functionResult = matchedTool.getFunction().run(call.arguments);
-                                // 使用新的处理函数处理directResult
-                                result = handleToolCallResult(functionResult);
+                result.setLlm("Tool not found: " + call.name);
+                continue;
+            }
 
-                            } else {
-                                result.setError("Function not defined for tool: " + call.name);
-                            }
-                            break;
+            try {
+                switch (matchedTool.getType()) {
+                    case Tool.TYPE.FUNCTION:
+                        // 调用本地函数
 
-                        case Tool.TYPE.IFUNCTION:
-                            // 调用 iClass 类型工具
-                        {
+                        String functionResult = matchedTool.getFunction().run(call.arguments);
+                        // 使用新的处理函数处理directResult
+                        result = handleToolCallResult(functionResult);
+
+
+                        break;
+
+                    case Tool.TYPE.IFUNCTION:
+                    {
+                        try {
                             var functionPath = getIFunctionPath(matchedTool);
 
                             var classPath = "%s/%s/%s".formatted(functionPath.get(0), functionPath.get(1), functionPath.get(2));
@@ -689,47 +686,33 @@ public abstract class Agent {
                             // 加载类
                             var cls = (FunctionWrapper) CodeUtil.load(versionDir, functionPath.get(2));
                             result = handleToolCallResult(cls.run(call.arguments));
+                        } catch (Exception e) {
+                            result.setError("Error calling IFunction tool '" + call.name + "': " + e.getMessage());
                         }
-                        break;
-
-                        case Tool.TYPE.MCP_HTTP:
-                            // 调用 HTTP 工具
-                        {
-                            try {
-                                // 这里应该实现 HTTP 工具调用逻辑
-                                // 由于需要与 MCP 服务器交互，实际实现会比较复杂
-                                // 这里提供一个简化的示例实现
-                                result = handleToolCallResult("{\"content\":\"HTTP tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
-
-                            } catch (Exception e) {
-                                result.setError("Error calling HTTP tool '" + matchedTool.getName() + "': " + e.getMessage());
-                            }
-                        }
-                        break;
-
-                        case Tool.TYPE.MCP_CLI:
-                            // 调用 CLI 工具
-                        {
-                            try {
-                                // 这里应该实现 CLI 工具调用逻辑
-                                // 需要构造命令行参数 attend 并执行命令
-                                // 这里提供一个简化的示例实现
-                                result = handleToolCallResult("{\"content\":\"CLI tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
-
-                            } catch (Exception e) {
-                                result.setError("Error calling CLI tool '" + matchedTool.getName() + "': " + e.getMessage());
-                            }
-                        }
-                        break;
-
-
-                        default:
-                            result.setError("Unsupported tool type: " + matchedTool.getType());
-                            break;
                     }
-                } catch (Exception e) {
-                    result.setError("Error calling tool '" + call.name + "': " + e.getMessage());
+                    break;
+
+                    case Tool.TYPE.MCP_HTTP:
+                        // 调用 HTTP 工具
+                    {
+                        result = handleToolCallResult("{\"content\":\"HTTP tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
+
+                    }
+                    break;
+
+                    case Tool.TYPE.MCP_CLI:
+                        // 调用 CLI 工具
+                    {
+
+                            result = handleToolCallResult("{\"content\":\"CLI tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
+
+                    }
+                    break;
+                    default:
+                        throw new RuntimeException("函数类型不存在");
                 }
+            } catch (Exception e) {
+                result.setLlm("工具调用错误" + e.getMessage());
             }
 
             call.result = result;

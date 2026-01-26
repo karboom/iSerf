@@ -234,6 +234,22 @@ class AgentTest {
             System.out.println(receivedMessages);
         });
     }
-    
 
+    /**
+     * 测试错误抛出流程
+     */
+    @Test
+    void testErrorHandle() {
+        // 创建 Agent
+        var llm = llmTest.getLlm();
+        var agent = new Agent("test-agent", "", llm, tools) {};
+
+        agent.send("xxx");
+
+        agent.broadcast
+                .doOnError(e -> {
+                    System.out.println("error: " + e.getMessage());
+                })
+                .subscribe(System.out::println);
+    }
 }
