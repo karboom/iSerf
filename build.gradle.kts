@@ -1,9 +1,10 @@
 plugins {
     id("java")
+    id("com.vanniktech.maven.publish") version "0.36.0"
 }
 
-group = "me.karboom.java"
-version = "1.0-SNAPSHOT"
+group = "io.github.karboom"
+version = "0.5.0"
 
 
 dependencies {
@@ -13,6 +14,19 @@ dependencies {
 
     implementation("com.fasterxml.jackson.core:jackson-databind:2.18.2")
 
+    implementation("com.squareup.okhttp3:okhttp:5.2.1")
+
+    implementation("io.modelcontextprotocol.sdk:mcp:0.14.1")
+    implementation("io.modelcontextprotocol.sdk:mcp-spring-webflux:0.14.1")
+    implementation("io.modelcontextprotocol.sdk:mcp-spring-webmvc:0.14.1")
+
+    implementation("com.corundumstudio.socketio:netty-socketio:2.0.13")
+
+    implementation("cn.hutool:hutool-all:5.8.43")
+
+    implementation("org.apache.commons:commons-math3:3.6.1")
+
+
     compileOnly("org.projectlombok:lombok:1.18.42")
     annotationProcessor("org.projectlombok:lombok:1.18.42")
 //
@@ -20,6 +34,58 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testImplementation("io.projectreactor:reactor-test:3.8.0-RC1")
+    testImplementation("tech.tablesaw:tablesaw-core:0.44.4")
+
+    testImplementation("ch.qos.logback:logback-classic:1.4.14")
+}
+
+
+mavenPublishing {
+//    publishToMavenCentral(SonatypeHost.DEFAULT)
+//    // or when publishing to https://s01.oss.sonatype.org
+//    publishToMavenCentral(SonatypeHost.S01)
+//    // or when publishing to https://central.sonatype.com/
+    publishToMavenCentral(automaticRelease = true)
+
+//    configure(JavaLibrary(
+//        // configures the -javadoc artifact, possible values:
+//        // - `JavadocJar.None()` don't publish this artifact
+//        // - `JavadocJar.Empty()` publish an emprt jar
+//        // - `JavadocJar.Javadoc()` to publish standard javadocs
+//        javadocJar = JavadocJar.Javadoc(),
+//        // whether to publish a sources jar
+//        sourcesJar = true,
+//    ))
+
+    signAllPublications()
+
+    coordinates("io.github.karboom", "iSlogger", version.toString())
+
+    pom {
+        name.set("iSlogger")
+        description.set("iSlogger 是一个基于事件流构建的智能Agent框架，采用响应式编程模型，支持创建高交互性的应用系统。该框架设计用于支持大规模Agent协作，并利用Reactor模式提供高性能的数据处理能力。")
+        inceptionYear.set("2026")
+        url.set("https://github.com/karboom/iSlogger")
+        licenses {
+            license {
+                name.set("MIT License")
+                url.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
+                distribution.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
+            }
+        }
+        developers {
+            developer {
+                id.set("karboom")
+                name.set("karboom")
+                url.set("https://github.com/karboom/")
+            }
+        }
+        scm {
+            url.set("https://github.com/karboom/iSlogger")
+            connection.set("scm:git:git://github.com/karboom/iSlogger.git")
+            developerConnection.set("scm:git:ssh://git@github.com/karboom/iSlogger.git")
+        }
+    }
 }
 
 tasks.test {
