@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.models.chat.completions.ChatCompletionChunk;
 import lombok.SneakyThrows;
 import me.karboom.java.iSlogger.llm.text.BaseLLM;
+import me.karboom.java.iSlogger.agent.Event;
 import me.karboom.java.iSlogger.memory.Item;
 import me.karboom.java.iSlogger.memory.LocalMemory;
 import me.karboom.java.iSlogger.memory.Memory;
@@ -45,7 +46,7 @@ public abstract class Agent {
     protected List<Tool> tools;
     protected BaseLLM llm;
     public String prompt;
-    protected PriorityBlockingQueue<Item> queue;
+    protected PriorityBlockingQueue<Event> queue;
     public Flux<Item> itemBroadcast;
 
     protected Sinks.Many<Item> sink;
@@ -68,7 +69,7 @@ public abstract class Agent {
         this.prompt = prompt;
         this.llm = llm;
         this.tools = tools != null ? tools : new ArrayList<>();
-        this.queue = new PriorityBlockingQueue<>(100, Comparator.comparing(Item::getId));
+        this.queue = new PriorityBlockingQueue<>(100, Comparator.comparing(Event::getPriority));
 
         this.memory.add(Item.builder().id(id).role(Item.ROLE.SYSTEM).text(this.prompt).build());
 
@@ -184,17 +185,17 @@ public abstract class Agent {
         Schedulers.fromExecutor(eventPool).schedule(() -> {
             while (true) {
                 try {
-                    var item = queue.take();
+                    var event = queue.take();
 
                     var userMessage = Item.builder()
                             .role(Item.ROLE.USER)
-                            .text(item.getText())
+                            .text(event.getItem().getText())
                             .build();
 
                     // 添加到记忆中
                     memory.add(userMessage);
 
-                    var format = item.getFormatted() == null ? null : item.getFormatted().getClass();
+                    var format = event.getItem().getFormatted() == null ? null : event.getItem().getFormatted().getClass();
 
                     var flux = llm.send(memory.get(), format, tools);
 
@@ -396,7 +397,10 @@ public abstract class Agent {
             item.setFormatted(cls.getConstructors()[0].newInstance());
         }
 
-        queue.offer(item);
+        queue.offer(Event.builder()
+                .type(Event.Type.MESSAGE)
+                .item(item)
+                .build());
     }
 
     public void send(String message) {
