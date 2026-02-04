@@ -187,91 +187,15 @@ public abstract class Agent {
                 try {
                     var event = queue.take();
 
-                    var userMessage = Item.builder()
-                            .role(Item.ROLE.USER)
-                            .text(event.getItem().getText())
-                            .build();
+                    switch (event.getType()) {
+                        case Event.Type.MESSAGE -> {
+                            handleMessage(event);
+                        }
 
-                    // 添加到记忆中
-                    memory.add(userMessage);
-
-                    var format = event.getItem().getFormatted() == null ? null : event.getItem().getFormatted().getClass();
-
-                    var flux = llm.send(memory.get(), format, tools);
-
-                    fluxHandle(flux, format)
-                            .flatMapMany(holder -> {
-                                var toolCallHolder = holder.getT2();
-
-                                if (!toolCallHolder.isEmpty()) {
-                                    var calls = mergeToolCalls(toolCallHolder);
-
-                                    // 通过cli调用MCP函数
-                                    var callResult = invokeToolCalls(calls);
-
-                                    // 按结果类型分组处理
-                                    var directCalls = new ArrayList<Item.ToolCall>();
-                                    var errorCalls = new ArrayList<Item.ToolCall>();
-                                    var llmCalls = new ArrayList<Item.ToolCall>();
-
-                                    for (var call : callResult) {
-                                        if (call.result.getDirect() != null) {
-                                            directCalls.add(call);
-                                        } else if (call.result.getError() != null) {
-                                            errorCalls.add(call);
-                                        } else if (call.result.getLlm() != null) {
-                                            llmCalls.add(call);
-                                        }
-                                    }
-
-
-                                    // 处理DIRECT类型
-                                    if (!directCalls.isEmpty()) {
-                                        for (Item.ToolCall call : directCalls) {
-                                            sink.tryEmitNext(Item.builder().text(JSONUtil.stringify(call.getResult().getDirect())).isSegment(0).build());
-                                        }
-                                    }
-
-                                    // 处理ERROR类型
-                                    if (!errorCalls.isEmpty()) {
-                                        sink.tryEmitNext(Item.builder().text("我正在更新代码，请您稍后").build());
-                                        // Todo 判断IFunction
-
-                                        for (var toolCall : errorCalls) {
-                                            updateToolWithRetry(toolCall, 1).subscribe();
-                                            invokeToolCalls(List.of(toolCall));
-                                        }
-                                    }
-
-                                    // 处理LLM类型
-                                    if (!llmCalls.isEmpty()) {
-                                        var messageInvoke = Item.builder()
-                                                .role(Item.ROLE.ASSISTANT)
-                                                .toolCalls(llmCalls)
-                                                .build();
-
-                                        var messageRes = Item.builder()
-                                                .role(Item.ROLE.TOOL)
-                                                .toolCalls(llmCalls)
-                                                .build();
-
-                                        memory.add(messageInvoke);
-                                        memory.add(messageRes);
-
-                                        // Todo 这里的tools参数是否可以去掉，节省token
-                                        var newFlux = llm.send(memory.get(), null, tools);
-
-                                        return fluxHandle(newFlux, format).thenMany(Flux.empty());
-                                    } else {
-                                        return Flux.empty();
-                                    }
-                                } else {
-                                    return Flux.empty();
-                                }
-                            })
-                            .blockLast()
-                    ;
-
+                        case Event.Type.ORGANIZE_MEMORY -> {
+                            handleOrganizeMemory(event);
+                        }
+                    }
                 } catch (InterruptedException e) {
                     sink.tryEmitError(e);
                 }
@@ -383,6 +307,96 @@ public abstract class Agent {
 //                        return f;
 //                    })
 //                    .block();
+    }
+
+
+    private void handleOrganizeMemory (Event event) {}
+
+    private void handleMessage(Event event) {
+        var userMessage = Item.builder()
+                .role(Item.ROLE.USER)
+                .text(event.getItem().getText())
+                .build();
+
+        // 添加到记忆中
+        memory.add(userMessage);
+
+        var format = event.getItem().getFormatted() == null ? null : event.getItem().getFormatted().getClass();
+
+        var flux = llm.send(memory.get(), format, tools);
+
+        fluxHandle(flux, format)
+                .flatMapMany(holder -> {
+                    var toolCallHolder = holder.getT2();
+
+                    if (!toolCallHolder.isEmpty()) {
+                        var calls = mergeToolCalls(toolCallHolder);
+
+                        // 通过cli调用MCP函数
+                        var callResult = invokeToolCalls(calls);
+
+                        // 按结果类型分组处理
+                        var directCalls = new ArrayList<Item.ToolCall>();
+                        var errorCalls = new ArrayList<Item.ToolCall>();
+                        var llmCalls = new ArrayList<Item.ToolCall>();
+
+                        for (var call : callResult) {
+                            if (call.result.getDirect() != null) {
+                                directCalls.add(call);
+                            } else if (call.result.getError() != null) {
+                                errorCalls.add(call);
+                            } else if (call.result.getLlm() != null) {
+                                llmCalls.add(call);
+                            }
+                        }
+
+
+                        // 处理DIRECT类型
+                        if (!directCalls.isEmpty()) {
+                            for (Item.ToolCall call : directCalls) {
+                                sink.tryEmitNext(Item.builder().text(JSONUtil.stringify(call.getResult().getDirect())).isSegment(0).build());
+                            }
+                        }
+
+                        // 处理ERROR类型
+                        if (!errorCalls.isEmpty()) {
+                            sink.tryEmitNext(Item.builder().text("我正在更新代码，请您稍后").build());
+                            // Todo 判断IFunction
+
+                            for (var toolCall : errorCalls) {
+                                updateToolWithRetry(toolCall, 1).subscribe();
+                                invokeToolCalls(List.of(toolCall));
+                            }
+                        }
+
+                        // 处理LLM类型
+                        if (!llmCalls.isEmpty()) {
+                            var messageInvoke = Item.builder()
+                                    .role(Item.ROLE.ASSISTANT)
+                                    .toolCalls(llmCalls)
+                                    .build();
+
+                            var messageRes = Item.builder()
+                                    .role(Item.ROLE.TOOL)
+                                    .toolCalls(llmCalls)
+                                    .build();
+
+                            memory.add(messageInvoke);
+                            memory.add(messageRes);
+
+                            // Todo 这里的tools参数是否可以去掉，节省token
+                            var newFlux = llm.send(memory.get(), null, tools);
+
+                            return fluxHandle(newFlux, format).thenMany(Flux.empty());
+                        } else {
+                            return Flux.empty();
+                        }
+                    } else {
+                        return Flux.empty();
+                    }
+                })
+                .blockLast()
+        ;
     }
 
     @SneakyThrows
