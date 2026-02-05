@@ -74,16 +74,38 @@ public class Item {
     public String agentId;
     public String userId;
 
+    public String role;
     public String type;
 
     public String text;
-    public String image;
+
+    /**
+     * 图片列表，支持 文件、base64、http连接
+     */
+    public List<String> images;
+
+    /**
+     * 视频地址
+     */
+    public String video;
+    /**
+     * 音频地址
+     */
+    public String audio;
+    /**
+     * 视频帧率
+     */
+    public String fps;
+
     public List<ToolCall> toolCalls;
+
+    /**
+     * 多个消息混合
+     */
     public List<Item> mixed;
 
     public ObjectNode custom;
 
-    public String role;
 
 
     public Integer isSegment;

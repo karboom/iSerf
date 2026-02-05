@@ -23,5 +23,5 @@ public abstract class BaseLLM {
         this.maxRetries = maxRetries;
     }
 
-    abstract public Flux<ChatCompletionChunk> send(List<Item> messages, Class<?> outputFormat, List<Tool> tools);
+    abstract public Flux<Output> send(List<Item> messages, Class<?> outputFormat, List<Tool> tools);
 }

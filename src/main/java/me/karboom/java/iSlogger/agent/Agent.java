@@ -6,6 +6,7 @@ import com.openai.models.chat.completions.ChatCompletionChunk;
 import lombok.SneakyThrows;
 import me.karboom.java.iSlogger.llm.text.BaseLLM;
 import me.karboom.java.iSlogger.agent.Event;
+import me.karboom.java.iSlogger.llm.text.Output;
 import me.karboom.java.iSlogger.memory.Item;
 import me.karboom.java.iSlogger.memory.LocalMemory;
 import me.karboom.java.iSlogger.memory.Memory;
@@ -71,7 +72,7 @@ public abstract class Agent {
         this.tools = tools != null ? tools : new ArrayList<>();
         this.queue = new PriorityBlockingQueue<>(100, Comparator.comparing(Event::getPriority));
 
-        this.memory.add(Item.builder().id(id).role(Item.ROLE.SYSTEM).text(this.prompt).build());
+        this.memory.add(Item.builder().id(id).role(Item.ROLE.SYSTEM).text(this.prompt).type(Item.TYPE.TEXT).build());
 
         this.sink = Sinks.many().multicast().onBackpressureBuffer();
         this.broadcast = sink.asFlux();
@@ -89,7 +90,7 @@ public abstract class Agent {
         return broadcast.subscribe(consumer);
     }
 
-    private Mono<Tuple3<Item, List<ChatCompletionChunk>, Item>> fluxHandle(Flux<ChatCompletionChunk> flux, Class format) {
+    private Mono<Tuple3<Item, List<Output>, Item>> fluxHandle(Flux<Output> flux, Class format) {
         return flux
                 .publishOn(Schedulers.fromExecutor(this.eventPool))
                 .reduce(Tuples.of(
@@ -101,15 +102,15 @@ public abstract class Agent {
                     var toolCall = acc.getT2();
                     var contentItem = acc.getT3();
 
-                    var usage = chunk.usage();
-                    var choices = chunk.choices();
+                    var usage = chunk.getUsage();
+                    var choices = chunk.getChoices();
 
-                    if (!choices.isEmpty()) {
-                        var delta = choices.get(0).delta();
+                    if (choices != null) {
+                        var delta = choices.get(0);
 
-                        var toolCalls = delta.toolCalls();
-                        var thinking = delta._additionalProperties().get("reasoning_content");
-                        var content = delta.content();
+                        var toolCalls = delta.getToolCall();
+                        var thinking = delta.getThinking();
+                        var content = delta.getText();
 
                         if (thinking != null && !thinking.toString().equals("null")) {
                             thinkingItem.setId(UUID.randomUUID().toString()); // 为thinkingItem设置ID
@@ -118,7 +119,7 @@ public abstract class Agent {
                             var thinkingSegment = Item.builder().text(thinking.toString()).isSegment(1).build();
 
                             sink.tryEmitNext(thinkingSegment);
-                        } else if (toolCalls.isPresent()) {
+                        } else if (toolCalls != null) {
                             // Todo toolcall返回不及预期的时候，有可能先出问题再出toolCall
                             // Todo toolcall可能被循环触发
                             if (thinkingItem.getId() != null) {
@@ -127,14 +128,14 @@ public abstract class Agent {
                             }
                             // 将当前chunk添加到toolCall列表中用于后续处理
                             toolCall.add(chunk);
-                        } else if (content.isPresent()) {
+                        } else if (content != null) {
 
                             if (thinkingItem.getId() != null) {
                                 // thinking阶段结束，更新thinkingItem为非片段并发送
                                 sink.tryEmitNext(thinkingItem);
                             }
 
-                            var contentText = content.get();
+                            var contentText = content;
 
                             contentItem.setId(UUID.randomUUID().toString());
                             contentItem.setText(contentItem.getText() + contentText);
@@ -149,22 +150,15 @@ public abstract class Agent {
                             // 目前暂不处理
                         }
 
-                    } else if (usage.isPresent()) {
+                    } else if (usage != null) {
                         if (contentItem.getId() != null) {
-                            var usageData = usage.get();
-                            var completionDetails = usageData.completionTokensDetails();
                             var usageBuilder = Item.Usage.builder()
-                                    .total((int) usageData.totalTokens())
-                                    .promptTotal((int) usageData.promptTokens())
-                                    .completionTotal((int) usageData.completionTokens())
+                                    .total((int) usage.getTotalTokens())
+                                    .promptTotal((int) usage.getPromptTokens())
+                                    .completionTotal((int) usage.getCompletionTokens())
+                                    .completionThinking(usage.getThinkingTokens())
                                     .build();
 
-                            completionDetails.ifPresent(completionTokensDetails -> {
-                                completionTokensDetails.reasoningTokens().ifPresent(obj -> {
-                                    usageBuilder.setCompletionThinking(Integer.valueOf(obj.toString()));
-                                });
-                            });
-                            
                             contentItem.setUsage(usageBuilder);
 
                             if (format != null) {
@@ -313,10 +307,7 @@ public abstract class Agent {
     private void handleOrganizeMemory (Event event) {}
 
     private void handleMessage(Event event) {
-        var userMessage = Item.builder()
-                .role(Item.ROLE.USER)
-                .text(event.getItem().getText())
-                .build();
+        var userMessage = event.getItem();
 
         // 添加到记忆中
         memory.add(userMessage);
@@ -333,7 +324,7 @@ public abstract class Agent {
                         var calls = mergeToolCalls(toolCallHolder);
 
                         // 通过cli调用MCP函数
-                        var callResult = invokeToolCalls(calls);
+                        var callResult = invokeToolCalls(calls.getFirst());
 
                         // 按结果类型分组处理
                         var directCalls = new ArrayList<Item.ToolCall>();
@@ -373,11 +364,13 @@ public abstract class Agent {
                         if (!llmCalls.isEmpty()) {
                             var messageInvoke = Item.builder()
                                     .role(Item.ROLE.ASSISTANT)
+                                    .type(Item.TYPE.TEXT)
                                     .toolCalls(llmCalls)
                                     .build();
 
                             var messageRes = Item.builder()
                                     .role(Item.ROLE.TOOL)
+
                                     .toolCalls(llmCalls)
                                     .build();
 
@@ -403,6 +396,7 @@ public abstract class Agent {
     public void send(String message, Class<?> cls) {
         var item = Item
                 .builder()
+                .type(Item.TYPE.TEXT)
                 .role(Item.ROLE.USER)
                 .id("")
                 .text(message).build();
@@ -472,10 +466,10 @@ public abstract class Agent {
                         // 调用LLM生成更新后的代码
                         return llm.send(messages, null, null)
                                 .map(chunk -> {
-                                    if (chunk.choices() != null && !chunk.choices().isEmpty()) {
-                                        var delta = chunk.choices().get(0).delta();
-                                        if (delta.content().isPresent()) {
-                                            return delta.content().get();
+                                    if (chunk.getChoices() != null && !chunk.getChoices().isEmpty()) {
+                                        var delta = chunk.getChoices().get(0).getText();
+                                        if (delta != null) {
+                                            return delta;
                                         }
                                     }
                                     return "";
@@ -548,10 +542,10 @@ public abstract class Agent {
         return llm.send(List.of(userMessage), null, null)
                 .reduce("", (acc, chunk) -> {
                     var text = "";
-                    if (chunk.choices() != null && !chunk.choices().isEmpty()) {
-                        var delta = chunk.choices().get(0).delta();
-                        if (delta.content().isPresent()) {
-                            text = delta.content().get();
+                    if (chunk.getChoices() != null && !chunk.getChoices().isEmpty()) {
+                        var delta = chunk.getChoices().get(0).getText();
+                        if (delta != null) {
+                            text = delta;
                         }
                     }
                     return acc + text;
@@ -582,71 +576,72 @@ public abstract class Agent {
     }
 
     /**
-     * 合并函数调用chunk
+     * 合并函数调用片段
+     *
+     * 1.根据首个chunk确定choice总数
+     * 2.每个choice最终积累一个完整的Output.ToolCall
+     * 3.将Output.Toolcall body属性解析json，转为Item.ToolCall
      *
      * @param chunks 流式响应块列表
-     * @return 合并后的工具调用列表
+     * @return 合并后的工具调用列表，每个choice对应一组ToolCall
      */
-    private List<Item.ToolCall> mergeToolCalls(List<ChatCompletionChunk> chunks) {
-        // 使用 Map 存储每个 index 对应的 ToolCall
-        var toolCallsMap = new HashMap<Integer, Item.ToolCall>();
-        // 使用 StringBuilder 累积 arguments JSON 字符串
-        var argumentsMap = new HashMap<Integer, StringBuilder>();
+    private List<List<Item.ToolCall>> mergeToolCalls(List<Output> chunks) {
+        if (chunks.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        var result = new ArrayList<List<Item.ToolCall>>();
+
+        var mergedToolCalls = new HashMap<Integer, Output.ToolCall>();
 
         for (var chunk : chunks) {
-            if (chunk.choices() != null && !chunk.choices().isEmpty()) {
-                var delta = chunk.choices().get(0).delta();
-                if (delta.toolCalls().isPresent()) {
-                    for (var toolCall : delta.toolCalls().get()) {
-                        int index = (int) toolCall.index();
+            var choices = chunk.getChoices();
+            if (choices == null || choices.isEmpty()) {
+                continue;
+            }
 
-                        // 初始化 ToolCall 对象（如果不存在）
-                        if (!toolCallsMap.containsKey(index)) {
-                            toolCallsMap.put(index, Item.ToolCall.builder()
-                                    .arguments(new HashMap<>())
-                                    .build());
-                        }
+            var toolCalls = choices.get(0).getToolCall();
+            if (toolCalls == null) {
+                continue;
+            }
 
-                        var currentToolCall = toolCallsMap.get(index);
-
-                        // 设置 id
-                        if (toolCall.id().isPresent() && !toolCall.id().get().isEmpty()) {
-                            currentToolCall.id = toolCall.id().get();
-                        }
-
-                        // 设置 function 信息
-                        if (toolCall.function().isPresent()) {
-                            var function = toolCall.function().get();
-                            if (function.name().isPresent()) {
-                                currentToolCall.name = function.name().get();
-                            }
-                            if (function.arguments().isPresent()) {
-                                // 累积 arguments 字符串
-                                if (!argumentsMap.containsKey(index)) {
-                                    argumentsMap.put(index, new StringBuilder());
-                                }
-                                argumentsMap.get(index).append(function.arguments().get());
-                            }
-                        }
-                    }
+            for (var toolCall : toolCalls) {
+                var index = toolCall.getIndex();
+                if (index == null) {
+                    continue;
                 }
+
+                mergedToolCalls.merge(index, toolCall, (existing, newCall) -> {
+                    if (newCall.getId() != null && newCall.getId() != "") {
+                        existing.setId(newCall.getId());
+                    }
+                    if (newCall.getName() != null) {
+                        existing.setName(newCall.getName());
+                    }
+                    if (newCall.getArguments() != null) {
+                        var existingArgs = existing.getArguments() == null ? "" : existing.getArguments();
+                        existing.setArguments(existingArgs + newCall.getArguments());
+                    }
+                    return existing;
+                });
             }
         }
 
-        // 解析累积的 arguments JSON 字符串为 HashMap
-        for (var entry : argumentsMap.entrySet()) {
-            var index = entry.getKey();
-            var argsJson = entry.getValue().toString();
-            try {
-                var argsMap = JSONUtil.parse(argsJson, HashMap.class);
-                toolCallsMap.get(index).arguments = argsMap;
-            } catch (Exception e) {
-                // 如果解析失败，保持空的 HashMap
-                sink.tryEmitError(e);
-            }
+        for (var entry : mergedToolCalls.entrySet()) {
+            var toolCallsForChoice = new ArrayList<Item.ToolCall>();
+            var outputToolCall = entry.getValue();
+
+            var itemToolCall = Item.ToolCall.builder()
+                    .id(outputToolCall.getId())
+                    .name(outputToolCall.getName())
+                    .arguments(JSONUtil.parse(outputToolCall.getArguments(), HashMap.class))
+                    .build();
+
+            toolCallsForChoice.add(itemToolCall);
+            result.add(toolCallsForChoice);
         }
 
-        return new ArrayList<>(toolCallsMap.values());
+        return result;
     }
 
     /**

@@ -12,15 +12,19 @@ dependencies {
 
     implementation("io.projectreactor:reactor-core:3.8.0-RC1")
 
-    implementation("com.fasterxml.jackson.core:jackson-databind:2.18.2")
+    implementation("tools.jackson.core:jackson-databind:3.0.4")
 
-    implementation("com.squareup.okhttp3:okhttp:5.2.1")
+    implementation("com.squareup.okhttp3:okhttp:5.3.2")
+    implementation("com.squareup.okhttp3:okhttp-sse:5.3.2")
+
+    implementation("com.github.victools:jsonschema-generator:4.38.0")
 
     implementation("io.modelcontextprotocol.sdk:mcp:0.14.1")
     implementation("io.modelcontextprotocol.sdk:mcp-spring-webflux:0.14.1")
     implementation("io.modelcontextprotocol.sdk:mcp-spring-webmvc:0.14.1")
 
     implementation("com.corundumstudio.socketio:netty-socketio:2.0.13")
+    implementation("io.socket:socket.io-client:2.1.1")
 
     implementation("cn.hutool:hutool-all:5.8.43")
 

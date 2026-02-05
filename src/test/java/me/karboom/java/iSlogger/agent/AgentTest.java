@@ -72,6 +72,58 @@ class AgentTest {
     }
 
     @Test
+    public void testToolCall() {
+        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+            // 创建 Agent
+            var llm = llmTest.getLlm();
+//            llm.llmConfig.put("thinking", true);
+
+            // 定义输入列表
+            var inputs = List.of(
+                    "杭州的天气如何"
+//                    "杭州的天气如何，上海的天气如何"
+//                    "写首五言律诗，中文的",
+//                    "你好"
+            );
+
+            // 创建表格
+            var inputColumn = StringColumn.create("input", inputs);
+            var outputColumn = StringColumn.create("output", new String[inputs.size()]);
+            var table = Table.create("agent_broadcast_test", inputColumn, outputColumn);
+
+            // 完成计数器
+            var completedCount = new AtomicInteger(0);
+
+            // 对于每个输入，发送消息并订阅响应
+            inputs.forEach(input -> {
+                var i = inputs.indexOf(input);
+
+                var agent = new Agent("test-agent-" + i, "", llm, tools) {};
+
+                // 订阅 broadcast
+                agent.subscribe(item -> {
+                    System.out.println("Index " + i + " received: " + item);
+                    if (item.getIsSegment() == 0) {
+                        outputColumn.set(i, item.getText());
+                        completedCount.incrementAndGet();
+                    }
+                });
+
+                // 发送消息
+                agent.send(input);
+            });
+
+            // 等待所有输出完成
+            while (completedCount.get() < inputs.size()) {
+                Thread.sleep(100);
+            }
+
+            // 输出表格
+            System.out.println(table.print());
+        });
+    }
+
+    @Test
     public void testAgentBroadcast() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
             // 创建 Agent
