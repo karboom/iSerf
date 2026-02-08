@@ -4,6 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.models.chat.completions.ChatCompletionChunk;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSlogger.llm.text.BaseLLM;
 import me.karboom.java.iSlogger.agent.Event;
 import me.karboom.java.iSlogger.llm.text.Output;
@@ -41,6 +42,7 @@ import java.util.function.Consumer;
  * Todo 增加一个retry方法？方便直接重试上一条
  * Todo 文件读取改异步
  */
+@Slf4j
 public abstract class Agent {
     public String id;
     protected Memory memory = new LocalMemory();
@@ -57,6 +59,8 @@ public abstract class Agent {
 
     private ExecutorService eventPool;
     private ExecutorService broadcastPool;
+
+    public Persistence persistence;
 
     /**
      * 构造函数
@@ -80,8 +84,10 @@ public abstract class Agent {
         this.eventPool = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Event-", 0).factory());
         this.broadcastPool =  Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Broadcast-", 0).factory());
 
+        this.persistence = new NonePersistence();
 
         run();
+        this.recovery();
     }
 
 
@@ -188,6 +194,10 @@ public abstract class Agent {
 
                         case Event.Type.ORGANIZE_MEMORY -> {
                             handleOrganizeMemory(event);
+                        }
+
+                        case Event.Type.RECOVERY -> {
+                            handleRecovery(event);
                         }
                     }
                 } catch (InterruptedException e) {
@@ -303,6 +313,9 @@ public abstract class Agent {
 //                    .block();
     }
 
+    public void recovery () {
+        queue.offer(Event.builder().type(Event.Type.RECOVERY).build());
+    }
 
     private void handleOrganizeMemory (Event event) {}
 
@@ -390,6 +403,16 @@ public abstract class Agent {
                 })
                 .blockLast()
         ;
+    }
+
+    private void handleRecovery(Event event) {
+        Mono.zip(
+            persistence.load(this.id, Event.class),
+            persistence.load(this.id, Item.class)
+        )
+                .map(res -> {
+                    return res;
+                }).block();
     }
 
     @SneakyThrows

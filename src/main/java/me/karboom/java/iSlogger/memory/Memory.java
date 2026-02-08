@@ -1,10 +1,15 @@
 package me.karboom.java.iSlogger.memory;
 
+import lombok.Data;
+
 import java.util.ArrayList;
 import java.util.List;
 
+@Data
 abstract public class Memory {
-    List<Item> items =  new ArrayList<>();
+    protected List<Item> items =  new ArrayList<>();
+
+
 
     public Memory() {
     }

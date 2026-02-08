@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "io.github.karboom"
-version = "0.5.0"
+version = "0.6.0-alpha"
 
 
 dependencies {
@@ -25,6 +25,10 @@ dependencies {
 
     implementation("com.corundumstudio.socketio:netty-socketio:2.0.13")
     implementation("io.socket:socket.io-client:2.1.1")
+
+    implementation("com.cronutils:cron-utils:9.2.1")
+
+    implementation("io.lettuce:lettuce-core:7.4.0.RELEASE")
 
     implementation("cn.hutool:hutool-all:5.8.43")
 
@@ -72,7 +76,7 @@ mavenPublishing {
         url.set("https://github.com/karboom/iSlogger")
         licenses {
             license {
-                name.set("MIT License")
+                name.set("The Apache License, Version 2.0")
                 url.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
                 distribution.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
             }
