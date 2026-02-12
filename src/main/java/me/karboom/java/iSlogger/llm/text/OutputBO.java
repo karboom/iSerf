@@ -11,7 +11,7 @@ import java.util.List;
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-public class Output {
+public class OutputBO {
     @Data
     @Builder
     @AllArgsConstructor
@@ -73,4 +73,6 @@ public class Output {
      * 是否为增量内容
      */
     public Boolean isDelta;
+
+    public String error;
 }

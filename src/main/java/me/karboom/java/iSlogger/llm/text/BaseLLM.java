@@ -1,6 +1,5 @@
 package me.karboom.java.iSlogger.llm.text;
 
-import com.openai.models.chat.completions.ChatCompletionChunk;
 import me.karboom.java.iSlogger.tool.Tool;
 import me.karboom.java.iSlogger.memory.Item;
 import reactor.core.publisher.Flux;
@@ -23,5 +22,15 @@ public abstract class BaseLLM {
         this.maxRetries = maxRetries;
     }
 
-    abstract public Flux<Output> send(List<Item> messages, Class<?> outputFormat, List<Tool> tools);
+    abstract public Flux<OutputBO> send(List<Item> messages, Class<?> outputFormat, List<Tool> tools);
+
+    /**
+     * 批量调用接口
+     * @return 批量任务ID
+     */
+    abstract public String batch(List<List<Item>> messageBatch, Class<?> outputFormat);
+
+    abstract public TaskStatusBO taskStatus(String taskId);
+
+    abstract public List<OutputBO> taskResult(TaskStatusBO task);
 }

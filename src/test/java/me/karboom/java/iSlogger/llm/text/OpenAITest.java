@@ -139,7 +139,7 @@ public class OpenAITest {
             var toolCalls = new ArrayList<String>();
             var finished = new AtomicBoolean(false);
 
-            var holder = new ArrayList<Output>();
+            var holder = new ArrayList<OutputBO>();
             response.subscribe(
                     chunk -> {
                         holder.add(chunk);
@@ -326,6 +326,142 @@ public class OpenAITest {
             while (!finished.get()) {
                 Thread.sleep(100);
             }
+        });
+    }
+
+    private List<List<Item>> createWeatherMessageBatch() {
+        var messageBatch = new ArrayList<List<Item>>();
+        
+        // 第一个批次：询问天气
+        var messages1 = new ArrayList<Item>();
+        messages1.add(Item.builder()
+                .role(Item.ROLE.SYSTEM)
+                .type(Item.TYPE.TEXT)
+                .text("你是一个乐于助人的助手。")
+                .build());
+        messages1.add(Item.builder()
+                .role(Item.ROLE.USER)
+                .type(Item.TYPE.TEXT)
+                .text("巴黎的天气怎么样？给出一个随机温度。")
+                .build());
+        messageBatch.add(messages1);
+        
+        // 第二个批次：询问天气
+        var messages2 = new ArrayList<Item>();
+        messages2.add(Item.builder()
+                .role(Item.ROLE.SYSTEM)
+                .type(Item.TYPE.TEXT)
+                .text("你是一个乐于助人的助手。")
+                .build());
+        messages2.add(Item.builder()
+                .role(Item.ROLE.USER)
+                .type(Item.TYPE.TEXT)
+                .text("北京的天气怎么样？给出一个随机温度。")
+                .build());
+        messageBatch.add(messages2);
+        
+        return messageBatch;
+    }
+
+    @Test
+    void testBatch() {
+        assertTimeoutPreemptively(Duration.ofSeconds(60), () -> {
+            // 创建多个消息批次
+            var messageBatch = createWeatherMessageBatch();
+            
+            // 调用 batch 方法，使用 WeatherResponse 输出格式
+            var batchId = getLlm("batch-test-model").batch(messageBatch, WeatherResponse.class);
+            
+            // 验证响应不为空
+            assertNotNull(batchId);
+            assertFalse(batchId.isEmpty());
+            
+            // 打印响应以便调试
+            System.out.println("Batch ID: " + batchId);
+        });
+    }
+
+    @Test
+    void testTaskStatus() {
+        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+            // 创建多个消息批次
+            var messageBatch = createWeatherMessageBatch();
+            var batchId = getLlm("batch-test-model").batch(messageBatch, WeatherResponse.class);
+            
+            // 查询任务状态
+            var taskStatus = getLlm("batch-test-model").taskStatus(batchId);
+            
+            // 验证任务状态不为空
+            assertNotNull(taskStatus);
+            assertNotNull(taskStatus.getId());
+            assertNotNull(taskStatus.getStatus());
+            
+            // 验证状态是有效的
+            assertTrue(
+                TaskStatusBO.STATUS.DOING.equals(taskStatus.getStatus()) ||
+                TaskStatusBO.STATUS.DONE.equals(taskStatus.getStatus()) ||
+                TaskStatusBO.STATUS.ERROR.equals(taskStatus.getStatus()) ||
+                TaskStatusBO.STATUS.EXPIRED.equals(taskStatus.getStatus()) ||
+                TaskStatusBO.STATUS.CANCELLED.equals(taskStatus.getStatus())
+            );
+            
+            // 打印任务状态以便调试
+            System.out.println("Task status: " + taskStatus);
+        });
+    }
+
+    @Test
+    void testTaskResult() {
+        assertTimeoutPreemptively(Duration.ofSeconds(90), () -> {
+            // 创建多个消息批次
+            var messageBatch = createWeatherMessageBatch();
+            var batchId = getLlm("batch-test-model").batch(messageBatch, WeatherResponse.class);
+
+
+            // 等待任务完成（批处理可能需要一些时间）
+            TaskStatusBO taskStatus;
+            int maxRetries = 12; // 最多等待60秒 (12 * 5秒)
+            int retryCount = 0;
+            
+            do {
+                taskStatus = getLlm("batch-test-model").taskStatus(batchId);
+                if (TaskStatusBO.STATUS.DONE.equals(taskStatus.getStatus())) {
+                    break;
+                }
+
+                Thread.sleep(5000); // 等待5秒后重试
+                retryCount++;
+            } while (retryCount < maxRetries);
+            
+            if (retryCount >= maxRetries) {
+                throw new RuntimeException("Batch task did not complete within timeout period");
+            }
+            
+            // 验证任务状态
+            assertNotNull(taskStatus);
+            assertNotNull(taskStatus.getSuccessResultId());
+            
+            // 获取任务结果
+            var results = getLlm("batch-test-model").taskResult(taskStatus);
+            
+            // 验证结果不为空
+            assertNotNull(results);
+            assertFalse(results.isEmpty());
+            assertEquals(2, results.size()); // 应该有两个结果，对应两个请求
+            
+            // 验证结果内容
+            for (var result : results) {
+                assertNotNull(result);
+                if (result.getChoices() != null && !result.getChoices().isEmpty()) {
+                    var choice = result.getChoices().getFirst();
+                    if (choice.getText() != null) {
+                        assertTrue(choice.getText().length() > 0);
+                    }
+                }
+            }
+            
+            // 打印结果以便调试
+            System.out.println("Task results: " + results);
         });
     }
 }

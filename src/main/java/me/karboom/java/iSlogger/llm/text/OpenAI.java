@@ -3,10 +3,7 @@ package me.karboom.java.iSlogger.llm.text;
 import com.github.victools.jsonschema.generator.*;
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
-import com.openai.core.JsonValue;
-import com.openai.models.FunctionDefinition;
-import com.openai.models.FunctionParameters;
-import com.openai.models.chat.completions.*;
+import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSlogger.tool.Tool;
 import me.karboom.java.iSlogger.memory.Item;
 import me.karboom.java.iSlogger.util.JSONUtil;
@@ -16,6 +13,7 @@ import okhttp3.sse.EventSourceListener;
 import okhttp3.sse.EventSources;
 import reactor.core.publisher.Flux;
 import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -25,6 +23,7 @@ import java.util.Map;
 /**
  * OpenAI
  */
+@Slf4j
 public class OpenAI extends BaseLLM {
     private OpenAIClient client;
     private final SchemaGenerator schemaGenerator;
@@ -57,7 +56,7 @@ public class OpenAI extends BaseLLM {
      * @return 自定义数据结构
      */
     @Override
-    public Flux<Output> send(List<Item> memory, Class<?> outputFormat, List<Tool> tools) {
+    public Flux<OutputBO> send(List<Item> memory, Class<?> outputFormat, List<Tool> tools) {
         return Flux.create(sink -> {
             var httpClient = new OkHttpClient.Builder()
                     .connectTimeout(Duration.ofSeconds(60))
@@ -87,7 +86,7 @@ public class OpenAI extends BaseLLM {
                             sink.complete();
                             return;
                         }
-                        var output = parseOutput(data);
+                        var output = parseOutput(JSONUtil.parse(data), true);
                         if (output != null) {
                             sink.next(output);
                         }
@@ -111,6 +110,190 @@ public class OpenAI extends BaseLLM {
 //            sink.onDispose(eventSource::cancel);
         });
     }
+
+    @Override
+    public String batch(List<List<Item>> messageBatch, Class<?> outputFormat) {
+        var httpClient = new OkHttpClient.Builder()
+                .connectTimeout(Duration.ofSeconds(60))
+                .readTimeout(Duration.ofSeconds(60))
+                .writeTimeout(Duration.ofSeconds(60))
+                .build();
+
+        // 构建批量请求的JSONL格式数据
+        var jsonlBuilder = new StringBuilder();
+        for (var i = 0; i < messageBatch.size(); i++) {
+            var messages = messageBatch.get(i);
+            // 复用现有的buildRequestBody方法，但需要调整参数
+            var requestBody = buildRequestBody(messages, outputFormat, null);
+            // 将stream设置为false，因为batch API不支持流式响应
+            var requestJson = JSONUtil.parse(requestBody);
+            requestJson.put("stream", false);
+            
+            var requestNode = JSONUtil.create();
+            requestNode.put("custom_id", "request-%d".formatted(i));
+            requestNode.put("method", "POST");
+            requestNode.put("url", "/v1/chat/completions");
+//            requestNode.put("url", "/v1/chat/ds-test");
+            requestNode.set("body", requestJson);
+            
+            jsonlBuilder.append(requestNode.toString()).append("\n");
+        }
+
+        // 第一步：上传文件到 /v1/files
+        var mediaType = MediaType.parse("application/jsonl");
+        var fileBody = RequestBody.create(jsonlBuilder.toString().getBytes(), mediaType);
+        var fileMultipartBody = new MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("file", "batch.jsonl", fileBody)
+                .addFormDataPart("purpose", "batch")
+                .build();
+
+        var fileRequest = new Request.Builder()
+                .url("%s/files".formatted(this.url))
+                .addHeader("Authorization", "Bearer %s".formatted(this.apiKey))
+                .post(fileMultipartBody)
+                .build();
+
+        String fileId;
+        try (var fileResponse = httpClient.newCall(fileRequest).execute()) {
+            if (!fileResponse.isSuccessful()) {
+                throw new RuntimeException("File upload failed: " + fileResponse.code());
+            }
+            var fileResponseBody = fileResponse.body();
+            if (fileResponseBody == null) {
+                throw new RuntimeException("File upload response is null");
+            }
+            var fileResponseJson = JSONUtil.parse(fileResponseBody.string());
+            var fileIdNode = fileResponseJson.path("id");
+            if (fileIdNode.isMissingNode() || fileIdNode.isNull()) {
+                throw new RuntimeException("File upload response missing id");
+            }
+            fileId = fileIdNode.asString();
+        } catch (Exception e) {
+            throw new RuntimeException("File upload error", e);
+        }
+
+        // 第二步：使用file_id创建batch任务
+        var batchRequestBody = JSONUtil.create();
+        batchRequestBody.put("input_file_id", fileId);
+        batchRequestBody.put("endpoint", "/v1/chat/completions");
+//        batchRequestBody.put("endpoint", "/v1/chat/ds-test");
+        batchRequestBody.put("completion_window", "24h");
+
+        var batchRequest = new Request.Builder()
+                .url("%s/batches".formatted(this.url))
+                .addHeader("Authorization", "Bearer %s".formatted(this.apiKey))
+                .addHeader("Content-Type", "application/json")
+                .post(RequestBody.create(batchRequestBody.toString(), MediaType.parse("application/json")))
+                .build();
+
+        try (var batchResponse = httpClient.newCall(batchRequest).execute()) {
+            if (!batchResponse.isSuccessful()) {
+                throw new RuntimeException("Batch creation failed: " + batchResponse.code());
+            }
+            var batchResponseBody = batchResponse.body();
+            if (batchResponseBody == null) {
+                throw new RuntimeException("Batch creation response is null");
+            }
+            var batchResponseJson = JSONUtil.parse(batchResponseBody.string());
+            var batchIdNode = batchResponseJson.path("id");
+            if (batchIdNode.isMissingNode() || batchIdNode.isNull()) {
+                throw new RuntimeException("Batch creation response missing id");
+            }
+            return batchIdNode.asString();
+        } catch (Exception e) {
+            throw new RuntimeException("Batch creation error", e);
+        }
+    }
+
+    @Override
+    public TaskStatusBO taskStatus(String taskId) {
+        var httpClient = new OkHttpClient.Builder()
+                .connectTimeout(Duration.ofSeconds(60))
+                .readTimeout(Duration.ofSeconds(60))
+                .writeTimeout(Duration.ofSeconds(60))
+                .build();
+
+        var request = new Request.Builder()
+                .url("%s/batches/%s".formatted(this.url, taskId))
+                .addHeader("Authorization", "Bearer %s".formatted(this.apiKey))
+                .addHeader("Content-Type", "application/json")
+                .get()
+                .build();
+
+        try (var response = httpClient.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                throw new RuntimeException("Task status query failed: " + response.code());
+            }
+            var responseBody = response.body();
+            if (responseBody == null) {
+                throw new RuntimeException("Task status response is null");
+            }
+            var responseJson = JSONUtil.parse(responseBody.string());
+            
+            var statusNode = responseJson.path("status");
+            var apiStatus = statusNode.isMissingNode() || statusNode.isNull() ? "unknown" : statusNode.asText();
+            var mappedStatus = switch (apiStatus) {
+                case "completed" -> TaskStatusBO.STATUS.DONE;
+                case "failed" -> TaskStatusBO.STATUS.ERROR;
+                case "expired" -> TaskStatusBO.STATUS.EXPIRED;
+                case "cancelled" -> TaskStatusBO.STATUS.CANCELLED;
+                default -> TaskStatusBO.STATUS.DOING;
+            };
+            
+            var taskStatus = TaskStatusBO.builder()
+                    .id(responseJson.path("id").asText())
+                    .status(mappedStatus)
+                    .build();
+            
+            var outputFilesNode = responseJson.path("output_file_id");
+            if (!outputFilesNode.isMissingNode() && !outputFilesNode.isNull()) {
+                taskStatus.setSuccessResultId(outputFilesNode.asText());
+            }
+            
+            var errorFilesNode = responseJson.path("error_file_id");
+            if (!errorFilesNode.isMissingNode() && !errorFilesNode.isNull()) {
+                taskStatus.setErrorResultId(errorFilesNode.asText());
+            }
+            
+            return taskStatus;
+        } catch (Exception e) {
+            throw new RuntimeException("Task status query error", e);
+        }
+    }
+
+    @Override
+    public List<OutputBO> taskResult(TaskStatusBO task) {
+
+        var httpClient = new OkHttpClient.Builder()
+                .connectTimeout(Duration.ofSeconds(60))
+                .readTimeout(Duration.ofSeconds(60))
+                .writeTimeout(Duration.ofSeconds(60))
+                .build();
+
+        // 下载输出文件
+        var downloadRequest = new Request.Builder()
+                .url("%s/files/%s/content".formatted(this.url, task.getSuccessResultId()))
+                .addHeader("Authorization", "Bearer %s".formatted(this.apiKey))
+                .get()
+                .build();
+
+        try (var response = httpClient.newCall(downloadRequest).execute()) {
+            if (!response.isSuccessful()) {
+                throw new RuntimeException("Task result download failed: " + response.code());
+            }
+            var responseBody = response.body();
+            if (responseBody == null) {
+                throw new RuntimeException("Task result response is null");
+            }
+            
+            var content = responseBody.string();
+            return parseOutputBatch(content);
+        } catch (Exception e) {
+            throw new RuntimeException("Task result download error", e);
+        }
+    }
+    
 
     private String buildRequestBody(List<Item> memory, Class<?> outputFormat, List<Tool> tools) {
         var body = JSONUtil.create();
@@ -302,38 +485,61 @@ public class OpenAI extends BaseLLM {
         return toolsArray;
     }
 
-    private Output parseOutput(String data) {
-        var json = JSONUtil.parse(data);
-        var output = new Output();
+    private List<OutputBO> parseOutputBatch(String data) {
+        var outputs = new ArrayList<OutputBO>();
+        var lines = data.split("\n");
+        for (var line : lines) {
+            if (line != null && !line.trim().isEmpty()) {
+                var jsonLine = JSONUtil.parse(line);
+                var bodyNode = jsonLine.path("response").path("body");
+                if (!bodyNode.isMissingNode() && !bodyNode.isNull()) {
+                    var output = parseOutput((ObjectNode) bodyNode, false);
+                    if (output != null) {
+                        outputs.add(output);
+                    }
+                }
+            }
+        }
+        return outputs;
+    }
 
-        var idNode = json.path("id");
+    /**
+     * 解析响应body对象
+     * @param data
+     * @param isStream
+     * @return
+     */
+    private OutputBO parseOutput(ObjectNode data, Boolean isStream) {
+        var output = new OutputBO();
+
+        var idNode = data.path("id");
         if (!idNode.isMissingNode() && !idNode.isNull()) {
             output.setId(idNode.asString());
         }
         output.type = "chat.completion.chunk";
-        output.isDelta = true;
+        output.isDelta = isStream;
 
-        var choicesNode = json.path("choices");
+        var choicesNode = data.path("choices");
         if (!choicesNode.isEmpty()) {
-            var outputChoices = new ArrayList<Output.Choice>();
+            var outputChoices = new ArrayList<OutputBO.Choice>();
             for (var choiceNode : choicesNode) {
-                var outputChoice = new Output.Choice();
+                var outputChoice = new OutputBO.Choice();
 
-                var deltaNode = choiceNode.path("delta");
-                if (!deltaNode.isEmpty()) {
-                    var contentNode = deltaNode.path("content");
+                var messageContentNode = choiceNode.path(isStream ? "delta": "message");
+                if (!messageContentNode.isEmpty()) {
+                    var contentNode = messageContentNode.path("content");
                     if (!contentNode.isMissingNode() && !contentNode.isNull()) {
                         outputChoice.text = contentNode.asString();
                     }
 
-                    var reasoningContentNode = deltaNode.path("reasoning_content");
+                    var reasoningContentNode = messageContentNode.path("reasoning_content");
                     if (!reasoningContentNode.isMissingNode() && !reasoningContentNode.isNull()) {
                         outputChoice.thinking = reasoningContentNode.asText();
                     }
 
-                    var toolCallsNode = deltaNode.path("tool_calls");
+                    var toolCallsNode = messageContentNode.path("tool_calls");
                     if (!toolCallsNode.isEmpty()) {
-                        var toolCalls = new ArrayList<Output.ToolCall>();
+                        var toolCalls = new ArrayList<OutputBO.ToolCall>();
 
                         for (var toolCall : toolCallsNode) {
                             var functionNode = toolCall.path("function");
@@ -344,7 +550,7 @@ public class OpenAI extends BaseLLM {
                             var argNode = functionNode.path("arguments");
 
 
-                            var object = Output.ToolCall.builder().id(funcIdNode.asString()).index(indexNode.asInt()).arguments(argNode.asString()).build();
+                            var object = OutputBO.ToolCall.builder().id(funcIdNode.asString()).index(indexNode.asInt()).arguments(argNode.asString()).build();
 
                             if (!nameNode.isMissingNode()) {
                                 object.setName(nameNode.asString());
@@ -367,9 +573,9 @@ public class OpenAI extends BaseLLM {
             output.choices = outputChoices;
         }
 
-        var usageNode = json.path("usage");
+        var usageNode = data.path("usage");
         if (!usageNode.isEmpty()) {
-            var usage = Output.Usage.builder()
+            var usage = OutputBO.Usage.builder()
                     .promptTokens(usageNode.path("prompt_tokens").asInt())
                     .completionTokens(usageNode.path("completion_tokens").asInt())
                     .totalTokens(usageNode.path("total_tokens").asInt())
