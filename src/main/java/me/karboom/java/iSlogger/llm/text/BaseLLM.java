@@ -22,15 +22,29 @@ public abstract class BaseLLM {
         this.maxRetries = maxRetries;
     }
 
+    /**
+     * 用于持续交流
+     */
     abstract public Flux<OutputBO> send(List<Item> messages, Class<?> outputFormat, List<Tool> tools);
 
     /**
-     * 批量调用接口
+     * 用于工具查询
+     */
+    abstract public OutputBO query(List<Item> messages, Class<?> outputFormat);
+
+    /**
+     * 批量工具查询
      * @return 批量任务ID
      */
     abstract public String batch(List<List<Item>> messageBatch, Class<?> outputFormat);
 
+    /**
+     * 查看批量任务状态
+     */
     abstract public TaskStatusBO taskStatus(String taskId);
 
+    /**
+     * 查看批量任务结果
+     */
     abstract public List<OutputBO> taskResult(TaskStatusBO task);
 }

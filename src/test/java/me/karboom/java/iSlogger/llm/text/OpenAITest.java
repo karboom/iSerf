@@ -464,4 +464,33 @@ public class OpenAITest {
             System.out.println("Task results: " + results);
         });
     }
+
+    @Test
+    void testQuery() {
+        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+            var messages = new ArrayList<Item>();
+            messages.add(Item.builder()
+                    .role(Item.ROLE.SYSTEM)
+                    .type(Item.TYPE.TEXT)
+                    .text("你是一个乐于助人的助手。")
+                    .build());
+            messages.add(Item.builder()
+                    .role(Item.ROLE.USER)
+                    .type(Item.TYPE.TEXT)
+                    .text("1+1等于几？")
+                    .build());
+
+            var response = llm.query(messages, null);
+
+            assertNotNull(response);
+            assertNotNull(response.getChoices());
+            assertFalse(response.getChoices().isEmpty());
+            
+            var choice = response.getChoices().getFirst();
+            assertNotNull(choice.getText());
+            assertTrue(choice.getText().length() > 0);
+            
+            System.out.println("Query response: " + choice.getText());
+        });
+    }
 }

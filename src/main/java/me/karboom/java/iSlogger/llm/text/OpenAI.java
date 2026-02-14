@@ -32,8 +32,8 @@ public class OpenAI extends BaseLLM {
         super(llmType, llmConfig, apiKey, url, maxRetries);
 
         var configBuilder = new SchemaGeneratorConfigBuilder(SchemaVersion.DRAFT_7, OptionPreset.PLAIN_JSON);
-        var config = configBuilder.build();
-        this.schemaGenerator = new SchemaGenerator(config);
+        var config = configBuilder.forFields().withRequiredCheck(fieldScope -> true);
+        this.schemaGenerator = new SchemaGenerator(configBuilder.build());
 
         var builder = OpenAIOkHttpClient.builder()
                 .apiKey(this.apiKey)
@@ -109,6 +109,41 @@ public class OpenAI extends BaseLLM {
 
 //            sink.onDispose(eventSource::cancel);
         });
+    }
+
+    @Override
+    public OutputBO query(List<Item> messages, Class<?> outputFormat) {
+        var httpClient = new OkHttpClient.Builder()
+                .connectTimeout(Duration.ofSeconds(60))
+                .readTimeout(Duration.ofSeconds(60))
+                .writeTimeout(Duration.ofSeconds(60))
+                .build();
+
+        var requestBody = buildRequestBody(messages, outputFormat, null);
+        var requestJson = JSONUtil.parse(requestBody);
+        requestJson.remove("stream");
+        requestJson.remove("stream_options");
+
+        var request = new Request.Builder()
+                .url("%s/chat/completions".formatted(this.url))
+                .addHeader("Authorization", "Bearer %s".formatted(this.apiKey))
+                .addHeader("Content-Type", "application/json")
+                .post(RequestBody.create(requestJson.toString(), MediaType.parse("application/json")))
+                .build();
+
+        try (var response = httpClient.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                throw new RuntimeException("Query failed: " + response.code());
+            }
+            var responseBody = response.body();
+            if (responseBody == null) {
+                throw new RuntimeException("Query response is null");
+            }
+            var responseJson = JSONUtil.parse(responseBody.string());
+            return parseOutput(responseJson, false);
+        } catch (Exception e) {
+            throw new RuntimeException("Query error", e);
+        }
     }
 
     @Override
