@@ -97,6 +97,9 @@ public class Item {
      */
     public String fps;
 
+    /**
+     * 工具调用信息
+     */
     public List<ToolCall> toolCalls;
 
     /**
@@ -106,12 +109,28 @@ public class Item {
 
     public ObjectNode custom;
 
-
-
+    /**
+     * 是否为流式输出的片段
+     */
     public Integer isSegment;
 
-
+    /**
+     * 格式化之后的输出对象
+     */
     public Object formatted;
 
+    /**
+     * 使用量情况
+     */
     public Usage usage;
+
+    /**
+     * 重要程度
+     */
+    public String importance;
+
+    /**
+     * 是否遗忘
+     */
+    public Integer isForgotten;
 }

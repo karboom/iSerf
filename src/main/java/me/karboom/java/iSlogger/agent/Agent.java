@@ -42,7 +42,7 @@ import java.util.function.Consumer;
 @Slf4j
 public abstract class Agent {
     public String id;
-    protected Memory memory = new LocalMemory();
+    public Memory memory = new LocalMemory();
     protected List<Tool> tools;
     protected BaseLLM llm;
     public String prompt;
@@ -314,8 +314,60 @@ public abstract class Agent {
         queue.offer(Event.builder().type(Event.Type.RECOVERY).build());
     }
 
-    private void handleOrganizeMemory (Event event) {}
+    /**
+     * 整理记忆
+     * 1.调用llm.query，将当前的memory压缩
+     * 2.压缩后的内容追加到记忆，并且将参与压缩的记忆标记forgotten
+     * Todo 1.记忆重要程度判断  2.提示词
+     * @param event
+     */
+    @SneakyThrows
+    private void handleOrganizeMemory (Event event) {
+        var currentMemory = memory.get();
+        
+        if (currentMemory.isEmpty()) {
+            return;
+        }
 
+        var summaryPrompt = Item.builder()
+                .role(Item.ROLE.USER)
+                .text("请将以上对话历史压缩为简洁的摘要，保留关键信息和上下文，用于后续对话参考。")
+                .build();
+
+        var messages = new ArrayList<Item>(currentMemory.stream().skip(1).toList());
+        messages.add(summaryPrompt);
+
+        var result = llm.query(messages, null);
+
+        if (result != null && result.getChoices() != null && !result.getChoices().isEmpty()) {
+            var summaryText = result.getChoices().get(0).getText();
+            if (summaryText != null && !summaryText.isEmpty()) {
+                var summaryItem = Item.builder()
+                        .id(UUID.randomUUID().toString())
+                        .role(Item.ROLE.ASSISTANT)
+                        .type(Item.TYPE.TEXT)
+                        .text(summaryText)
+                        .isForgotten(0)
+                        .build();
+
+                memory.add(summaryItem);
+                
+                currentMemory.stream().skip(1).forEach(item -> {
+                    if (item.getIsForgotten() == null || item.getIsForgotten() == 0) {
+                        item.setIsForgotten(1);
+                    }
+                });
+                
+                memory.sync();
+                log.debug("handleOrganizeMemory Memory compressed successfully");
+            }
+        }
+    }
+
+    /**
+     * 处理信息输入
+     * @param event
+     */
     private void handleMessage(Event event) {
         var userMessage = event.getItem();
 
@@ -324,7 +376,7 @@ public abstract class Agent {
 
         var format = event.getItem().getFormatted() == null ? null : event.getItem().getFormatted().getClass();
 
-        var flux = llm.send(memory.get(), format, tools);
+        var flux = llm.send(memory.get().stream().filter(item -> item.getIsForgotten() == 1).toList(), format, tools);
 
         fluxHandle(flux, format)
                 .flatMapMany(holder -> {
@@ -400,6 +452,26 @@ public abstract class Agent {
                 })
                 .blockLast()
         ;
+
+        this.checkMemorySize();
+    }
+
+    /**
+     * 检查记忆长度
+     * 计算prompt消耗，如果大于150k，那么触发记忆整理事件，Todo 弄一个支持自定义的map，根据model的70%压缩
+     */
+    private void checkMemorySize() {
+
+        var currentMemory = memory.get();
+        var promptTotal = currentMemory.stream()
+                .skip(1)
+                .filter(item -> item.getUsage() != null && item.getUsage().getPromptTotal() != null)
+                .mapToInt(item -> item.getUsage().getPromptTotal())
+                .sum();
+
+        if (promptTotal > 150000) {
+            queue.offer(Event.builder().type(Event.Type.ORGANIZE_MEMORY).build());
+        }
     }
 
     private void handleRecovery(Event event) {
