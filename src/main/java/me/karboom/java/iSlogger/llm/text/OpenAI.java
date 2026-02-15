@@ -19,14 +19,15 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * OpenAI
  */
 @Slf4j
 public class OpenAI extends BaseLLM {
-    private OpenAIClient client;
     private final SchemaGenerator schemaGenerator;
+    private final OkHttpClient httpClient;
 
     public OpenAI(String llmType, Map<String, Object> llmConfig, String apiKey, String url, Integer maxRetries) {
         super(llmType, llmConfig, apiKey, url, maxRetries);
@@ -44,7 +45,12 @@ public class OpenAI extends BaseLLM {
             builder.maxRetries(this.maxRetries);
         }
 
-        this.client = builder.build();
+        this.httpClient = new OkHttpClient.Builder()
+                .connectTimeout(Duration.ofSeconds(60))
+                .readTimeout(Duration.ofSeconds(60))
+                .writeTimeout(Duration.ofSeconds(60))
+                .connectionPool(new ConnectionPool(1000, 5, TimeUnit.MINUTES))
+                .build();
     }
 
     /**
@@ -58,12 +64,6 @@ public class OpenAI extends BaseLLM {
     @Override
     public Flux<OutputBO> send(List<Item> memory, Class<?> outputFormat, List<Tool> tools) {
         return Flux.create(sink -> {
-            var httpClient = new OkHttpClient.Builder()
-                    .connectTimeout(Duration.ofSeconds(60))
-                    .readTimeout(Duration.ofSeconds(60))
-                    .writeTimeout(Duration.ofSeconds(60))
-                    .build();
-
             var requestBody = buildRequestBody(memory, outputFormat, tools);
 
             var request = new Request.Builder()
@@ -113,12 +113,6 @@ public class OpenAI extends BaseLLM {
 
     @Override
     public OutputBO query(List<Item> messages, Class<?> outputFormat) {
-        var httpClient = new OkHttpClient.Builder()
-                .connectTimeout(Duration.ofSeconds(60))
-                .readTimeout(Duration.ofSeconds(60))
-                .writeTimeout(Duration.ofSeconds(60))
-                .build();
-
         var requestBody = buildRequestBody(messages, outputFormat, null);
         var requestJson = JSONUtil.parse(requestBody);
         requestJson.remove("stream");
@@ -148,12 +142,6 @@ public class OpenAI extends BaseLLM {
 
     @Override
     public String batch(List<List<Item>> messageBatch, Class<?> outputFormat) {
-        var httpClient = new OkHttpClient.Builder()
-                .connectTimeout(Duration.ofSeconds(60))
-                .readTimeout(Duration.ofSeconds(60))
-                .writeTimeout(Duration.ofSeconds(60))
-                .build();
-
         // 构建批量请求的JSONL格式数据
         var jsonlBuilder = new StringBuilder();
         for (var i = 0; i < messageBatch.size(); i++) {
@@ -243,12 +231,6 @@ public class OpenAI extends BaseLLM {
 
     @Override
     public TaskStatusBO taskStatus(String taskId) {
-        var httpClient = new OkHttpClient.Builder()
-                .connectTimeout(Duration.ofSeconds(60))
-                .readTimeout(Duration.ofSeconds(60))
-                .writeTimeout(Duration.ofSeconds(60))
-                .build();
-
         var request = new Request.Builder()
                 .url("%s/batches/%s".formatted(this.url, taskId))
                 .addHeader("Authorization", "Bearer %s".formatted(this.apiKey))
@@ -299,13 +281,6 @@ public class OpenAI extends BaseLLM {
 
     @Override
     public List<OutputBO> taskResult(TaskStatusBO task) {
-
-        var httpClient = new OkHttpClient.Builder()
-                .connectTimeout(Duration.ofSeconds(60))
-                .readTimeout(Duration.ofSeconds(60))
-                .writeTimeout(Duration.ofSeconds(60))
-                .build();
-
         // 下载输出文件
         var downloadRequest = new Request.Builder()
                 .url("%s/files/%s/content".formatted(this.url, task.getSuccessResultId()))
