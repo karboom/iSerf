@@ -1,10 +1,6 @@
 package me.karboom.java.iSlogger.server;
 
-import com.corundumstudio.socketio.Configuration;
-import com.corundumstudio.socketio.AckRequest;
-import com.corundumstudio.socketio.SocketIOClient;
-import com.corundumstudio.socketio.SocketIOServer;
-import com.corundumstudio.socketio.SocketIONamespace;
+import com.corundumstudio.socketio.*;
 import com.corundumstudio.socketio.listener.ConnectListener;
 import com.corundumstudio.socketio.listener.DisconnectListener;
 import com.corundumstudio.socketio.listener.DataListener;
@@ -19,16 +15,20 @@ import lombok.NoArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSlogger.agent.Agent;
+import me.karboom.java.iSlogger.llm.text.OpenAI;
 import me.karboom.java.iSlogger.team.Team;
 import me.karboom.java.iSlogger.memory.Item;
 import me.karboom.java.iSlogger.util.JSONUtil;
 import reactor.core.publisher.Flux;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 去中心化 Websocket 服务器，即是服务，也是其他集群节点的代理
@@ -51,25 +51,27 @@ public abstract class Websocket {
     }
 
     protected SocketIOServer server;
+
+    protected String clusterIp;
     protected Integer port;
 
     private Map<String, Agent> agents = new HashMap<>();
     private Map<String, Team> teams = new HashMap<>();
 
 
-    private Map<String, DataListener> userEvents = new HashMap<>();
-    private Map<String, DataListener> sysEvents = new HashMap<>();
+    private Map<String, DataListener<String>> userEvents = new HashMap<>();
+    private Map<String, DataListener<String>> sysEvents = new HashMap<>();
 
 
     /**
-     *  agent缓存：  AgentId 对应 Nodes索引，-1表示不明确
+     *  agent 缓存：AgentId 对应 Nodes 索引，-1 表示不明确
      */
     private Map<String, Integer> otherAgentNode = new HashMap<>();
 
     /**
-     * client缓存
+     * client 缓存
      */
-    private Map<String, String> agentClient = new HashMap<>();
+    private Map<String, UUID> agentClient = new HashMap<>();
 
     /**
      * 服务器节点列表
@@ -78,13 +80,26 @@ public abstract class Websocket {
 
     protected ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
+    public Websocket (String clusterIp, Integer port) {
+        this.clusterIp = clusterIp;
+        this.port = port;
+    }
 
     /**
-     * 启动服务器后定时调用 getNodes 并且转化为nodeList，并且listen，并且定时调用broadcast
+     *  Todo 根据网络接口自动解析clusterIp 和 port
+     */
+    public Websocket () {
+    }
+
+    /**
+     * 启动服务器后定时调用 getNodes 并且转化为 nodeList，并且 listen，并且定时调用 broadcast
      */
     public void start() {
         var config = new Configuration();
         config.setPort(port);
+        config.setSocketConfig(new SocketConfig(){{
+            setReuseAddress(true);
+        }});
 
         server = new SocketIOServer(config);
 
@@ -100,7 +115,7 @@ public abstract class Websocket {
         // 定时调用 getNodes 更新节点列表
         scheduler.scheduleAtFixedRate(() -> {
             var nodeAddresses = getNodes();
-            updateNodeList(nodeAddresses);
+            parseNodes(nodeAddresses);
             listen();
         }, 0, 5, TimeUnit.SECONDS);
 
@@ -109,34 +124,54 @@ public abstract class Websocket {
     }
 
     /**
-     * 更新节点列表
+     *
+     * @return  服务器节点地址列表
      */
-    private void updateNodeList(List<String> nodeAddresses) {
-        var localIp = "127.0.0.1";
-        var localPort = 9092;
-        var currentNodeMap = new HashMap<String, NodeInfo>();
+    abstract public List<String> getNodes();
 
-        for (var address : nodeAddresses) {
-            var parts = address.split(":");
+    /**
+     * 解析节点列表
+
+     * x 遍历 nodeList，根据解析情况进行新增和删除
+     *
+     * Todo 如果数量减少了，其中的 agents 如何处理
+     *
+     * @param nodeAddresses ip:port 字符串
+     */
+    @SneakyThrows
+    private void parseNodes(List<String> nodeAddresses) {
+        var newNodeList = new ArrayList<NodeInfo>();
+
+
+        for (var addr : nodeAddresses) {
+            var parts = addr.split(":");
+            if (parts.length != 2) {
+                throw new IllegalArgumentException("Invalid node address format: " + addr);
+            }
             var ip = parts[0];
             var port = Integer.parseInt(parts[1]);
-            var isLocal = ip.equals(localIp) && port == localPort;
-            var existingNode = nodeList.stream()
-                    .filter(n -> n.ip.equals(ip) && n.port.equals(port))
-                    .findFirst()
-                    .orElse(null);
 
-            var nodeInfo = existingNode != null ? existingNode : NodeInfo.builder()
-                    .ip(ip)
-                    .port(port)
-                    .isLocal(isLocal)
-                    .client(null)
-                    .build();
-
-            currentNodeMap.put(address, nodeInfo);
+            newNodeList.add(new NodeInfo(ip, port, Objects.equals(ip, clusterIp) && this.port == port, null));
         }
 
-        nodeList = new ArrayList<>(currentNodeMap.values());
+
+        // 更新节点列表，保留已有连接的节点
+        var updatedNodeList = new ArrayList<NodeInfo>();
+        for (var newNode : newNodeList) {
+            var existingNode = nodeList.stream()
+                    .filter(n -> n.ip.equals(newNode.ip) && n.port.equals(newNode.port))
+                    .findFirst()
+                    .orElse(null);
+            
+            if (existingNode != null) {
+                updatedNodeList.add(existingNode);
+            } else {
+                updatedNodeList.add(newNode);
+            }
+        }
+
+
+        this.nodeList = updatedNodeList;
     }
 
     /**
@@ -146,7 +181,8 @@ public abstract class Websocket {
     public void broadcast() {
         for (var node : nodeList) {
             if (Boolean.FALSE.equals(node.isLocal) && node.client != null && node.client.connected()) {
-                node.client.emit("alive", Map.of("ip", "127.0.0.1", "port", 9092));
+                var dataJson = "{\"ip\":\"127.0.0.1\",\"port\":9092}";
+                node.client.emit("alive", dataJson);
             }
         }
     }
@@ -169,65 +205,121 @@ public abstract class Websocket {
                     System.out.println("Connected to node: " + node.ip + ":" + node.port);
                 });
                 
-                socket.on("alive", args -> {
-                    if (args.length > 0 && args[0] instanceof Map) {
-                        var ip = (String) ((Map) args[0]).get("ip");
-                        var port = ((Map) args[0]).get("port");
-                        System.out.println("Received alive from: " + ip + ":" + port);
-                    }
-                });
-                
+
+
                 socket.connect();
                 node.setClient(socket);
             }
         }
     }
 
-    /**
-     *
-     * @return  服务器节点地址列表
-     */
-    abstract public List<String> getNodes();
 
     /**
      * 代理转发到其他节点
-     * @param agentId Agent ID
-     * @param event 事件名称
-     * @param data 数据
-     * @param ackSender Ack回调
+     * - 解析事件名称 ns/name，根据不同的 ns 和 name 区分节点路由方式
+     * -- agent/create，根据targetNode发送
+     * -- agent/其他，需要先匹配 otherAgentNode，如果没有命中，给其他非自身 node 群发，然后根据响应更新缓存
+     * - 转发的 data 需要新增 source: ip:port 字段，并且封装为 {event, body} 格式发送
+     * - emit 方法需要阻塞线程
      */
     @SneakyThrows
-    private void proxyToOtherNode(String agentId, String event, Map data, AckRequest ackSender) {
-        var nodeIndex = otherAgentNode.get(agentId);
+    private void proxyToOtherNode(String event, ObjectNode data, AckRequest ackSender, NodeInfo specialNode) {
+        var parts = event.split("/");
+        var ns = parts[0];
+        var name = parts.length > 1 ? parts[1] : "";
+        var source = clusterIp + ":" + port;
 
-        if (nodeIndex != null && nodeIndex != -1) {
-            var targetNode = nodeList.get(nodeIndex);
-            if (targetNode.client != null && targetNode.client.connected()) {
-                targetNode.client.emit(event, new Map[]{data}, args -> {
-                    var success = args.length > 0 && args[0] instanceof Map && Boolean.TRUE.equals(((Map) args[0]).get("success"));
-                    if (success) {
-                        ackSender.sendAckData(args[0]);
-                    } else {
-                        otherAgentNode.put(agentId, -1);
-                        ackSender.sendAckData(Map.of("success", false));
-                    }
-                });
-            } else {
-                otherAgentNode.put(agentId, -1);
-                ackSender.sendAckData(Map.of("success", false));
-            }
-        } else {
-            for (var node : nodeList) {
-                if (Boolean.FALSE.equals(node.isLocal) && node.client != null && node.client.connected()) {
-                    node.client.emit(event, new Map[]{data}, args -> {
-                        var success = args.length > 0 && args[0] instanceof Map && Boolean.TRUE.equals(((Map) args[0]).get("success"));
-                        if (success) {
-                            otherAgentNode.put(agentId, nodeList.indexOf(node));
-                            ackSender.sendAckData(args[0]);
+        log.debug("proxyToOtherNode: event={}, ns={}, name={}, source={}", event, ns, name, source);
+
+        data.put("source", source);
+
+        switch (ns) {
+            case "agent" -> {
+                switch (name) {
+                    case "create" -> {
+                        var targetNode = specialNode;
+
+                        var proxyData = JSONUtil.create();
+                        proxyData.put("event", event);
+                        proxyData.set("body", data);
+                        var proxyDataJson = JSONUtil.stringify(proxyData);
+                        var latch = new CountDownLatch(1);
+                        var responseRef = new AtomicReference<String>();
+                        targetNode.client.emit("proxy", new String[]{proxyDataJson}, args -> {
+                            if (args.length > 0 && args[0] instanceof String) {
+                                responseRef.set(args[0].toString());
+                            }
+                            latch.countDown();
+                        });
+                        latch.await(5, TimeUnit.SECONDS);
+                        var response = responseRef.get();
+                        if (response != null) {
+                            ackSender.sendAckData(response);
+                        } else {
+                            ackSender.sendAckData("{\"success\":false}");
                         }
-                    });
+                    }
+                    default -> {
+                        var agentId = data.path("agentId").asText();
+                        var nodeIndex = otherAgentNode.get(agentId);
+                        var proxyData = JSONUtil.create();
+                        proxyData.put("event", event);
+                        proxyData.set("body", data);
+                        var proxyDataJson = JSONUtil.stringify(proxyData);
+
+                        if (nodeIndex != null && nodeIndex != -1) {
+                            var targetNode = nodeList.get(nodeIndex);
+                            if (targetNode != null && targetNode.client != null && targetNode.client.connected()) {
+                                var latch = new CountDownLatch(1);
+                                var responseRef = new AtomicReference<String>();
+                                targetNode.client.emit("proxy", new String[]{proxyDataJson}, args -> {
+                                    if (args.length > 0 && args[0] instanceof String) {
+                                        responseRef.set(args[0].toString());
+                                    } else {
+                                        otherAgentNode.put(agentId, -1);
+                                    }
+                                    latch.countDown();
+                                });
+                                latch.await(5, TimeUnit.SECONDS);
+                                var response = responseRef.get();
+                                if (response != null) {
+                                    ackSender.sendAckData(response);
+                                } else {
+                                    ackSender.sendAckData("{\"success\":false}");
+                                }
+                            } else {
+                                otherAgentNode.put(agentId, -1);
+                                ackSender.sendAckData("{\"success\":false}");
+                            }
+                        } else {
+                            var responseRef = new AtomicReference<String>();
+                            var latch = new CountDownLatch(1);
+                            var hasResponded = new AtomicReference<>(false);
+                            for (var node : nodeList) {
+                                if (Boolean.FALSE.equals(node.isLocal) && node.client != null && node.client.connected()) {
+                                    node.client.emit("proxy", new String[]{proxyDataJson}, args -> {
+                                        if (args.length > 0 && args[0] instanceof String && !hasResponded.get()) {
+                                            if (hasResponded.compareAndSet(false, true)) {
+                                                responseRef.set(args[0].toString());
+                                                otherAgentNode.put(agentId, nodeList.indexOf(node));
+                                            }
+                                        }
+                                        latch.countDown();
+                                    });
+                                }
+                            }
+                            latch.await(5, TimeUnit.SECONDS);
+                            var response = responseRef.get();
+                            if (response != null) {
+                                ackSender.sendAckData(response);
+                            } else {
+                                ackSender.sendAckData("{\"success\":false}");
+                            }
+                        }
+                    }
                 }
             }
+            default -> ackSender.sendAckData("{\"success\":false,\"reason\":\"unknown namespace\"}");
         }
     }
 
@@ -235,88 +327,110 @@ public abstract class Websocket {
      *  初始化用户侧协议
      *
      *  服务端监听客户端事件
-     *  agent/create: {prompt}。 随机一个节点转发事件，如果随机到自身，那么直接执行。响应 {agentId}
-     *  agent/send: {agentId, event: {}}。
-     *  agent/active: {agentId}。订阅agent
-     *  agent/leave: {agentId}。 取消订阅agent
-     *
-     *  agent/send、agent/active、agent/leave 实现自动节点转发，如果本节点未找到Agent，那么从otherAgentNode找出对应的节点并且转发，如果转发ack失败那么标记-1。如果缓存未匹配到，那么群发给其他节点, ack成功就缓存结果
+     *  agent/create: {"prompt":"xxx"}。如果存在source字段，直接处理。否则随机一个节点转发事件，如果随机到自身，那么直接执行。响应 {"agentId":"xxx"}
+     *  agent/send: {"agentId":"xxx","event":{}}。
+     *  agent/active: {"agentId":"xxx"}。订阅 agent
+     *  agent/leave: {"agentId":"xxx"}。取消订阅 agent
      *
      *  客户端监听服务端事件
-     *  message: {agentId, item}
+     *  message: {"agentId":"xxx","item":{}}
      *
      *
      */
     private void initUserEvents () {
-        userEvents.put("agent/create", new DataListener<Map>() {
+        userEvents.put("agent/create", new DataListener<String>() {
             @Override
             @SneakyThrows
-            public void onData(SocketIOClient client, Map data, AckRequest ackSender) {
-                var prompt = (String) data.get("prompt");
+            public void onData(SocketIOClient client, String dataJson, AckRequest ackSender) {
+                var data = JSONUtil.parse(dataJson);
+                var prompt = data.path("prompt").asText();
+
+
+
                 var random = new Random();
                 var targetIndex = random.nextInt(nodeList.size());
                 var targetNode = nodeList.get(targetIndex);
 
-                if (Boolean.TRUE.equals(targetNode.isLocal)) {
+                // 临时测试
+                targetNode = nodeList.stream().filter(o -> !o.getIsLocal()).findFirst().orElse(null);
+
+
+                if (!data.path("source").isMissingNode() || Boolean.TRUE.equals(targetNode.isLocal)) {
                     var agentId = UUID.randomUUID().toString();
-                    var agent = new Agent(agentId, prompt, null, null) {};
+                    var agent = new Agent(agentId, prompt, new OpenAI("qwen-plus", new HashMap<>(), System.getenv("OPENAI_API_KEY"), "https://dashscope.aliyuncs.com/compatible-mode/v1", 3), null) {};
                     agents.put(agentId, agent);
-                    ackSender.sendAckData(Map.of("agentId", agentId));
+                    System.out.println("<agent/create> local %s".formatted(dataJson));
+                    ackSender.sendAckData("{\"agentId\":\"%s\"}".formatted(agentId));
                 } else if (targetNode.client != null && targetNode.client.connected()) {
-                    targetNode.client.emit("agent/create", new Object[]{data}, args -> {
-                        if (args.length > 0 && args[0] instanceof Map) {
-                            ackSender.sendAckData(args[0]);
+                    System.out.println("<agent/create> %s cluster %s".formatted(port, dataJson));
+
+                    proxyToOtherNode("agent/create", data, ackSender, targetNode);
+
+                }
+            }
+        });
+
+        userEvents.put("agent/send", new DataListener<String>() {
+            @Override
+            @SneakyThrows
+            public void onData(SocketIOClient client, String dataJson, AckRequest ackSender) {
+                var data = JSONUtil.parse(dataJson);
+                var agentId = data.path("agentId").asText();
+                var eventJson = data.path("event").toString();
+                var agent = agents.get(agentId);
+
+                if (agent != null) {
+                    agent.send(eventJson);
+                } else {
+                    proxyToOtherNode("agent/send", data, ackSender, null);
+                }
+            }
+        });
+
+        userEvents.put("agent/active", new DataListener<String>() {
+            @Override
+            @SneakyThrows
+            public void onData(SocketIOClient client, String dataJson, AckRequest ackSender) {
+                var data = JSONUtil.parse(dataJson);
+                var agentId = data.path("agentId").asText();
+                var agent = agents.get(agentId);
+
+                agentClient.put(agentId, client.getSessionId());
+
+                if (agent != null) {
+                    agent.subscribe(item -> {
+                        var messageJson = "{\"agentId\":\"%s\",\"item\":%s}".formatted(agentId, JSONUtil.stringify(item));
+
+                        if (!data.path("source").isMissingNode()) {
+                            var reverseJson = "{\"event\":\"%s\",\"body\":%s}".formatted("message", messageJson);
+                            var targetNode = nodeList.stream().filter(o -> {
+                                return "%s:%s".formatted(o.ip, o.port).equals(data.get("source").asString());
+                            }).toList();
+                            targetNode.getFirst().client.emit("reverse", reverseJson);
+                        } else {
+                            client.sendEvent("message", messageJson);
                         }
                     });
-                }
-            }
-        });
-
-        userEvents.put("agent/send", new DataListener<Map>() {
-            @Override
-            @SneakyThrows
-            public void onData(SocketIOClient client, Map data, AckRequest ackSender) {
-                var agentId = (String) data.get("agentId");
-                var event = (Map) data.get("event");
-                var agent = agents.get(agentId);
-
-                if (agent != null) {
-                    agent.send(JSONUtil.stringify(event));
+                    ackSender.sendAckData("{\"success\":true}");
                 } else {
-                    proxyToOtherNode(agentId, "agent/send", data, ackSender);
+                    proxyToOtherNode("agent/active", data, ackSender, null);
                 }
             }
         });
 
-        userEvents.put("agent/active", new DataListener<Map>() {
+        userEvents.put("agent/leave", new DataListener<String>() {
             @Override
             @SneakyThrows
-            public void onData(SocketIOClient client, Map data, AckRequest ackSender) {
-                var agentId = (String) data.get("agentId");
-                var agent = agents.get(agentId);
-
-                if (agent != null) {
-                    agentClient.put(agentId, client.getSessionId().toString());
-                    agent.subscribe(item -> client.sendEvent("message", Map.of("agentId", agentId, "item", item)));
-                    ackSender.sendAckData(Map.of("success", true));
-                } else {
-                    proxyToOtherNode(agentId, "agent/active", data, ackSender);
-                }
-            }
-        });
-
-        userEvents.put("agent/leave", new DataListener<Map>() {
-            @Override
-            @SneakyThrows
-            public void onData(SocketIOClient client, Map data, AckRequest ackSender) {
-                var agentId = (String) data.get("agentId");
+            public void onData(SocketIOClient client, String dataJson, AckRequest ackSender) {
+                var data = JSONUtil.parse(dataJson);
+                var agentId = data.path("agentId").asText();
                 var agent = agents.get(agentId);
 
                 if (agent != null) {
                     agentClient.remove(agentId);
-                    ackSender.sendAckData(Map.of("success", true));
+                    ackSender.sendAckData("{\"success\":true}");
                 } else {
-                    proxyToOtherNode(agentId, "agent/leave", data, ackSender);
+                    proxyToOtherNode("agent/leave", data, ackSender, null);
                 }
             }
         });
@@ -326,31 +440,53 @@ public abstract class Websocket {
      * 初始化服务间通信
      *
      * 监听事件
-     * alive: {timestamp} 。
-     * proxy: {event, body} 。根据event直接调用userEvent里面的处理函数
+     * alive: {"ip", port, timestamp}。 根据其他节点广播的存活消息，更新节点状态
+     * proxy: {"event":"xxx","body":"{}"}。根据 event 直接调用 userEvent 里面的处理函数
+     * reverse: {event,"body":"{}"}。根据 agentId 从 agentClient 获取客户端，然后发送 body
      *
      */
     private void initSysEvents() {
-        sysEvents.put("alive", new DataListener<Map>() {
+        sysEvents.put("alive", new DataListener<String>() {
             @Override
-            public void onData(SocketIOClient client, Map data, AckRequest ackSender) {
-                var timestamp = data.get("timestamp");
-                log.debug("initSysEvents received alive with timestamp: {}", timestamp);
+            public void onData(SocketIOClient client, String dataJson, AckRequest ackSender) {
             }
         });
 
-        sysEvents.put("proxy", new DataListener<Map>() {
+        sysEvents.put("proxy", new DataListener<String>() {
             @Override
             @SneakyThrows
-            public void onData(SocketIOClient client, Map data, AckRequest ackSender) {
-                var event = (String) data.get("event");
-                var body = (Map) data.get("body");
+            public void onData(SocketIOClient client, String dataJson, AckRequest ackSender) {
+                var data = JSONUtil.parse(dataJson);
+                var event = data.path("event").asText();
+                var bodyJson = data.path("body").toString();
                 var listener = userEvents.get(event);
 
-                if (listener != null) {
-                    listener.onData(client, body, ackSender);
+
+                listener.onData(client, bodyJson, ackSender);
+            }
+        });
+
+        sysEvents.put("reverse", new DataListener<String>() {
+            @Override
+            @SneakyThrows
+            public void onData(SocketIOClient client, String dataJson, AckRequest ackSender) {
+                var data = JSONUtil.parse(dataJson);
+
+                var body = data.get("body");
+                var agentId = body.get("agentId").asString();
+                var bodyJson = data.path("body").toString();
+                var sessionId = agentClient.get(agentId);
+
+                if (sessionId != null) {
+                    var targetClient = server.getNamespace("/user").getClient(sessionId);
+                    if (targetClient != null) {
+                        targetClient.sendEvent("message", bodyJson);
+//                        ackSender.sendAckData("{\"success\":true}");
+                    } else {
+//                        ackSender.sendAckData("{\"success\":false,\"reason\":\"client not found\"}");
+                    }
                 } else {
-                    ackSender.sendAckData(Map.of("success", false));
+//                    ackSender.sendAckData("{\"success\":false,\"reason\":\"agent not subscribed\"}");
                 }
             }
         });
@@ -359,12 +495,12 @@ public abstract class Websocket {
 
     protected void setupUserNS(SocketIONamespace userNS) {
         initUserEvents();
-        userEvents.forEach((event, listener) -> userNS.addEventListener(event, Map.class, listener));
+        userEvents.forEach((event, listener) -> userNS.addEventListener(event, String.class, listener));
     }
 
 
     protected void setupSysNS(SocketIONamespace sysNS) {
         initSysEvents();
-        sysEvents.forEach((event, listener) -> sysNS.addEventListener(event, Map.class, listener));
+        sysEvents.forEach((event, listener) -> sysNS.addEventListener(event, String.class, listener));
     }
 }
