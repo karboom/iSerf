@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit;
  * OpenAI
  */
 @Slf4j
-public class OpenAI extends BaseLLM {
+public class OpenAI extends Base {
     private final SchemaGenerator schemaGenerator;
     private final OkHttpClient httpClient;
 
@@ -61,7 +61,7 @@ public class OpenAI extends BaseLLM {
      * @return 自定义数据结构
      */
     @Override
-    public Flux<OutputBO> send(List<Item> memory, Class<?> outputFormat, List<Tool> tools) {
+    public Flux<Output> send(List<Item> memory, Class<?> outputFormat, List<Tool> tools) {
         return Flux.create(sink -> {
             var requestBody = buildRequestBody(memory, outputFormat, tools);
 
@@ -111,7 +111,7 @@ public class OpenAI extends BaseLLM {
     }
 
     @Override
-    public OutputBO query(List<Item> messages, Class<?> outputFormat) {
+    public Output query(List<Item> messages, Class<?> outputFormat) {
         var requestBody = buildRequestBody(messages, outputFormat, null);
         var requestJson = JSONUtil.parse(requestBody);
         requestJson.remove("stream");
@@ -229,7 +229,7 @@ public class OpenAI extends BaseLLM {
     }
 
     @Override
-    public TaskStatusBO taskStatus(String taskId) {
+    public BatchTaskInfo taskStatus(String taskId) {
         var request = new Request.Builder()
                 .url("%s/batches/%s".formatted(this.url, taskId))
                 .addHeader("Authorization", "Bearer %s".formatted(this.apiKey))
@@ -250,14 +250,14 @@ public class OpenAI extends BaseLLM {
             var statusNode = responseJson.path("status");
             var apiStatus = statusNode.isMissingNode() || statusNode.isNull() ? "unknown" : statusNode.asText();
             var mappedStatus = switch (apiStatus) {
-                case "completed" -> TaskStatusBO.STATUS.DONE;
-                case "failed" -> TaskStatusBO.STATUS.ERROR;
-                case "expired" -> TaskStatusBO.STATUS.EXPIRED;
-                case "cancelled" -> TaskStatusBO.STATUS.CANCELLED;
-                default -> TaskStatusBO.STATUS.DOING;
+                case "completed" -> BatchTaskInfo.STATUS.DONE;
+                case "failed" -> BatchTaskInfo.STATUS.ERROR;
+                case "expired" -> BatchTaskInfo.STATUS.EXPIRED;
+                case "cancelled" -> BatchTaskInfo.STATUS.CANCELLED;
+                default -> BatchTaskInfo.STATUS.DOING;
             };
             
-            var taskStatus = TaskStatusBO.builder()
+            var taskStatus = BatchTaskInfo.builder()
                     .id(responseJson.path("id").asText())
                     .status(mappedStatus)
                     .build();
@@ -279,7 +279,7 @@ public class OpenAI extends BaseLLM {
     }
 
     @Override
-    public List<OutputBO> taskResult(TaskStatusBO task) {
+    public List<Output> taskResult(BatchTaskInfo task) {
         // 下载输出文件
         var downloadRequest = new Request.Builder()
                 .url("%s/files/%s/content".formatted(this.url, task.getSuccessResultId()))
@@ -494,8 +494,8 @@ public class OpenAI extends BaseLLM {
         return toolsArray;
     }
 
-    private List<OutputBO> parseOutputBatch(String data) {
-        var outputs = new ArrayList<OutputBO>();
+    private List<Output> parseOutputBatch(String data) {
+        var outputs = new ArrayList<Output>();
         var lines = data.split("\n");
         for (var line : lines) {
             if (line != null && !line.trim().isEmpty()) {
@@ -518,8 +518,8 @@ public class OpenAI extends BaseLLM {
      * @param isStream
      * @return
      */
-    private OutputBO parseOutput(ObjectNode data, Boolean isStream) {
-        var output = new OutputBO();
+    private Output parseOutput(ObjectNode data, Boolean isStream) {
+        var output = new Output();
 
         var idNode = data.path("id");
         if (!idNode.isMissingNode() && !idNode.isNull()) {
@@ -530,9 +530,9 @@ public class OpenAI extends BaseLLM {
 
         var choicesNode = data.path("choices");
         if (!choicesNode.isEmpty()) {
-            var outputChoices = new ArrayList<OutputBO.Choice>();
+            var outputChoices = new ArrayList<Output.Choice>();
             for (var choiceNode : choicesNode) {
-                var outputChoice = new OutputBO.Choice();
+                var outputChoice = new Output.Choice();
 
                 var messageContentNode = choiceNode.path(isStream ? "delta": "message");
                 if (!messageContentNode.isEmpty()) {
@@ -548,7 +548,7 @@ public class OpenAI extends BaseLLM {
 
                     var toolCallsNode = messageContentNode.path("tool_calls");
                     if (!toolCallsNode.isEmpty()) {
-                        var toolCalls = new ArrayList<OutputBO.ToolCall>();
+                        var toolCalls = new ArrayList<Output.ToolCall>();
 
                         for (var toolCall : toolCallsNode) {
                             var functionNode = toolCall.path("function");
@@ -559,7 +559,7 @@ public class OpenAI extends BaseLLM {
                             var argNode = functionNode.path("arguments");
 
 
-                            var object = OutputBO.ToolCall.builder().id(funcIdNode.asString()).index(indexNode.asInt()).arguments(argNode.asString()).build();
+                            var object = Output.ToolCall.builder().id(funcIdNode.asString()).index(indexNode.asInt()).arguments(argNode.asString()).build();
 
                             if (!nameNode.isMissingNode()) {
                                 object.setName(nameNode.asString());
@@ -584,7 +584,7 @@ public class OpenAI extends BaseLLM {
 
         var usageNode = data.path("usage");
         if (!usageNode.isEmpty()) {
-            var usage = OutputBO.Usage.builder()
+            var usage = Output.Usage.builder()
                     .promptTokens(usageNode.path("prompt_tokens").asInt())
                     .completionTokens(usageNode.path("completion_tokens").asInt())
                     .totalTokens(usageNode.path("total_tokens").asInt())

@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class TaskStatusBO {
+public class BatchTaskInfo {
     static public class STATUS {
         static public final String DOING = "DOING";
         static public final String DONE = "DONE";

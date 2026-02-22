@@ -139,7 +139,7 @@ public class OpenAITest {
             var toolCalls = new ArrayList<String>();
             var finished = new AtomicBoolean(false);
 
-            var holder = new ArrayList<OutputBO>();
+            var holder = new ArrayList<Output>();
             response.subscribe(
                     chunk -> {
                         holder.add(chunk);
@@ -398,11 +398,11 @@ public class OpenAITest {
             
             // 验证状态是有效的
             assertTrue(
-                TaskStatusBO.STATUS.DOING.equals(taskStatus.getStatus()) ||
-                TaskStatusBO.STATUS.DONE.equals(taskStatus.getStatus()) ||
-                TaskStatusBO.STATUS.ERROR.equals(taskStatus.getStatus()) ||
-                TaskStatusBO.STATUS.EXPIRED.equals(taskStatus.getStatus()) ||
-                TaskStatusBO.STATUS.CANCELLED.equals(taskStatus.getStatus())
+                BatchTaskInfo.STATUS.DOING.equals(taskStatus.getStatus()) ||
+                BatchTaskInfo.STATUS.DONE.equals(taskStatus.getStatus()) ||
+                BatchTaskInfo.STATUS.ERROR.equals(taskStatus.getStatus()) ||
+                BatchTaskInfo.STATUS.EXPIRED.equals(taskStatus.getStatus()) ||
+                BatchTaskInfo.STATUS.CANCELLED.equals(taskStatus.getStatus())
             );
             
             // 打印任务状态以便调试
@@ -419,13 +419,13 @@ public class OpenAITest {
 
 
             // 等待任务完成（批处理可能需要一些时间）
-            TaskStatusBO taskStatus;
+            BatchTaskInfo batchTaskInfo;
             int maxRetries = 12; // 最多等待60秒 (12 * 5秒)
             int retryCount = 0;
             
             do {
-                taskStatus = getLlm("batch-test-model").taskStatus(batchId);
-                if (TaskStatusBO.STATUS.DONE.equals(taskStatus.getStatus())) {
+                batchTaskInfo = getLlm("batch-test-model").taskStatus(batchId);
+                if (BatchTaskInfo.STATUS.DONE.equals(batchTaskInfo.getStatus())) {
                     break;
                 }
 
@@ -438,11 +438,11 @@ public class OpenAITest {
             }
             
             // 验证任务状态
-            assertNotNull(taskStatus);
-            assertNotNull(taskStatus.getSuccessResultId());
+            assertNotNull(batchTaskInfo);
+            assertNotNull(batchTaskInfo.getSuccessResultId());
             
             // 获取任务结果
-            var results = getLlm("batch-test-model").taskResult(taskStatus);
+            var results = getLlm("batch-test-model").taskResult(batchTaskInfo);
             
             // 验证结果不为空
             assertNotNull(results);

@@ -11,7 +11,7 @@ import java.util.List;
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-public class OutputBO {
+public class Output {
     @Data
     @Builder
     @AllArgsConstructor

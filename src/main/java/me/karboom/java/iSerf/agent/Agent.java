@@ -3,8 +3,8 @@ package me.karboom.java.iSerf.agent;
 import cn.hutool.core.util.StrUtil;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.llm.text.BaseLLM;
-import me.karboom.java.iSerf.llm.text.OutputBO;
+import me.karboom.java.iSerf.llm.text.Base;
+import me.karboom.java.iSerf.llm.text.Output;
 import me.karboom.java.iSerf.memory.Item;
 import me.karboom.java.iSerf.memory.LocalMemory;
 import me.karboom.java.iSerf.memory.Memory;
@@ -45,7 +45,7 @@ public abstract class Agent {
     public String id;
     public Memory memory = new LocalMemory();
     protected List<Tool> tools;
-    protected BaseLLM llm;
+    protected Base llm;
     public String prompt;
     protected PriorityBlockingQueue<Event> queue;
     public Flux<Item> itemBroadcast;
@@ -72,7 +72,7 @@ public abstract class Agent {
      * @param llm   LLM 实例
      * @param tools 工具列表
      */
-    public Agent(String id, String prompt, BaseLLM llm, List<Tool> tools) {
+    public Agent(String id, String prompt, Base llm, List<Tool> tools) {
         this.id = id;
         this.prompt = prompt;
         this.llm = llm;
@@ -99,7 +99,7 @@ public abstract class Agent {
         return broadcast.subscribe(consumer);
     }
 
-    private Mono<Tuple3<Item, List<OutputBO>, Item>> fluxHandle(Flux<OutputBO> flux, Class format) {
+    private Mono<Tuple3<Item, List<Output>, Item>> fluxHandle(Flux<Output> flux, Class format) {
         return flux
                 .publishOn(Schedulers.fromExecutor(this.eventPool))
                 .reduce(Tuples.of(
@@ -740,14 +740,14 @@ public abstract class Agent {
      * @param chunks 流式响应块列表
      * @return 合并后的工具调用列表，每个choice对应一组ToolCall
      */
-    private List<List<Item.ToolCall>> mergeToolCalls(List<OutputBO> chunks) {
+    private List<List<Item.ToolCall>> mergeToolCalls(List<Output> chunks) {
         if (chunks.isEmpty()) {
             return new ArrayList<>();
         }
 
         var result = new ArrayList<List<Item.ToolCall>>();
 
-        var mergedToolCalls = new HashMap<Integer, OutputBO.ToolCall>();
+        var mergedToolCalls = new HashMap<Integer, Output.ToolCall>();
 
         for (var chunk : chunks) {
             var choices = chunk.getChoices();
