@@ -12,12 +12,30 @@
   <div id="app"></div>
   <script>
     window.$docsify = {
-      name: 'iSlogger',
-      repo: 'https://github.com/karboom/iSlogger',
+      homepage: "说明.md",
+      name: 'iSerf',
+      repo: 'https://github.com/karboom/iSerf',
       // maxLevel: 4,
       // subMaxLevel: 6,
       loadSidebar: true,
-      loadNavbar: true
+      loadNavbar: true,
+      alias: {
+        // '/': '/zh-cn/'
+      },
+
+      search: {
+        placeholder: {
+          '/zh-cn/': "搜索"
+        },
+        noData: {
+          "/zh-cn/": "找不到结果"
+        },
+        depth: 6
+      }
+    }
+
+    if (window.location.hash == '/' || window.location.hash == '') {
+      window.location.hash = '/zh-cn/开始/介绍';
     }
   </script>
   <!-- Docsify v4 -->

@@ -1,7 +1,7 @@
 # Websocket 集群
 提供一个弹性伸缩的集群服务，每个节点是对等的，即提供服务，也充当路由。扩缩容无需迁移节点内容。外层可以增加负载均衡来统一入口。
 
-![Websocket 集群架构](https://karboom-blog.oss-cn-hangzhou.aliyuncs.com/iSlogger/%E6%9E%B6%E6%9E%84%E5%9B%BE-%E6%9C%8D%E5%8A%A1%E9%9B%86%E7%BE%A4.webp)
+![Websocket 集群架构](https://karboom-blog.oss-cn-hangzhou.aliyuncs.com/iSerf/%E6%9E%B6%E6%9E%84%E5%9B%BE-%E6%9C%8D%E5%8A%A1%E9%9B%86%E7%BE%A4.webp)
 
 
 
@@ -12,7 +12,7 @@
 继承 `Websocket` 类并实现 `getNodes()` 方法：
 
 ```java
-import me.karboom.java.iSlogger.server.Websocket;
+import me.karboom.java.iSerf.server.Websocket;
 import java.util.List;
 
 public class MyWebsocketServer extends Websocket {
@@ -23,7 +23,7 @@ public class MyWebsocketServer extends Websocket {
     @Override
     public List<String> getNodes() {
         // K8S 环境：通过 headless service 域名解析获取节点列表
-        // return List.of("islogger.default.svc.cluster.local");
+        // return List.of("iSerf.default.svc.cluster.local");
         
         // ECS 环境：直接返回 IP 池
         return List.of("192.168.1.10:9092", "192.168.1.11:9092", "192.168.1.12:9092");
