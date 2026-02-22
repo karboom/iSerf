@@ -6,6 +6,10 @@ build/
 !**/src/test/**/build/
 .kotlin
 
+**/iFunction/**
+
+.run/
+
 ### IntelliJ IDEA ###
 .idea/modules.xml
 .idea/jarRepositories.xml
