@@ -1,6 +1,7 @@
 plugins {
     id("java")
     id("com.vanniktech.maven.publish") version "0.36.0"
+    id("org.graalvm.buildtools.native") version "0.11.4"
 }
 
 group = "io.github.karboom"
@@ -26,6 +27,9 @@ dependencies {
     implementation("com.corundumstudio.socketio:netty-socketio:2.0.13")
     implementation("io.socket:socket.io-client:2.1.1")
 
+    implementation("com.hivemq:hivemq-mqtt-client:1.3.3")
+    implementation("com.hivemq:hivemq-community-edition-embedded:2025.5")
+
     implementation("com.cronutils:cron-utils:9.2.1")
 
     implementation("io.lettuce:lettuce-core:7.4.0.RELEASE")
@@ -33,6 +37,11 @@ dependencies {
     implementation("cn.hutool:hutool-all:5.8.43")
 
     implementation("org.apache.commons:commons-math3:3.6.1")
+
+    implementation("net.bramp.ffmpeg:ffmpeg:0.8.0")
+
+    implementation("org.jooq:jooq:3.20.0")
+    implementation("org.postgresql:postgresql:42.7.5")
 
 
     compileOnly("org.projectlombok:lombok:1.18.42")
