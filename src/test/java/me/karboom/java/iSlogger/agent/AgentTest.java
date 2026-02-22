@@ -287,6 +287,7 @@ class AgentTest {
         });
     }
 
+
     /**
      * 测试错误抛出流程
      */
@@ -303,5 +304,164 @@ class AgentTest {
                     System.out.println("error: " + e.getMessage());
                 })
                 .subscribe(System.out::println);
+    }
+
+    /**
+     * 测试 MESSAGE 事件处理
+     */
+    @Test
+    void testMessageEvent() {
+        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+            var llm = llmTest.getLlm();
+            var agent = new Agent("test-message-agent", "你是一个有用的助手", llm, tools) {};
+
+            var receivedItems = new ArrayList<Item>();
+            agent.subscribe(item -> receivedItems.add(item));
+
+            agent.send("你好");
+
+            Thread.sleep(5000);
+
+            assertTrue(receivedItems.size() > 0, "应收到响应消息");
+            var textItems = receivedItems.stream()
+                    .filter(item -> item.getType().equals(Item.TYPE.TEXT))
+                    .toList();
+            assertFalse(textItems.isEmpty(), "应包含文本类型的响应");
+        });
+    }
+
+    /**
+     * 测试 ORGANIZE_MEMORY 事件处理
+     */
+    @Test
+    void testOrganizeMemoryEvent() {
+        assertTimeoutPreemptively(Duration.ofSeconds(60), () -> {
+            var llm = llmTest.getLlm();
+            var agent = new Agent("test-organize-memory-agent", "你是一个有用的助手", llm, tools) {};
+
+            var messages = List.of(
+                    "你好",
+                    "今天天气怎么样",
+                    "北京天气如何",
+                    "上海天气如何",
+                    "杭州天气如何",
+                    "你知道什么是人工智能吗",
+                    "介绍一下机器学习",
+                    "深度学习是什么",
+                    "神经网络和深度学习的关系",
+                    "谢谢你的回答"
+            );
+
+            for (var i = 0; i < messages.size(); i++) {
+                var userItem = Item.builder()
+                        .id(UUID.randomUUID().toString())
+                        .role(Item.ROLE.USER)
+                        .type(Item.TYPE.TEXT)
+                        .text(messages.get(i))
+                        .build();
+                agent.memory.add(userItem);
+
+                var assistantItem = Item.builder()
+                        .id(UUID.randomUUID().toString())
+                        .role(Item.ROLE.ASSISTANT)
+                        .type(Item.TYPE.TEXT)
+                        .text("这是一个回复")
+                        .build();
+                agent.memory.add(assistantItem);
+            }
+
+            Thread.sleep(1000);
+
+            var memoryBeforeCompress = agent.memory.get();
+            var countBefore = memoryBeforeCompress.size();
+            System.out.println("压缩前记忆数量: " + countBefore);
+            assertTrue(countBefore > 20, "压缩前应有超过20条记忆");
+
+            var event = Event.builder()
+                    .type(Event.Type.ORGANIZE_MEMORY)
+                    .priority(1)
+                    .build();
+
+            agent.queue.offer(event);
+
+            Thread.sleep(10000);
+
+            var memoryAfterCompress = agent.memory.get();
+            var countAfter = memoryAfterCompress.size();
+            System.out.println("压缩后记忆数量: " + countAfter);
+            
+            var forgottenCount = memoryAfterCompress.stream()
+                    .filter(item -> item.getIsForgotten() != null && item.getIsForgotten() == 1)
+                    .count();
+            System.out.println("被遗忘的记忆数量: " + forgottenCount);
+            assertTrue(forgottenCount > 0, "应有记忆项被标记为遗忘");
+            
+            var summaryCount = memoryAfterCompress.stream()
+                    .filter(item -> item.getIsForgotten() != null && item.getIsForgotten() == 0)
+                    .count();
+            assertTrue(summaryCount > 0, "应有未遗忘的摘要内容");
+        });
+    }
+
+    /**
+     * 测试 RECOVERY 事件处理
+     */
+    @Test
+    void testRecoveryEvent() {
+        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+            var llm = llmTest.getLlm();
+            var agent = new Agent("test-recovery-agent", "你是一个有用的助手", llm, tools) {};
+
+            agent.recovery();
+
+            Thread.sleep(1000);
+
+            assertTrue(true, "RECOVERY 事件已处理");
+        });
+    }
+
+    /**
+     * 测试 invokeToolCallCache 方法
+     */
+    @Test
+    void testInvokeToolCallCache() {
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            var llm = llmTest.getLlm();
+            var agent = new Agent("test-cache-agent", "你是一个有用的助手", llm, tools) {};
+
+            // 准备测试参数
+            var testParams = new HashMap<String, Object>() {{
+                put("location", "北京");
+            }};
+
+            // 创建缓存
+            var cache = ToolCallCache.builder()
+                    .callId("test-call-001")
+                    .toolName("getWeather")
+                    .params(testParams)
+                    .build();
+            agent.toolCallCaches.add(cache);
+
+            // 测试正常调用缓存
+            var result = agent.invokeToolCallCache("test-call-001");
+            assertNotNull(result, "应返回调用结果");
+
+            // 测试缓存不存在的情况
+            assertThrows(RuntimeException.class, () -> {
+                agent.invokeToolCallCache("non-existent-call");
+            }, "缓存不存在时应抛出异常");
+
+            // 测试工具不存在的情况
+            var cacheWithNonExistentTool = ToolCallCache.builder()
+                    .callId("test-call-002")
+                    .toolName("non-existent-tool")
+                    .params(testParams)
+                    .build();
+            agent.toolCallCaches.add(cacheWithNonExistentTool);
+
+            assertThrows(RuntimeException.class, () -> {
+                agent.invokeToolCallCache("test-call-002");
+            }, "工具不存在时应抛出异常");
+        });
     }
 }

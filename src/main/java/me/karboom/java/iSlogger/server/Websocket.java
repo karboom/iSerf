@@ -62,6 +62,7 @@ public abstract class Websocket {
     private Map<String, DataListener<String>> userEvents = new HashMap<>();
     private Map<String, DataListener<String>> sysEvents = new HashMap<>();
 
+    abstract Agent createAgent(ObjectNode params);
 
     /**
      *  agent 缓存：AgentId 对应 Nodes 索引，-1 表示不明确
@@ -331,9 +332,10 @@ public abstract class Websocket {
      *  agent/send: {"agentId":"xxx","event":{}}。
      *  agent/active: {"agentId":"xxx"}。订阅 agent
      *  agent/leave: {"agentId":"xxx"}。取消订阅 agent
+     *  agent/toolCall: {agentId, toolCallId}。
      *
      *  客户端监听服务端事件
-     *  message: {"agentId":"xxx","item":{}}
+     *  agent/message: {"agentId":"xxx","item":{}}
      *
      *
      */
@@ -352,12 +354,13 @@ public abstract class Websocket {
                 var targetNode = nodeList.get(targetIndex);
 
                 // 临时测试
-                targetNode = nodeList.stream().filter(o -> !o.getIsLocal()).findFirst().orElse(null);
+//                targetNode = nodeList.stream().filter(o -> !o.getIsLocal()).findFirst().orElse(null);
 
 
                 if (!data.path("source").isMissingNode() || Boolean.TRUE.equals(targetNode.isLocal)) {
-                    var agentId = UUID.randomUUID().toString();
-                    var agent = new Agent(agentId, prompt, new OpenAI("qwen-plus", new HashMap<>(), System.getenv("OPENAI_API_KEY"), "https://dashscope.aliyuncs.com/compatible-mode/v1", 3), null) {};
+                    var agent = createAgent(data);
+                    var agentId = agent.id;
+
                     agents.put(agentId, agent);
                     System.out.println("<agent/create> local %s".formatted(dataJson));
                     ackSender.sendAckData("{\"agentId\":\"%s\"}".formatted(agentId));
@@ -408,7 +411,7 @@ public abstract class Websocket {
                             }).toList();
                             targetNode.getFirst().client.emit("reverse", reverseJson);
                         } else {
-                            client.sendEvent("message", messageJson);
+                            client.sendEvent("agent/message", messageJson);
                         }
                     });
                     ackSender.sendAckData("{\"success\":true}");
@@ -431,6 +434,26 @@ public abstract class Websocket {
                     ackSender.sendAckData("{\"success\":true}");
                 } else {
                     proxyToOtherNode("agent/leave", data, ackSender, null);
+                }
+            }
+        });
+
+        userEvents.put("agent/toolCall", new DataListener<String>() {
+            @Override
+            @SneakyThrows
+            public void onData(SocketIOClient client, String dataJson, AckRequest ackSender) {
+                var data = JSONUtil.parse(dataJson);
+                var agentId = data.path("agentId").asText();
+                var toolCallId = data.path("toolCallId").asText();
+                var agent = agents.get(agentId);
+
+                log.debug("agent/toolCall agentId: " + agentId + ", toolCallId: " + toolCallId);
+
+                if (agent != null) {
+                    var result = agent.invokeToolCallCache(toolCallId);
+                    ackSender.sendAckData(JSONUtil.stringify(result));
+                } else {
+                    proxyToOtherNode("agent/toolCall", data, ackSender, null);
                 }
             }
         });
@@ -480,7 +503,7 @@ public abstract class Websocket {
                 if (sessionId != null) {
                     var targetClient = server.getNamespace("/user").getClient(sessionId);
                     if (targetClient != null) {
-                        targetClient.sendEvent("message", bodyJson);
+                        targetClient.sendEvent("agent/message", bodyJson);
 //                        ackSender.sendAckData("{\"success\":true}");
                     } else {
 //                        ackSender.sendAckData("{\"success\":false,\"reason\":\"client not found\"}");

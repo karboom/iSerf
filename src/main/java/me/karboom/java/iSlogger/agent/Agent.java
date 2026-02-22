@@ -24,6 +24,7 @@ import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.function.Tuple3;
 import reactor.util.function.Tuples;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -60,6 +61,11 @@ public abstract class Agent {
     public Persistence persistence;
 
     /**
+     * 工具调用缓存
+     */
+    public List<ToolCallCache> toolCallCaches = new ArrayList<>();
+
+    /**
      * 构造函数
      *
      * @param id    Agent ID
@@ -73,7 +79,7 @@ public abstract class Agent {
         this.tools = tools != null ? tools : new ArrayList<>();
         this.queue = new PriorityBlockingQueue<>(100, Comparator.comparing(Event::getPriority));
 
-        this.memory.add(Item.builder().id(id).role(Item.ROLE.SYSTEM).text(this.prompt).type(Item.TYPE.TEXT).build());
+        this.memory.add(Item.builder().id(id).role(Item.ROLE.SYSTEM).text(this.prompt).type(Item.TYPE.TEXT).isForgotten(0).build());
 
         this.sink = Sinks.many().multicast().onBackpressureBuffer();
         this.broadcast = sink.asFlux();
@@ -99,7 +105,7 @@ public abstract class Agent {
                 .reduce(Tuples.of(
                         Item.builder().type(Item.TYPE.THINKING).text("").isSegment(0).build(),
                         new ArrayList<>(),
-                        Item.builder().type(Item.TYPE.TEXT).text("").isSegment(0).build()
+                        Item.builder().role(Item.ROLE.ASSISTANT).type(Item.TYPE.TEXT).text("").isSegment(0).build()
                 ), (acc, chunk) -> {
                     var thinkingItem = acc.getT1();
                     var toolCall = acc.getT2();
@@ -145,7 +151,7 @@ public abstract class Agent {
 
 
                             if (format == null) {
-                                var contentItemSegment = Item.builder().type(Item.TYPE.TEXT).text(contentText).isSegment(1).build();
+                                var contentItemSegment = Item.builder().id(UUID.randomUUID().toString()).role(contentItem.getRole()).type(Item.TYPE.TEXT).text(contentText).isSegment(1).build();
                                 sink.tryEmitNext(contentItemSegment);
                             }
                         } else {
@@ -315,6 +321,50 @@ public abstract class Agent {
     }
 
     /**
+     * 直接从缓存的参数调用工具
+     * 1. 找出匹配的toolCallCache
+     * 2. 调用函数，获取result.direct并且返回
+     *
+     * Todo 跑在哪个线程池里面
+     */
+    @SneakyThrows
+    public ObjectNode invokeToolCallCache(String toolCallId) {
+        log.debug("invokeToolCallCache toolCallId: " + toolCallId);
+        
+        // 根据 toolCallId 查找缓存
+        var cache = toolCallCaches.stream()
+                .filter(c -> c.callId.equals(toolCallId))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Tool call cache not found: " + toolCallId));
+        
+        // 根据 toolName 匹配对应的 Tool
+        var matchedTool = tools.stream()
+                .filter(tool -> tool.getName().equals(cache.toolName))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Tool not found: " + cache.toolName));
+        
+        var result = Item.ToolCall.Result.builder().build();
+
+        // Todo 这里可以封装一个函数专门调用iFunction
+        var functionPath = getIFunctionPath(matchedTool);
+
+        var classPath = "%s/%s/%s".formatted(functionPath.get(0), functionPath.get(1), functionPath.get(2));
+        var versionDir = "%s/%s".formatted(functionPath.get(0), functionPath.get(1));
+
+        // 判断 versionDir 下面是否有.class 文件，否则先编译
+        if (!new File("%s.class".formatted(classPath)).exists()) {
+            var javaFile = new File("%s.java".formatted(classPath));
+            CodeUtil.compile(Files.readString(javaFile.toPath()), versionDir);
+        }
+
+        // 加载类
+        var cls = (FunctionWrapper) CodeUtil.load(versionDir, functionPath.get(2));
+        result = handleToolCallResult(cls.run(cache.params));
+
+        return result.direct;
+    }
+
+    /**
      * 整理记忆
      * 1.调用llm.query，将当前的memory压缩
      * 2.压缩后的内容追加到记忆，并且将参与压缩的记忆标记forgotten
@@ -376,7 +426,7 @@ public abstract class Agent {
 
         var format = event.getItem().getFormatted() == null ? null : event.getItem().getFormatted().getClass();
 
-        var flux = llm.send(memory.get().stream().filter(item -> item.getIsForgotten() == 1).toList(), format, tools);
+        var flux = llm.send(memory.get().stream().filter(item -> item.getIsForgotten() == 0).toList(), format, tools);
 
         fluxHandle(flux, format)
                 .flatMapMany(holder -> {
@@ -406,14 +456,24 @@ public abstract class Agent {
 
                         // 处理DIRECT类型
                         if (!directCalls.isEmpty()) {
+
                             for (Item.ToolCall call : directCalls) {
-                                sink.tryEmitNext(Item.builder().text(JSONUtil.stringify(call.getResult().getDirect())).isSegment(0).build());
+                                // 缓存工具调用参数，结果不管
+                                var cache = ToolCallCache.builder()
+                                        .callId(call.getId())
+                                        .toolName(call.getName())
+                                        .params(call.getArguments())
+                                        .build();
+                                toolCallCaches.add(cache);
+
+                                // 触发消息
+                                sink.tryEmitNext(Item.builder().toolCalls(List.of(call)).custom(call.getResult().getDirect()).type(Item.TYPE.CUSTOM).isSegment(0).build());
                             }
                         }
 
                         // 处理ERROR类型
                         if (!errorCalls.isEmpty()) {
-                            sink.tryEmitNext(Item.builder().text("我正在更新代码，请您稍后").build());
+                            sink.tryEmitNext(Item.builder().type(Item.TYPE.ERROR).text("我正在更新代码，请您稍后").build());
                             // Todo 判断IFunction
 
                             for (var toolCall : errorCalls) {
@@ -428,11 +488,12 @@ public abstract class Agent {
                                     .role(Item.ROLE.ASSISTANT)
                                     .type(Item.TYPE.TEXT)
                                     .toolCalls(llmCalls)
+                                    .isForgotten(0)
                                     .build();
 
                             var messageRes = Item.builder()
                                     .role(Item.ROLE.TOOL)
-
+                                    .isForgotten(0)
                                     .toolCalls(llmCalls)
                                     .build();
 
@@ -491,6 +552,7 @@ public abstract class Agent {
                 .type(Item.TYPE.TEXT)
                 .role(Item.ROLE.USER)
                 .id("")
+                .isForgotten(0)
                 .text(message).build();
 
         if (cls != null) {
@@ -509,6 +571,7 @@ public abstract class Agent {
 
     /**
      * 根据错误反馈更新工具内容
+     * @deprecated
      */
     public Mono<Void> updateTool(Item.ToolCall toolCall) {
         // 1. 根据ToolCall 匹配tool
@@ -707,7 +770,7 @@ public abstract class Agent {
                     if (newCall.getId() != null && newCall.getId() != "") {
                         existing.setId(newCall.getId());
                     }
-                    if (newCall.getName() != null) {
+                    if (newCall.getName() != null && newCall.getName() != "") {
                         existing.setName(newCall.getName());
                     }
                     if (newCall.getArguments() != null) {
