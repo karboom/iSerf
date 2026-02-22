@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "io.github.karboom"
-version = "0.6.0-alpha"
+version = "0.65.0-alpha"
 
 
 dependencies {
@@ -76,13 +76,13 @@ mavenPublishing {
 
     signAllPublications()
 
-    coordinates("io.github.karboom", "iSlogger", version.toString())
+    coordinates("io.github.karboom", "iSerf", version.toString())
 
     pom {
-        name.set("iSlogger")
-        description.set("iSlogger 是一个基于事件流构建的智能Agent框架，采用响应式编程模型，支持创建高交互性的应用系统。该框架设计用于支持大规模Agent协作，并利用Reactor模式提供高性能的数据处理能力。")
+        name.set("iSerf")
+        description.set("iSerf 是一个基于事件流构建的智能Agent框架，采用响应式编程模型，支持创建高交互性的应用系统。该框架设计用于支持大规模Agent协作，并利用Reactor模式提供高性能的数据处理能力。")
         inceptionYear.set("2026")
-        url.set("https://github.com/karboom/iSlogger")
+        url.set("https://github.com/karboom/iSerf")
         licenses {
             license {
                 name.set("The Apache License, Version 2.0")
@@ -98,9 +98,9 @@ mavenPublishing {
             }
         }
         scm {
-            url.set("https://github.com/karboom/iSlogger")
-            connection.set("scm:git:git://github.com/karboom/iSlogger.git")
-            developerConnection.set("scm:git:ssh://git@github.com/karboom/iSlogger.git")
+            url.set("https://github.com/karboom/iSerf")
+            connection.set("scm:git:git://github.com/karboom/iSerf.git")
+            developerConnection.set("scm:git:ssh://git@github.com/karboom/iSerf.git")
         }
     }
 }
