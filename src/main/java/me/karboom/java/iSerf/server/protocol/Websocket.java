@@ -1,0 +1,313 @@
+package me.karboom.java.iSerf.server.protocol;
+
+import cn.hutool.core.util.IdUtil;
+import com.corundumstudio.socketio.*;
+import com.corundumstudio.socketio.listener.DataListener;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
+import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.server.messageBus.IMessageBus;
+import me.karboom.java.iSerf.server.messageBus.Pulsar;
+import me.karboom.java.iSerf.server.metaData.IMetaData;
+import me.karboom.java.iSerf.server.metaData.Node;
+import me.karboom.java.iSerf.server.metaData.RedisSingle;
+import me.karboom.java.iSerf.team.Team;
+import me.karboom.java.iSerf.util.DataUtil;
+import me.karboom.java.iSerf.util.JSONUtil;
+import tools.jackson.databind.node.ObjectNode;
+
+import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.function.BiFunction;
+import java.util.function.Function;
+
+/**
+ * 去中心化 Websocket 服务器，即是服务，也是其他集群节点的代理
+ */
+@Slf4j
+public abstract class Websocket {
+
+    protected SocketIOServer server;
+
+    public String id;
+    protected String clusterIp;
+    protected Integer port;
+
+    private Map<String, Agent> localAgents = new HashMap<>();
+    private Map<String, Team> teams = new HashMap<>();
+
+
+    private Map<String, DataListener<String>> sysEvents = new HashMap<>();
+
+    private Map<String, BiFunction<Object, String, String>> userEventHandler = new HashMap<>();
+
+    abstract public Agent createAgent(ObjectNode params);
+
+    public IMessageBus messageBus;
+
+
+    // Todo 没有经过stop，异常退出了，如何解决数据
+    public IMetaData metaData;
+
+
+    /**
+     *  agent 缓存：AgentId 对应 Nodes 索引，-1 表示不明确
+     */
+    private Map<String, Integer> otherAgentNode = new HashMap<>();
+
+    /**
+     * client 缓存
+     */
+    private Map<String, UUID> agentClient = new HashMap<>();
+
+
+    public Websocket (String clusterIp, Integer port, IMessageBus messageBus, IMetaData metaData) {
+        this.id = DataUtil.getFlakeId();
+        this.clusterIp = clusterIp;
+        this.port = port;
+        this.messageBus = messageBus;
+        this.metaData = metaData;
+    }
+
+
+
+    /**
+     * 启动服务器后定时调用 getNodes 并且转化为 nodeList，并且 listen，并且定时调用 broadcast
+     */
+    public void start() {
+        var config = new Configuration();
+        config.setPort(port);
+        config.setSocketConfig(new SocketConfig(){{
+            setReuseAddress(true);
+        }});
+
+        server = new SocketIOServer(config);
+
+        // Agent 命名空间
+        var agentNamespace = server.addNamespace("/user");
+        setupUserNS(agentNamespace);
+
+
+        server.start();
+
+        this.listenMessage();
+
+        this.metaData.addNode(Node.builder().id(this.id).port(this.port).ip(this.clusterIp).build());
+    }
+
+    public void stop() {
+        metaData.removeNode(this.id);
+    }
+
+
+
+
+    /**
+     *  初始化用户侧协议
+     *
+     *  服务端监听客户端事件
+     *  agent/create: {"prompt":"xxx"}。直接创建 Agent。响应 {"agentId":"xxx"}
+     *  agent/send: {"agentId":"xxx","event":{}}。
+     *  agent/active: {"agentId":"xxx"}。订阅 agent
+     *  agent/leave: {"agentId":"xxx"}。取消订阅 agent
+     *  agent/toolCall: {agentId, toolCallId}。
+     *
+     *  客户端监听服务端事件
+     *  agent/message: {"agentId":"xxx","item":{}}
+     *
+     *
+     */
+    private void initUserEventHandler() {
+        var nodeId = this.id;
+        
+        userEventHandler.put("agent/create", (client, dataJson)-> {
+            var data = JSONUtil.parse(dataJson);
+            var agent = createAgent(data);
+            var agentId = agent.id;
+            localAgents.put(agentId, agent);
+            metaData.setAgentStay(agentId, nodeId);
+            log.debug("initUserEventHandler agent/create: local " + dataJson);
+            return "{\"agentId\":\"%s\"}".formatted(agentId);
+        });
+
+        userEventHandler.put("agent/send", (client, dataJson)-> {
+            var data = JSONUtil.parse(dataJson);
+            var agentId = data.path("agentId").asText();
+            var eventJson = data.path("event").toString();
+            var agent = localAgents.get(agentId);
+            if (agent != null) {
+                agent.send(eventJson);
+            } else {
+                var targetNodeId = metaData.getAgentStay(agentId);
+                sendToOtherNode("agent/send", dataJson, targetNodeId);
+            }
+            return null;
+        });
+
+        userEventHandler.put("agent/active", (client, dataJson)-> {
+            var data = JSONUtil.parse(dataJson);
+            var agentId = data.path("agentId").asText();
+            var agent = localAgents.get(agentId);
+
+            if (agent != null) {
+
+                agent.subscribe(item -> {
+                    var messageJson = "{\"agentId\":\"%s\",\"item\":%s}".formatted(agentId, JSONUtil.stringify(item));
+
+                    switch (client) {
+                        case SocketIOClient ioClient -> {
+                            ioClient.sendEvent("agent/message", messageJson);
+                        }
+
+                        case String sourceNodeId -> {
+                            var reverseJson = "%s|%s|%s|%s".formatted(this.id, "reverse", "agent/message", messageJson);
+
+                            messageBus.publish("%s-message".formatted(sourceNodeId), reverseJson);
+                        }
+                        default -> throw new IllegalStateException("Unexpected value: " + client);
+                    }
+
+                });
+                return "{\"success\":true}";
+            } else {
+                var targetNodeId = metaData.getAgentStay(agentId);
+                agentClient.put(agentId, ((SocketIOClient) client).getSessionId());
+                sendToOtherNode("agent/active", dataJson, targetNodeId);
+                return null;
+            }
+        });
+
+        userEventHandler.put("agent/leave", (client, dataJson)-> {
+            var data = JSONUtil.parse(dataJson);
+            var agentId = data.path("agentId").asText();
+            var agent = localAgents.get(agentId);
+            if (agent != null) {
+                agentClient.remove(agentId);
+                return "{\"success\":true}";
+            } else {
+                var targetNodeId = metaData.getAgentStay(agentId);
+                sendToOtherNode("agent/leave", dataJson, targetNodeId);
+                return null;
+            }
+        });
+
+        userEventHandler.put("agent/toolCall", (client, dataJson)-> {
+            var data = JSONUtil.parse(dataJson);
+            var agentId = data.path("agentId").asText();
+            var toolCallId = data.path("toolCallId").asText();
+            var agent = localAgents.get(agentId);
+            log.debug("initUserEventHandler agent/toolCall agentId: " + agentId + ", toolCallId: " + toolCallId);
+            if (agent != null) {
+                var result = agent.invokeToolCallCache(toolCallId);
+                return JSONUtil.stringify(result);
+            } else {
+                var targetNodeId = metaData.getAgentStay(agentId);
+                sendToOtherNode("agent/toolCall", dataJson, targetNodeId);
+                return null;
+            }
+        });
+    }
+
+    /**
+     * 通过MessageBus发布消息给其他节点
+     * 消息主题为 nodeId-message，消息数据结构为|分隔（只有4段）： sourceNodeId|type|event|body
+     */
+    private void sendToOtherNode(String event, String data, String nodeId) {
+        var body = "%s|proxy|%s|%s".formatted(this.id, event, data);
+        this.messageBus.publish("%s-message".formatted(nodeId), body);
+    }
+
+
+    /**
+     * 订阅需要本节点处理的消息
+     * 消息主题为 nodeId-message，消息数据结构为 | 分隔（只有 4 段）：sourceNodeId|type|event|body
+     */
+    public void listenMessage() {
+        messageBus.subscribe("%s-message".formatted(this.id), (message)-> {
+            log.debug("listenMessage message: " + message);
+            var parts = message.split("\\|", 4);
+
+            var sourceNode = parts[0];
+            var type = parts[1];
+            var event = parts[2];
+            var bodyJson = parts[3];
+
+            switch (type) {
+                case "proxy" -> {
+                    var handler = userEventHandler.get(event);
+                    if (handler != null) {
+                        var result = handler.apply(sourceNode, bodyJson);
+                        log.debug("listenMessage proxy event: " + event + ", result: " + result);
+
+                        if (result != null) {
+                            var msg = "%s|%s|%s|%s".formatted(this.id, "reverse", "ack", result);
+                            messageBus.publish("%s-message".formatted(sourceNode), msg);
+                        }
+                    }
+                }
+                case "reverse" -> {
+                    var data = JSONUtil.parse(bodyJson);
+                    var agentId = data.path("agentId").asText();
+
+                    var clientId = agentClient.get(agentId);
+
+                    if (!event.equals("ack")) {
+                        var client = server.getNamespace("/user").getClient(clientId);
+                        client.sendEvent(event, bodyJson);
+                    }
+
+                }
+            }
+        });
+    }
+    /**
+     * 初始化服务间通信
+     *
+     * 监听事件
+     * proxy: {"event":"xxx","body":"{}"}。根据 event 直接调用 userEvent 里面的处理函数
+     * reverse: {event,"body":"{}"}。根据 agentId 从 agentClient 获取客户端，然后发送 body
+     *
+     */
+    private void initSysEvents() {
+
+        sysEvents.put("reverse", new DataListener<String>() {
+            @Override
+            @SneakyThrows
+            public void onData(SocketIOClient client, String dataJson, AckRequest ackSender) {
+                var data = JSONUtil.parse(dataJson);
+
+                var body = data.get("body");
+                var agentId = body.get("agentId").asString();
+                var bodyJson = data.path("body").toString();
+                var sessionId = agentClient.get(agentId);
+
+                if (sessionId != null) {
+                    var targetClient = server.getNamespace("/user").getClient(sessionId);
+                    if (targetClient != null) {
+                        targetClient.sendEvent("agent/message", bodyJson);
+//                        ackSender.sendAckData("{\"success\":true}");
+                    } else {
+//                        ackSender.sendAckData("{\"success\":false,\"reason\":\"client not found\"}");
+                    }
+                } else {
+//                    ackSender.sendAckData("{\"success\":false,\"reason\":\"agent not subscribed\"}");
+                }
+            }
+        });
+    }
+
+
+    protected void setupUserNS(SocketIONamespace userNS) {
+        initUserEventHandler();
+        userEventHandler.forEach((event, handler) -> {
+            userNS.addEventListener(event, String.class, (client, dataJson, ackSender) -> {
+                var result = handler.apply(client, dataJson);
+                if (result != null) {
+                    ackSender.sendAckData(result);
+                }
+            });
+        });
+    }
+
+}
