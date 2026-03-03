@@ -5,6 +5,7 @@ import com.openai.client.okhttp.OpenAIOkHttpClient;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.tool.Tool;
 import me.karboom.java.iSerf.memory.Item;
+import me.karboom.java.iSerf.util.HttpUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import okhttp3.*;
 import okhttp3.sse.EventSource;
@@ -26,7 +27,6 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class OpenAI extends Base {
     private final SchemaGenerator schemaGenerator;
-    private final OkHttpClient httpClient;
 
     public OpenAI(String llmType, Map<String, Object> llmConfig, String apiKey, String url, Integer maxRetries) {
         super(llmType, llmConfig, apiKey, url, maxRetries);
@@ -43,13 +43,6 @@ public class OpenAI extends Base {
         if (this.maxRetries != null) {
             builder.maxRetries(this.maxRetries);
         }
-
-        this.httpClient = new OkHttpClient.Builder()
-                .connectTimeout(Duration.ofSeconds(60))
-                .readTimeout(Duration.ofSeconds(60))
-                .writeTimeout(Duration.ofSeconds(60))
-                .connectionPool(new ConnectionPool(1000, 5, TimeUnit.MINUTES))
-                .build();
     }
 
     /**
@@ -103,7 +96,7 @@ public class OpenAI extends Base {
                 }
             };
 
-            var factory = EventSources.createFactory(httpClient);
+            var factory = EventSources.createFactory(HttpUtil.getClient());
             var eventSource = factory.newEventSource(request, listener);
 
 //            sink.onDispose(eventSource::cancel);
@@ -124,7 +117,7 @@ public class OpenAI extends Base {
                 .post(RequestBody.create(requestJson.toString(), MediaType.parse("application/json")))
                 .build();
 
-        try (var response = httpClient.newCall(request).execute()) {
+        try (var response = HttpUtil.getClient().newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 throw new RuntimeException("Query failed: " + response.code());
             }
@@ -177,7 +170,7 @@ public class OpenAI extends Base {
                 .build();
 
         String fileId;
-        try (var fileResponse = httpClient.newCall(fileRequest).execute()) {
+        try (var fileResponse = HttpUtil.getClient().newCall(fileRequest).execute()) {
             if (!fileResponse.isSuccessful()) {
                 throw new RuntimeException("File upload failed: " + fileResponse.code());
             }
@@ -209,7 +202,7 @@ public class OpenAI extends Base {
                 .post(RequestBody.create(batchRequestBody.toString(), MediaType.parse("application/json")))
                 .build();
 
-        try (var batchResponse = httpClient.newCall(batchRequest).execute()) {
+        try (var batchResponse = HttpUtil.getClient().newCall(batchRequest).execute()) {
             if (!batchResponse.isSuccessful()) {
                 throw new RuntimeException("Batch creation failed: " + batchResponse.code());
             }
@@ -237,7 +230,7 @@ public class OpenAI extends Base {
                 .get()
                 .build();
 
-        try (var response = httpClient.newCall(request).execute()) {
+        try (var response = HttpUtil.getClient().newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 throw new RuntimeException("Task status query failed: " + response.code());
             }
@@ -287,7 +280,7 @@ public class OpenAI extends Base {
                 .get()
                 .build();
 
-        try (var response = httpClient.newCall(downloadRequest).execute()) {
+        try (var response = HttpUtil.getClient().newCall(downloadRequest).execute()) {
             if (!response.isSuccessful()) {
                 throw new RuntimeException("Task result download failed: " + response.code());
             }

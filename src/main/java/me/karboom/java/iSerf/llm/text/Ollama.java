@@ -7,6 +7,7 @@ import com.github.victools.jsonschema.generator.SchemaVersion;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.memory.Item;
 import me.karboom.java.iSerf.tool.Tool;
+import me.karboom.java.iSerf.util.HttpUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import okhttp3.*;
 import okhttp3.sse.EventSource;
@@ -29,7 +30,6 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class Ollama extends Base {
     private final SchemaGenerator schemaGenerator;
-    private final OkHttpClient httpClient;
 
     public Ollama(String llmType, Map<String, Object> llmConfig, String apiKey, String url, Integer maxRetries) {
         super(llmType, llmConfig, apiKey, url, maxRetries);
@@ -37,13 +37,6 @@ public class Ollama extends Base {
         var configBuilder = new SchemaGeneratorConfigBuilder(SchemaVersion.DRAFT_7, OptionPreset.PLAIN_JSON);
         var config = configBuilder.forFields().withRequiredCheck(fieldScope -> true);
         this.schemaGenerator = new SchemaGenerator(configBuilder.build());
-
-        this.httpClient = new OkHttpClient.Builder()
-                .connectTimeout(Duration.ofSeconds(60))
-                .readTimeout(Duration.ofSeconds(60))
-                .writeTimeout(Duration.ofSeconds(60))
-                .connectionPool(new ConnectionPool(100, 5, TimeUnit.MINUTES))
-                .build();
     }
 
     @Override
@@ -101,7 +94,7 @@ public class Ollama extends Base {
                 }
             };
 
-            var factory = EventSources.createFactory(httpClient);
+            var factory = EventSources.createFactory(HttpUtil.getClient());
             factory.newEventSource(request, listener);
         });
     }
@@ -116,7 +109,7 @@ public class Ollama extends Base {
                 .post(RequestBody.create(requestBody, MediaType.parse("application/json")))
                 .build();
 
-        try (var response = httpClient.newCall(request).execute()) {
+        try (var response = HttpUtil.getClient().newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 throw new RuntimeException("Query failed: " + response.code());
             }

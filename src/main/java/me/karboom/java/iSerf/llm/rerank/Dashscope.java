@@ -3,6 +3,7 @@ package me.karboom.java.iSerf.llm.rerank;
 import cn.hutool.core.util.StrUtil;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import me.karboom.java.iSerf.util.HttpUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import okhttp3.*;
 import tools.jackson.databind.node.ObjectNode;
@@ -19,7 +20,6 @@ import java.util.Map;
 @Slf4j
 public class Dashscope extends Base {
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
-    private final OkHttpClient client = new OkHttpClient();
 
     // Dashscope Rerank API base URL
     private static final String BASE_URL = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank";
@@ -46,7 +46,7 @@ public class Dashscope extends Base {
             .post(RequestBody.create(requestJson, JSON))
             .build();
 
-        try (var response = client.newCall(request).execute()) {
+        try (var response = HttpUtil.getClient().newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 throw new IOException("Unexpected code " + response);
             }

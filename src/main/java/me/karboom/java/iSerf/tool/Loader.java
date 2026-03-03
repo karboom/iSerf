@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.transport.*;
 import lombok.SneakyThrows;
+import me.karboom.java.iSerf.util.HttpUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import okhttp3.*;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -23,16 +24,9 @@ public class Loader {
     public Integer timeout;
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
-    private final OkHttpClient httpClient;
-
 
     public Loader(Integer timeout) {
         this.timeout = timeout != null ? timeout : 30;
-        this.httpClient = new OkHttpClient.Builder()
-                .connectTimeout(this.timeout, TimeUnit.SECONDS)
-                .readTimeout(this.timeout, TimeUnit.SECONDS)
-                .writeTimeout(this.timeout, TimeUnit.SECONDS)
-                .build();
     }
 
     /**

@@ -10,9 +10,9 @@ import me.karboom.java.iSerf.memory.LocalMemory;
 import me.karboom.java.iSerf.memory.Memory;
 import me.karboom.java.iSerf.tool.Tool;
 import me.karboom.java.iSerf.util.CodeUtil;
+import me.karboom.java.iSerf.util.HttpUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import reactor.core.Disposable;
@@ -41,7 +41,7 @@ import java.util.function.Consumer;
  * Todo 文件读取改异步
  */
 @Slf4j
-public abstract class Agent {
+public class Agent {
     public String id;
     public Memory memory = new LocalMemory();
     protected List<Tool> tools;
@@ -560,6 +560,7 @@ public abstract class Agent {
         }
 
         queue.offer(Event.builder()
+                .priority(1)
                 .type(Event.Type.MESSAGE)
                 .item(item)
                 .build());
@@ -587,7 +588,6 @@ public abstract class Agent {
         // 2. 通过API获取代码
         var apiUrl = "http://localhost:3000/query";
         var toolName = matchedTool.getName();
-        var client = new OkHttpClient();
 
         // 创建请求
         var request = new Request.Builder()
@@ -595,8 +595,8 @@ public abstract class Agent {
                 .get()
                 .build();
 
-        // 异步执行HTTP请求并处理响应
-        return Mono.fromCallable(() -> client.newCall(request).execute())
+        // 异步执行 HTTP 请求并处理响应
+        return Mono.fromCallable(() -> HttpUtil.getClient().newCall(request).execute())
                 .flatMap(response -> {
                     if (!response.isSuccessful()) {
                         return Mono.error(new RuntimeException("Failed to query tool code: " + response.code()));
@@ -648,7 +648,7 @@ public abstract class Agent {
                                             .post(updateRequestBody)
                                             .build();
 
-                                    return Mono.fromCallable(() -> client.newCall(updateRequest).execute())
+                                    return Mono.fromCallable(() -> HttpUtil.getClient().newCall(updateRequest).execute())
                                             .flatMap(updateResponse -> {
                                                 if (!updateResponse.isSuccessful()) {
                                                     return Mono.error(new RuntimeException("Failed to upload updated code: " + updateResponse.code()));
