@@ -1,0 +1,3 @@
+[submodule "scripts/PageIndex"]
+	path = scripts/PageIndex
+	url = ../../VectifyAI/PageIndex.git
