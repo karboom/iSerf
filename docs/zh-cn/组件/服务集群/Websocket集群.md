@@ -1,36 +1,63 @@
 # Websocket 集群
-提供一个弹性伸缩的集群服务，每个节点是对等的，即提供服务，也充当路由。扩缩容无需迁移节点内容。外层可以增加负载均衡来统一入口。
 
-![Websocket 集群架构](https://karboom-blog.oss-cn-hangzhou.aliyuncs.com/iSerf/%E6%9E%B6%E6%9E%84%E5%9B%BE-%E6%9C%8D%E5%8A%A1%E9%9B%86%E7%BE%A4.webp)
+基于 Socket.IO 实现的去中心化 Websocket 集群服务器，支持多节点部署和自动负载均衡。
 
+## 架构概述
 
+- 每个节点既是服务端，也是其他节点的代理
+- 使用 Redis 存储元数据（节点列表、Agent 路由信息）
+- 使用 Pulsar 作为消息总线进行节点间通信
+- 支持 Agent 跨节点路由和消息转发
 
 ## 代码示例
 
 ### 服务端
 
-继承 `Websocket` 类并实现 `getNodes()` 方法：
+继承 `Websocket` 类并实现 `createAgent` 方法：
 
 ```java
-import me.karboom.java.iSerf.server.Websocket;
-import java.util.List;
+package me.karboom.java.iSerf.server;
+
+import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.llm.text.OpenAI;
+import me.karboom.java.iSerf.server.messageBus.IMessageBus;
+import me.karboom.java.iSerf.server.messageBus.Pulsar;
+import me.karboom.java.iSerf.server.metaData.IMetaData;
+import me.karboom.java.iSerf.server.metaData.RedisSingle;
+import me.karboom.java.iSerf.server.protocol.Websocket;
+import me.karboom.java.iSerf.tool.Loader;
+import tools.jackson.databind.node.ObjectNode;
+
+import java.util.HashMap;
+import java.util.UUID;
 
 public class MyWebsocketServer extends Websocket {
-    public MyWebsocketServer(String ip, Integer port) {
-        super(ip, port);
-    }
 
     @Override
-    public List<String> getNodes() {
-        // K8S 环境：通过 headless service 域名解析获取节点列表
-        // return List.of("iSerf.default.svc.cluster.local");
+    public Agent createAgent(ObjectNode params) {
+        var prompt = params.path("prompt").asText();
+        var tools = new Loader(2000).fromIFunction("/path/to/functions", "toolName", null);
         
-        // ECS 环境：直接返回 IP 池
-        return List.of("192.168.1.10:9092", "192.168.1.11:9092", "192.168.1.12:9092");
+        return new Agent(
+            UUID.randomUUID().toString(), 
+            prompt, 
+            new OpenAI("qwen-plus", new HashMap<>(), System.getenv("OPENAI_API_KEY"), 
+                      "https://dashscope.aliyuncs.com/compatible-mode/v1", 3), 
+            tools
+        ) {};
+    }
+
+    public MyWebsocketServer(String ip, Integer port, IMessageBus messageBus, IMetaData metaData) {
+        super(ip, port, messageBus, metaData);
     }
 
     public static void main(String[] args) {
-        var server = new MyWebsocketServer("192.168.1.10", 9092);
+        var server = new MyWebsocketServer(
+            "192.168.1.10", 
+            9092,
+            new Pulsar("pulsar://localhost:6650"),
+            new RedisSingle("redis://localhost:6379")
+        );
         server.start();
     }
 }
@@ -144,12 +171,13 @@ public class MyWebsocketServer extends Websocket {
 | `agent/send` | `{"agentId":"xxx","event":{}}` | - | 向 Agent 发送消息 |
 | `agent/active` | `{"agentId":"xxx"}` | `{"success":true}` | 订阅 Agent，接收其消息推送 |
 | `agent/leave` | `{"agentId":"xxx"}` | `{"success":true}` | 取消订阅 Agent |
+| `agent/toolCall` | `{"agentId":"xxx","toolCallId":"xxx"}` | `{"result":{}}` | 调用 Agent 工具缓存 |
 
 #### 服务端推送事件
 
 | 事件 | 数据格式 | 说明 |
 |------|----------|------|
-| `message` | `{"agentId":"xxx","item":{}}` | 推送 Agent 产生的消息 |
+| `agent/message` | `{"agentId":"xxx","item":{}}` | 推送 Agent 产生的消息 |
 
 ### 服务侧协议（/sys）
 
@@ -167,10 +195,11 @@ public class MyWebsocketServer extends Websocket {
 
 | 事件 | 路由规则 |
 |------|----------|
-| `agent/create` | 随机选择非本节点的目标节点转发，如目标为自身则直接处理 |
+| `agent/create` | 直接在本节点创建 Agent，记录到元数据 |
 | `agent/send` | 先查 `otherAgentNode` 缓存，命中则发往对应节点；未命中则广播给所有非本节点，首个响应的节点会被缓存 |
 | `agent/active` | 先查本地 `agents` 缓存，存在则直接订阅；否则转发请求 |
 | `agent/leave` | 先查本地 `agents` 缓存，存在则直接取消订阅；否则转发请求 |
+| `agent/toolCall` | 先查本地 `agents` 缓存，存在则直接返回结果；否则转发请求 |
 
 ### 消息封装格式
 
@@ -184,15 +213,126 @@ public class MyWebsocketServer extends Websocket {
 - 每 5 秒向其他节点广播 `alive` 心跳消息
 - 节点间建立 WebSocket 连接保持通信
 
+## Redis 数据结构
+
+| Key 前缀 | 类型 | 说明 |
+|----------|------|------|
+| `Nodes` | Hash | 存储所有节点信息，{id: "ip:port"} |
+| `AS:{agentId}` | String | Agent 驻留节点 ID |
+| `AN:{agentId}` | List | 订阅该 Agent 的节点列表 |
+
 ## 性能测试
-Todo
+
+### 测试环境
+
+- 节点数：3
+- Redis：单机版
+- Pulsar：单机版
+
+### 测试指标
+
+| 指标 | 目标值 | 实测值 |
+|------|--------|--------|
+| 单节点连接数 | 10,000 | - |
+| 消息延迟 (P99) | < 100ms | - |
+| 跨节点转发延迟 | < 200ms | - |
+| 心跳间隔 | 5s | - |
+
+### 测试脚本
+
+```javascript
+// 使用 k6 进行压力测试
+import ws from 'k6/ws';
+import { check } from 'k6';
+
+export default function () {
+  const url = 'ws://localhost:9092/user';
+  
+  const response = ws.connect(url, {}, function (socket) {
+    socket.on('open', function () {
+      socket.send(JSON.stringify({ event: 'agent/create', data: { prompt: 'test' } }));
+    });
+    
+    socket.on('message', function (message) {
+      console.log('Received:', message);
+    });
+  });
+  
+  check(response, { 'status is 101': (r) => r && r.status === 101 });
+}
+```
 
 ## 负载均衡
 
-- K8S
+### K8S 环境
 
-负载均衡使用 headless service 服务域名，通过 dns 解析获取 nodes
+负载均衡使用 headless service 服务域名，通过 DNS 解析获取 nodes：
 
-- ECS
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: iserf-headless
+spec:
+  clusterIP: None
+  selector:
+    app: iserf
+  ports:
+    - port: 9092
+      targetPort: 9092
+```
 
-直接将 ip 池所有地址写入 Nginx，直接将 ip 池数组写入 nodes
+### ECS 环境
+
+直接将 IP 池所有地址写入 Nginx，直接将 IP 池数组写入 nodes：
+
+```nginx
+upstream iserf_backend {
+    server 192.168.1.10:9092;
+    server 192.168.1.11:9092;
+    server 192.168.1.12:9092;
+}
+```
+
+## 部署配置
+
+### 环境变量
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `OPENAI_API_KEY` | OpenAI API 密钥 | - |
+| `PULSAR_URL` | Pulsar 连接地址 | pulsar://localhost:6650 |
+| `REDIS_URL` | Redis 连接地址 | redis://localhost:6379 |
+| `SERVER_PORT` | 服务端口 | 9092 |
+| `CLUSTER_IP` | 集群 IP | 0.0.0.0 |
+
+### Docker 部署
+
+```dockerfile
+FROM openjdk:17-slim
+
+WORKDIR /app
+COPY build/libs/isserf.jar .
+
+ENV PULSAR_URL=pulsar://pulsar:6650
+ENV REDIS_URL=redis://redis:6379
+ENV SERVER_PORT=9092
+
+EXPOSE 9092
+
+CMD ["java", "-jar", "isserf.jar"]
+```
+
+## 故障处理
+
+### 节点故障
+
+1. 心跳检测超时（30 秒无心跳）
+2. 自动从 Redis Nodes 中移除故障节点
+3. 重新路由受影响的 Agent
+
+### 数据一致性
+
+- Agent 元数据存储在 Redis，节点重启后可恢复
+- 节点异常退出时，未持久化的数据可能丢失
+- 建议使用 Redis Persistence 或定期备份
