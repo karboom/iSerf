@@ -42,7 +42,14 @@ import java.util.function.Consumer;
  */
 @Slf4j
 public class Agent {
+    // region ========== 元数据 ==========
     public String id;
+    public String orgId;
+    public String userId;
+
+    // endregion
+
+
     public Memory memory = new LocalMemory();
     protected List<Tool> tools;
     protected Base llm;
@@ -58,7 +65,7 @@ public class Agent {
     private ExecutorService eventPool;
     private ExecutorService broadcastPool;
 
-    public Persistence persistence;
+    public IPersistence persistence;
 
     /**
      * 工具调用缓存
@@ -536,13 +543,20 @@ public class Agent {
     }
 
     private void handleRecovery(Event event) {
-        Mono.zip(
-            persistence.load(this.id, Event.class),
-            persistence.load(this.id, Item.class)
-        )
-                .map(res -> {
-                    return res;
-                }).block();
+        var result = persistence.load(this.orgId, this.userId, this.id);
+        
+        var items = result.getT1();
+        var events = result.getT2();
+        
+        log.debug("handleRecovery items size: %s, events size: %s".formatted(items.size(), events.size()));
+        
+        // 恢复记忆
+        items.forEach(memory::add);
+        
+        // 重新触发未处理的事件
+        events.stream()
+                .filter(e -> e.getType() != Event.Type.RECOVERY)
+                .forEach(queue::offer);
     }
 
     @SneakyThrows

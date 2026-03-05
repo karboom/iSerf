@@ -1,27 +1,18 @@
 package me.karboom.java.iSerf.agent;
 
 import me.karboom.java.iSerf.memory.Item;
+import reactor.util.function.Tuple2;
 
 import java.util.List;
 
-public class NonePersistence extends Persistence {
+public class NonePersistence implements IPersistence {
     @Override
-    protected List<Item> loadMemory(String agentId) {
-        return List.of();
+    public Tuple2<List<Item>, List<Event>> load(String orgId, String userId, String agentId) {
+        return null;
     }
 
     @Override
-    protected void saveMemory(String agentId, List<Item> data) {
-
-    }
-
-    @Override
-    protected List<Event> loadEvent(String agentId) {
-        return List.of();
-    }
-
-    @Override
-    protected void saveEvent(String agentId, List<Event> data) {
+    public void save(String orgId, String userId, String agentId, List<Event> events, List<Item> memories) {
 
     }
 }

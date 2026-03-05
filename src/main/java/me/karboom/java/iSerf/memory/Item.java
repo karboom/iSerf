@@ -11,6 +11,7 @@ import java.util.List;
 
 @Data
 @AllArgsConstructor
+@NoArgsConstructor
 @Builder
 public class Item {
     static public class TYPE {
@@ -36,6 +37,7 @@ public class Item {
 
     @Data
     @AllArgsConstructor
+    @NoArgsConstructor
     @Builder
     public static class ToolCall {
 
