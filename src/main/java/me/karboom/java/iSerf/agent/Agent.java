@@ -49,7 +49,7 @@ public class Agent {
 
     public List<Message> memory = new ArrayList<>();
     protected List<Tool> tools;
-    protected Base llm;
+    protected ILlmProvider llmProvider;
     public String prompt;
     protected PriorityBlockingQueue<Event> queue;
     public Flux<Message> itemBroadcast;
@@ -79,7 +79,6 @@ public class Agent {
     public Agent(String id, String prompt, Base llm, List<Tool> tools) {
         this.id = id;
         this.prompt = prompt;
-        this.llm = llm;
         this.tools = tools != null ? tools : new ArrayList<>();
         this.queue = new PriorityBlockingQueue<>(100, Comparator.comparing(Event::getPriority));
 
@@ -92,6 +91,7 @@ public class Agent {
         this.broadcastPool =  Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Broadcast-", 0).factory());
 
         this.persistence = new NonePersistence();
+        this.llmProvider = new FixedLlmProvider(llm);
 
         run();
         this.recovery();
@@ -389,7 +389,7 @@ public class Agent {
         var messages = new ArrayList<Message>(this.memory.stream().skip(1).toList());
         messages.add(summaryPrompt);
 
-        var result = llm.query(messages, null);
+        var result = llmProvider.get(null, null, null).query(messages, null);
 
         if (result != null && result.getChoices() != null && !result.getChoices().isEmpty()) {
             var summaryText = result.getChoices().get(0).getText();
@@ -427,7 +427,7 @@ public class Agent {
 
         var format = event.getMessage().getFormatted() == null ? null : event.getMessage().getFormatted().getClass();
 
-        var flux = llm.send(this.memory.stream().filter(item -> item.getIsForgotten() == 0).toList(), format, tools);
+        var flux = llmProvider.get(tools, format, null).send(this.memory.stream().filter(item -> item.getIsForgotten() == 0).toList(), format, tools);
 
         fluxHandle(flux, format)
                 .flatMapMany(holder -> {
@@ -502,7 +502,7 @@ public class Agent {
                             memory.add(messageRes);
 
                             // Todo 这里的 tools 参数是否可以去掉，节省 token
-                            var newFlux = llm.send(memory, null, tools);
+                            var newFlux = llmProvider.get(tools, null, null).send(memory, null, tools);
 
                             return fluxHandle(newFlux, format).thenMany(Flux.empty());
                         } else {
@@ -627,7 +627,7 @@ public class Agent {
                         messages.add(userMessage);
 
                         // 调用LLM生成更新后的代码
-                        return llm.send(messages, null, null)
+                        return llmProvider.get(null, null, null).send(messages, null, null)
                                 .map(chunk -> {
                                     if (chunk.getChoices() != null && !chunk.getChoices().isEmpty()) {
                                         var delta = chunk.getChoices().get(0).getText();
@@ -702,7 +702,7 @@ public class Agent {
                 .build();
 
         // Todo 这里直接给format
-        return llm.send(List.of(userMessage), null, null)
+        return llmProvider.get(null, null, null).send(List.of(userMessage), null, null)
                 .reduce("", (acc, chunk) -> {
                     var text = "";
                     if (chunk.getChoices() != null && !chunk.getChoices().isEmpty()) {
