@@ -10,6 +10,7 @@ import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
+import tools.jackson.module.blackbird.BlackbirdModule;
 
 
 import java.text.SimpleDateFormat;
@@ -23,17 +24,15 @@ public class JSONUtil {
                 .enable(StreamWriteFeature.WRITE_BIGDECIMAL_AS_PLAIN)
                 .build();
 
+        // 这里可以设置一些通用的转换参数
         mapper = JsonMapper.builder(factory)
+                .addModule(new BlackbirdModule())
                 .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .disable(SerializationFeature.FAIL_ON_EMPTY_BEANS)
-
                 .propertyNamingStrategy(PropertyNamingStrategies.LOWER_CAMEL_CASE)
                 .changeDefaultPropertyInclusion(incl -> incl.withValueInclusion(JsonInclude.Include.NON_NULL))
                 .defaultDateFormat(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss"))
                 .build();
-
-        // 这里可以设置一些通用的转换参数
-
     }
 
     public static ObjectNode create() {
@@ -48,6 +47,7 @@ public class JSONUtil {
     public static <T> T parse(String data, Class<T> cls) {
         return mapper.readValue(data, cls);
     }
+    public static <T> T parse(String data, TypeReference<T> typeReference) {return mapper.readValue(data, typeReference);}
 
     public static String stringify(Object data) {
         return mapper.writeValueAsString(data);
