@@ -1,8 +1,6 @@
 package me.karboom.java.iSerf.agent;
 
-import me.karboom.java.iSerf.memory.Item;
 import org.junit.jupiter.api.Test;
-import reactor.util.function.Tuple2;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -33,7 +31,7 @@ class NfsPersistenceTest {
             assertTrue(emptyResult.getT2().isEmpty(), "不存在的文件应返回空事件列表");
 
             // 准备测试数据
-            var toolCall = Item.ToolCall.builder()
+            var toolCall = Message.ToolCall.builder()
                     .id("call-001")
                     .name("getWeather")
                     .arguments(new java.util.HashMap<>() {{
@@ -42,22 +40,22 @@ class NfsPersistenceTest {
                     .build();
 
             var memories = List.of(
-                    Item.builder()
+                    Message.builder()
                             .id(UUID.randomUUID().toString())
-                            .role(Item.ROLE.USER)
-                            .type(Item.TYPE.TEXT)
+                            .role(Message.ROLE.USER)
+                            .type(Message.TYPE.TEXT)
                             .text("你好")
                             .build(),
-                    Item.builder()
+                    Message.builder()
                             .id(UUID.randomUUID().toString())
-                            .role(Item.ROLE.ASSISTANT)
-                            .type(Item.TYPE.TEXT)
+                            .role(Message.ROLE.ASSISTANT)
+                            .type(Message.TYPE.TEXT)
                             .text("你好，有什么可以帮助你的吗？")
                             .build(),
-                    Item.builder()
+                    Message.builder()
                             .id(UUID.randomUUID().toString())
-                            .role(Item.ROLE.ASSISTANT)
-                            .type(Item.TYPE.TOOL_CALLS)
+                            .role(Message.ROLE.ASSISTANT)
+                            .type(Message.TYPE.TOOL_CALLS)
                             .toolCalls(List.of(toolCall))
                             .build()
             );
@@ -104,10 +102,10 @@ class NfsPersistenceTest {
 
             // 测试覆盖写入
             var memories2 = List.of(
-                    Item.builder()
+                    Message.builder()
                             .id(UUID.randomUUID().toString())
-                            .role(Item.ROLE.USER)
-                            .type(Item.TYPE.TEXT)
+                            .role(Message.ROLE.USER)
+                            .type(Message.TYPE.TEXT)
                             .text("第二条消息")
                             .build()
             );

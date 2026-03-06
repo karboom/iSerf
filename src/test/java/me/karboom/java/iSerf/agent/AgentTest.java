@@ -1,7 +1,6 @@
 package me.karboom.java.iSerf.agent;
 
 import me.karboom.java.iSerf.llm.text.OpenAITest;
-import me.karboom.java.iSerf.memory.Item;
 import me.karboom.java.iSerf.tool.Loader;
 import me.karboom.java.iSerf.tool.Tool;
 import org.junit.jupiter.api.BeforeEach;
@@ -172,12 +171,12 @@ class AgentTest {
         var agent = new Agent("test-agent", "", llm, tools) {};
 
         // 测试用例1: 正常情况 - 工具存在且更新成功
-        var toolCall = me.karboom.java.iSerf.memory.Item.ToolCall.builder()
+        var toolCall = Message.ToolCall.builder()
                 .name("getWeather")
                 .arguments(new HashMap<>(){{
                     put("location", "伦敦");
                 }})
-                .result(me.karboom.java.iSerf.memory.Item.ToolCall.Result.builder()
+                .result(Message.ToolCall.Result.builder()
                         .error("这不是一个中国的地点")
                         .build())
                 .build();
@@ -189,10 +188,10 @@ class AgentTest {
         assertDoesNotThrow(() -> updateToolMono.block(), "updateTool should not throw exception for valid tool");
 
         // 测试用例2: 工具不存在的情况
-        var nonExistentToolCall = me.karboom.java.iSerf.memory.Item.ToolCall.builder()
+        var nonExistentToolCall = Message.ToolCall.builder()
                 .name("non-existent-tool")
                 .arguments(new HashMap<>())
-                .result(me.karboom.java.iSerf.memory.Item.ToolCall.Result.builder()
+                .result(Message.ToolCall.Result.builder()
                         .error("这不是一个中国的地点")
                         .build())
                 .build();
@@ -257,7 +256,7 @@ class AgentTest {
             var agent = new Agent("test-agent", prompt, llm, tools) {};
 
             // 创建一个列表来收集广播的消息
-            var receivedMessages = new ArrayList<Item>();
+            var receivedMessages = new ArrayList<Message>();
 
             // 订阅 broadcast 流
             agent.broadcast
@@ -306,7 +305,7 @@ class AgentTest {
             var llm = llmTest.getLlm();
             var agent = new Agent("test-message-agent", "你是一个有用的助手", llm, tools) {};
 
-            var receivedItems = new ArrayList<Item>();
+            var receivedItems = new ArrayList<Message>();
             agent.subscribe(item -> receivedItems.add(item));
 
             agent.send("你好");
@@ -315,7 +314,7 @@ class AgentTest {
 
             assertTrue(receivedItems.size() > 0, "应收到响应消息");
             var textItems = receivedItems.stream()
-                    .filter(item -> item.getType().equals(Item.TYPE.TEXT))
+                    .filter(item -> item.getType().equals(Message.TYPE.TEXT))
                     .toList();
             assertFalse(textItems.isEmpty(), "应包含文本类型的响应");
         });
@@ -344,18 +343,18 @@ class AgentTest {
             );
 
             for (var i = 0; i < messages.size(); i++) {
-                var userItem = Item.builder()
+                var userItem = Message.builder()
                         .id(UUID.randomUUID().toString())
-                        .role(Item.ROLE.USER)
-                        .type(Item.TYPE.TEXT)
+                        .role(Message.ROLE.USER)
+                        .type(Message.TYPE.TEXT)
                         .text(messages.get(i))
                         .build();
                 agent.memory.add(userItem);
 
-                var assistantItem = Item.builder()
+                var assistantItem = Message.builder()
                         .id(UUID.randomUUID().toString())
-                        .role(Item.ROLE.ASSISTANT)
-                        .type(Item.TYPE.TEXT)
+                        .role(Message.ROLE.ASSISTANT)
+                        .type(Message.TYPE.TEXT)
                         .text("这是一个回复")
                         .build();
                 agent.memory.add(assistantItem);
@@ -363,7 +362,7 @@ class AgentTest {
 
             Thread.sleep(1000);
 
-            var memoryBeforeCompress = agent.memory.get();
+            var memoryBeforeCompress = agent.memory;
             var countBefore = memoryBeforeCompress.size();
             System.out.println("压缩前记忆数量: " + countBefore);
             assertTrue(countBefore > 20, "压缩前应有超过20条记忆");
@@ -377,7 +376,7 @@ class AgentTest {
 
             Thread.sleep(10000);
 
-            var memoryAfterCompress = agent.memory.get();
+            var memoryAfterCompress = agent.memory;
             var countAfter = memoryAfterCompress.size();
             System.out.println("压缩后记忆数量: " + countAfter);
             

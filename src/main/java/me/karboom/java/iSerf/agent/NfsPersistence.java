@@ -6,7 +6,6 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.memory.Item;
 import me.karboom.java.iSerf.util.CBORUtil;
 import reactor.util.function.Tuple2;
 import reactor.util.function.Tuples;
@@ -36,7 +35,7 @@ public class NfsPersistence implements IPersistence {
     @NoArgsConstructor
     @AllArgsConstructor
     static public class Format {
-        public List<Item> memories;
+        public List<Message> memories;
         public List<Event> events;
     }
 
@@ -49,7 +48,7 @@ public class NfsPersistence implements IPersistence {
      */
     @Override
     @SneakyThrows
-    public Tuple2<List<Item>, List<Event>> load(String orgId, String userId, String agentId) {
+    public Tuple2<List<Message>, List<Event>> load(String orgId, String userId, String agentId) {
         var dir = "%s/%s/%s".formatted(baseDir, orgId, userId);
         var fileName = "%s/%s.cbor".formatted(dir, agentId);
         var path = Paths.get(fileName);
@@ -83,7 +82,7 @@ public class NfsPersistence implements IPersistence {
      */
     @Override
     @SneakyThrows
-    public void save(String orgId, String userId, String agentId, List<Event> events, List<Item> memories) {
+    public void save(String orgId, String userId, String agentId, List<Event> events, List<Message> memories) {
         var dir = "%s/%s/%s".formatted(baseDir, orgId, userId);
         var dirPath = Paths.get(dir);
 

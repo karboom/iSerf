@@ -4,7 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import me.karboom.java.iSerf.memory.Item;
+import me.karboom.java.iSerf.agent.Message;
 
 import java.util.List;
 
@@ -12,8 +12,8 @@ import java.util.List;
 @AllArgsConstructor
 @Builder
 @NoArgsConstructor
-public class Message {
+public class Communication {
     public String agentId;
     public List<String> mentions;
-    public Item item;
+    public Message message;
 }

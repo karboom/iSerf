@@ -43,7 +43,7 @@ public class Team {
     /**
      * 消息总线订阅
      */
-    public Flux<Message> broadcast;
+    public Flux<Communication> broadcast;
 
     public Team(Agent leader, List<Agent> members) {
         this.leader = leader;
@@ -51,9 +51,9 @@ public class Team {
 
 
         // Todo 这一段是否有必要和watch合并
-        var leaderBroadcast = leader.broadcast.map(item -> Message.builder().agentId(leader.id).mentions(null).item(item).build());
+        var leaderBroadcast = leader.broadcast.map(item -> Communication.builder().agentId(leader.id).mentions(null).message(item).build());
         var membersBroadcast = Flux.fromIterable(this.member)
-                .flatMap(m -> m.broadcast.map(item -> Message.builder().agentId(m.id).item(item).build()));
+                .flatMap(m -> m.broadcast.map(item -> Communication.builder().agentId(m.id).message(item).build()));
         this.broadcast = Flux.merge(leaderBroadcast, membersBroadcast).share();
 
         this.eventQueue = new PriorityBlockingQueue<>(100, Comparator.comparing(Event::getId));
@@ -179,7 +179,7 @@ public class Team {
     }
 
 
-    public Disposable subscribe(Consumer<Message> consumer) {
+    public Disposable subscribe(Consumer<Communication> consumer) {
         return broadcast.subscribe(consumer);
     }
 

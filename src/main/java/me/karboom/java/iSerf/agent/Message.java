@@ -1,4 +1,4 @@
-package me.karboom.java.iSerf.memory;
+package me.karboom.java.iSerf.agent;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -13,7 +13,7 @@ import java.util.List;
 @AllArgsConstructor
 @NoArgsConstructor
 @Builder
-public class Item {
+public class Message {
     static public class TYPE {
         public static final String TEXT = "TEXT";
         public static final String IMAGE = "IMAGE";
@@ -106,7 +106,7 @@ public class Item {
     /**
      * 多个消息混合
      */
-    public List<Item> mixed;
+    public List<Message> mixed;
 
     public ObjectNode custom;
 

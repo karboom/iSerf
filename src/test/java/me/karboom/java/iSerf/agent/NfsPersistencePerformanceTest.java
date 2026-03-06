@@ -1,6 +1,5 @@
 package me.karboom.java.iSerf.agent;
 
-import me.karboom.java.iSerf.memory.Item;
 import me.karboom.java.iSerf.util.DataUtil;
 import org.junit.jupiter.api.Test;
 
@@ -86,10 +85,10 @@ class NfsPersistencePerformanceTest {
                     executor.submit(() -> {
                         try {
                             var memories = List.of(
-                                    Item.builder()
+                                    Message.builder()
                                             .id(UUID.randomUUID().toString())
-                                            .role(Item.ROLE.USER)
-                                            .type(Item.TYPE.TEXT)
+                                            .role(Message.ROLE.USER)
+                                            .type(Message.TYPE.TEXT)
                                             .text("测试消息 " + finalI)
                                             .build()
                             );
@@ -158,7 +157,7 @@ class NfsPersistencePerformanceTest {
                 "能给我讲讲%s的历史吗？"
         };
 
-        var memories = new ArrayList<Item>();
+        var memories = new ArrayList<Message>();
         var events = new ArrayList<Event>();
 
         // 生成 200 轮对话，每轮约 500 字符（user + assistant 各 250），总计约 200kb
@@ -169,18 +168,18 @@ class NfsPersistencePerformanceTest {
             var userText = generateSimulatedText(templates, round, charsPerRound / 2);
             var assistantText = generateSimulatedText(templates, round + 1000, charsPerRound / 2);
 
-            var userItem = Item.builder()
+            var userItem = Message.builder()
                     .id(DataUtil.getFlakeId())
-                    .role(Item.ROLE.USER)
-                    .type(Item.TYPE.TEXT)
+                    .role(Message.ROLE.USER)
+                    .type(Message.TYPE.TEXT)
                     .text(userText)
                     .build();
             memories.add(userItem);
 
-            var assistantItem = Item.builder()
+            var assistantItem = Message.builder()
                     .id(DataUtil.getFlakeId())
-                    .role(Item.ROLE.ASSISTANT)
-                    .type(Item.TYPE.TEXT)
+                    .role(Message.ROLE.ASSISTANT)
+                    .type(Message.TYPE.TEXT)
                     .text(assistantText)
                     .build();
             memories.add(assistantItem);
@@ -190,14 +189,14 @@ class NfsPersistencePerformanceTest {
         var event1 = Event.builder()
                 .priority(1)
                 .type(Event.Type.ORGANIZE_MEMORY)
-                .item(memories.get(0))
+                .message(memories.get(0))
                 .build();
         events.add(event1);
 
         var event2 = Event.builder()
                 .priority(2)
                 .type(Event.Type.MESSAGE)
-                .item(memories.get(1))
+                .message(memories.get(1))
                 .build();
         events.add(event2);
 
@@ -210,7 +209,7 @@ class NfsPersistencePerformanceTest {
         System.out.println(" generateSimulatedCborFile 文件已生成：" + outputFile);
         System.out.println(" generateSimulatedCborFile 文件大小：" + fileSize + " bytes");
         System.out.println(" generateSimulatedCborFile 对话轮数：" + roundCount);
-        System.out.println(" generateSimulatedCborFile Item 数量：" + memories.size());
+        System.out.println(" generateSimulatedCborFile Communication 数量：" + memories.size());
         System.out.println(" generateSimulatedCborFile Event 数量：" + events.size());
     }
 }

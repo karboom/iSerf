@@ -4,7 +4,6 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import me.karboom.java.iSerf.memory.Item;
 
 @Builder
 @AllArgsConstructor
@@ -19,5 +18,5 @@ public class Event {
 
     public Integer priority;
     public String type;
-    public Item item;
+    public Message message;
 }

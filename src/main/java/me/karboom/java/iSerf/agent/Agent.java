@@ -5,9 +5,6 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.llm.text.Base;
 import me.karboom.java.iSerf.llm.text.Output;
-import me.karboom.java.iSerf.memory.Item;
-import me.karboom.java.iSerf.memory.LocalMemory;
-import me.karboom.java.iSerf.memory.Memory;
 import me.karboom.java.iSerf.tool.Tool;
 import me.karboom.java.iSerf.util.CodeUtil;
 import me.karboom.java.iSerf.util.HttpUtil;
@@ -50,15 +47,15 @@ public class Agent {
     // endregion
 
 
-    public Memory memory = new LocalMemory();
+    public List<Message> memory = new ArrayList<>();
     protected List<Tool> tools;
     protected Base llm;
     public String prompt;
     protected PriorityBlockingQueue<Event> queue;
-    public Flux<Item> itemBroadcast;
+    public Flux<Message> itemBroadcast;
 
-    protected Sinks.Many<Item> sink;
-    public Flux<Item> broadcast;
+    protected Sinks.Many<Message> sink;
+    public Flux<Message> broadcast;
 
     public Integer maxEvoRetry = 5;
 
@@ -86,7 +83,7 @@ public class Agent {
         this.tools = tools != null ? tools : new ArrayList<>();
         this.queue = new PriorityBlockingQueue<>(100, Comparator.comparing(Event::getPriority));
 
-        this.memory.add(Item.builder().id(id).role(Item.ROLE.SYSTEM).text(this.prompt).type(Item.TYPE.TEXT).isForgotten(0).build());
+        this.memory.add(Message.builder().id(id).role(Message.ROLE.SYSTEM).text(this.prompt).type(Message.TYPE.TEXT).isForgotten(0).build());
 
         this.sink = Sinks.many().multicast().onBackpressureBuffer();
         this.broadcast = sink.asFlux();
@@ -102,17 +99,17 @@ public class Agent {
 
 
     // Todo 支持3个入参的版本
-    public Disposable subscribe(Consumer<Item> consumer) {
+    public Disposable subscribe(Consumer<Message> consumer) {
         return broadcast.subscribe(consumer);
     }
 
-    private Mono<Tuple3<Item, List<Output>, Item>> fluxHandle(Flux<Output> flux, Class format) {
+    private Mono<Tuple3<Message, List<Output>, Message>> fluxHandle(Flux<Output> flux, Class format) {
         return flux
                 .publishOn(Schedulers.fromExecutor(this.eventPool))
                 .reduce(Tuples.of(
-                        Item.builder().type(Item.TYPE.THINKING).text("").isSegment(0).build(),
+                        Message.builder().type(Message.TYPE.THINKING).text("").isSegment(0).build(),
                         new ArrayList<>(),
-                        Item.builder().role(Item.ROLE.ASSISTANT).type(Item.TYPE.TEXT).text("").isSegment(0).build()
+                        Message.builder().role(Message.ROLE.ASSISTANT).type(Message.TYPE.TEXT).text("").isSegment(0).build()
                 ), (acc, chunk) -> {
                     var thinkingItem = acc.getT1();
                     var toolCall = acc.getT2();
@@ -132,7 +129,7 @@ public class Agent {
                             thinkingItem.setId(UUID.randomUUID().toString()); // 为thinkingItem设置ID
                             thinkingItem.setText(thinkingItem.getText() + thinking);
 
-                            var thinkingSegment = Item.builder().text(thinking.toString()).isSegment(1).build();
+                            var thinkingSegment = Message.builder().text(thinking.toString()).isSegment(1).build();
 
                             sink.tryEmitNext(thinkingSegment);
                         } else if (toolCalls != null) {
@@ -158,7 +155,7 @@ public class Agent {
 
 
                             if (format == null) {
-                                var contentItemSegment = Item.builder().id(UUID.randomUUID().toString()).role(contentItem.getRole()).type(Item.TYPE.TEXT).text(contentText).isSegment(1).build();
+                                var contentItemSegment = Message.builder().id(UUID.randomUUID().toString()).role(contentItem.getRole()).type(Message.TYPE.TEXT).text(contentText).isSegment(1).build();
                                 sink.tryEmitNext(contentItemSegment);
                             }
                         } else {
@@ -168,7 +165,7 @@ public class Agent {
 
                     } else if (usage != null) {
                         if (contentItem.getId() != null) {
-                            var usageBuilder = Item.Usage.builder()
+                            var usageBuilder = Message.Usage.builder()
                                     .total((int) usage.getTotalTokens())
                                     .promptTotal((int) usage.getPromptTokens())
                                     .completionTotal((int) usage.getCompletionTokens())
@@ -233,9 +230,9 @@ public class Agent {
 //                                        var callResult = invokeToolCalls(calls);
 //
 //                                        // 按结果类型分组处理
-//                                        var directCalls = new ArrayList<Item.ToolCall>();
-//                                        var errorCalls = new ArrayList<Item.ToolCall>();
-//                                        var llmCalls = new ArrayList<Item.ToolCall>();
+//                                        var directCalls = new ArrayList<Communication.ToolCall>();
+//                                        var errorCalls = new ArrayList<Communication.ToolCall>();
+//                                        var llmCalls = new ArrayList<Communication.ToolCall>();
 //
 //                                        for (var call : callResult) {
 //                                            if (call.result.getDirect() != null) {
@@ -251,14 +248,14 @@ public class Agent {
 //
 //                                        // 处理DIRECT类型
 //                                        if (!directCalls.isEmpty()) {
-//                                            for (Item.ToolCall call : directCalls) {
-//                                                sink.tryEmitNext(Item.builder().text(JSONUtil.stringify(call.getResult().getDirect())).isSegment(0).build());
+//                                            for (Communication.ToolCall call : directCalls) {
+//                                                sink.tryEmitNext(Communication.builder().text(JSONUtil.stringify(call.getResult().getDirect())).isSegment(0).build());
 //                                            }
 //                                        }
 //
 //                                        // 处理ERROR类型
 //                                        if (!errorCalls.isEmpty()) {
-//                                            sink.tryEmitNext(Item.builder().text("我正在更新代码，请您稍后").build());
+//                                            sink.tryEmitNext(Communication.builder().text("我正在更新代码，请您稍后").build());
 //                                            // Todo 判断IFunction
 //
 //                                            for (var toolCall : errorCalls) {
@@ -269,13 +266,13 @@ public class Agent {
 //
 //                                        // 处理LLM类型
 //                                        if (!llmCalls.isEmpty()) {
-//                                            var messageInvoke = Item.builder()
-//                                                    .role(Item.ROLE.ASSISTANT)
+//                                            var messageInvoke = Communication.builder()
+//                                                    .role(Communication.ROLE.ASSISTANT)
 //                                                    .toolCalls(llmCalls)
 //                                                    .build();
 //
-//                                            var messageRes = Item.builder()
-//                                                    .role(Item.ROLE.TOOL)
+//                                            var messageRes = Communication.builder()
+//                                                    .role(Communication.ROLE.TOOL)
 //                                                    .toolCalls(llmCalls)
 //                                                    .build();
 //
@@ -294,22 +291,22 @@ public class Agent {
 //                            return other;
 //                        }
 //                    })
-//                    .reduce(Item.builder().build(), (acc, chunk) -> {
+//                    .reduce(Communication.builder().build(), (acc, chunk) -> {
 //
 //                        var text = ((ChatCompletionChunk) chunk).choices().get(0).delta().content().get();
 //                        if (format == null) {
-//                            sink.tryEmitNext(Item.builder().text(text).isSegment(1).build());
+//                            sink.tryEmitNext(Communication.builder().text(text).isSegment(1).build());
 //                        }
 //                        acc.setText(acc.getText() + text);
 //
 //                        var usage = ((ChatCompletionChunk) chunk).usage();
-//                        usage.ifPresent(completionUsage -> item.setUsage(((int) completionUsage.totalTokens())));
+//                        usage.ifPresent(completionUsage -> message.setUsage(((int) completionUsage.totalTokens())));
 //
 //                        return acc;
 //                    })
 //                    .map(f -> {
 //                        f.setIsSegment(0);
-//                        f.setRole(Item.ROLE.ASSISTANT);
+//                        f.setRole(Communication.ROLE.ASSISTANT);
 //
 //                        if (format != null) {
 //                            f.setFormatted(JSONUtil.parse(f.getText(), format));
@@ -350,7 +347,7 @@ public class Agent {
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("Tool not found: " + cache.toolName));
         
-        var result = Item.ToolCall.Result.builder().build();
+        var result = Message.ToolCall.Result.builder().build();
 
         // Todo 这里可以封装一个函数专门调用iFunction
         var functionPath = getIFunctionPath(matchedTool);
@@ -380,18 +377,16 @@ public class Agent {
      */
     @SneakyThrows
     private void handleOrganizeMemory (Event event) {
-        var currentMemory = memory.get();
-        
-        if (currentMemory.isEmpty()) {
+        if (this.memory.isEmpty()) {
             return;
         }
 
-        var summaryPrompt = Item.builder()
-                .role(Item.ROLE.USER)
+        var summaryPrompt = Message.builder()
+                .role(Message.ROLE.USER)
                 .text("请将以上对话历史压缩为简洁的摘要，保留关键信息和上下文，用于后续对话参考。")
                 .build();
 
-        var messages = new ArrayList<Item>(currentMemory.stream().skip(1).toList());
+        var messages = new ArrayList<Message>(this.memory.stream().skip(1).toList());
         messages.add(summaryPrompt);
 
         var result = llm.query(messages, null);
@@ -399,23 +394,22 @@ public class Agent {
         if (result != null && result.getChoices() != null && !result.getChoices().isEmpty()) {
             var summaryText = result.getChoices().get(0).getText();
             if (summaryText != null && !summaryText.isEmpty()) {
-                var summaryItem = Item.builder()
+                var summaryItem = Message.builder()
                         .id(UUID.randomUUID().toString())
-                        .role(Item.ROLE.ASSISTANT)
-                        .type(Item.TYPE.TEXT)
+                        .role(Message.ROLE.ASSISTANT)
+                        .type(Message.TYPE.TEXT)
                         .text(summaryText)
                         .isForgotten(0)
                         .build();
 
-                memory.add(summaryItem);
+                this.memory.add(summaryItem);
                 
-                currentMemory.stream().skip(1).forEach(item -> {
+                this.memory.stream().skip(1).forEach(item -> {
                     if (item.getIsForgotten() == null || item.getIsForgotten() == 0) {
                         item.setIsForgotten(1);
                     }
                 });
                 
-                memory.sync();
                 log.debug("handleOrganizeMemory Memory compressed successfully");
             }
         }
@@ -426,14 +420,14 @@ public class Agent {
      * @param event
      */
     private void handleMessage(Event event) {
-        var userMessage = event.getItem();
+        var userMessage = event.getMessage();
 
         // 添加到记忆中
         memory.add(userMessage);
 
-        var format = event.getItem().getFormatted() == null ? null : event.getItem().getFormatted().getClass();
+        var format = event.getMessage().getFormatted() == null ? null : event.getMessage().getFormatted().getClass();
 
-        var flux = llm.send(memory.get().stream().filter(item -> item.getIsForgotten() == 0).toList(), format, tools);
+        var flux = llm.send(this.memory.stream().filter(item -> item.getIsForgotten() == 0).toList(), format, tools);
 
         fluxHandle(flux, format)
                 .flatMapMany(holder -> {
@@ -446,9 +440,9 @@ public class Agent {
                         var callResult = invokeToolCalls(calls.getFirst());
 
                         // 按结果类型分组处理
-                        var directCalls = new ArrayList<Item.ToolCall>();
-                        var errorCalls = new ArrayList<Item.ToolCall>();
-                        var llmCalls = new ArrayList<Item.ToolCall>();
+                        var directCalls = new ArrayList<Message.ToolCall>();
+                        var errorCalls = new ArrayList<Message.ToolCall>();
+                        var llmCalls = new ArrayList<Message.ToolCall>();
 
                         for (var call : callResult) {
                             if (call.result.getDirect() != null) {
@@ -464,7 +458,7 @@ public class Agent {
                         // 处理DIRECT类型
                         if (!directCalls.isEmpty()) {
 
-                            for (Item.ToolCall call : directCalls) {
+                            for (Message.ToolCall call : directCalls) {
                                 // 缓存工具调用参数，结果不管
                                 var cache = ToolCallCache.builder()
                                         .callId(call.getId())
@@ -474,13 +468,13 @@ public class Agent {
                                 toolCallCaches.add(cache);
 
                                 // 触发消息
-                                sink.tryEmitNext(Item.builder().toolCalls(List.of(call)).custom(call.getResult().getDirect()).type(Item.TYPE.CUSTOM).isSegment(0).build());
+                                sink.tryEmitNext(Message.builder().toolCalls(List.of(call)).custom(call.getResult().getDirect()).type(Message.TYPE.CUSTOM).isSegment(0).build());
                             }
                         }
 
                         // 处理ERROR类型
                         if (!errorCalls.isEmpty()) {
-                            sink.tryEmitNext(Item.builder().type(Item.TYPE.ERROR).text("我正在更新代码，请您稍后").build());
+                            sink.tryEmitNext(Message.builder().type(Message.TYPE.ERROR).text("我正在更新代码，请您稍后").build());
                             // Todo 判断IFunction
 
                             for (var toolCall : errorCalls) {
@@ -491,15 +485,15 @@ public class Agent {
 
                         // 处理LLM类型
                         if (!llmCalls.isEmpty()) {
-                            var messageInvoke = Item.builder()
-                                    .role(Item.ROLE.ASSISTANT)
-                                    .type(Item.TYPE.TEXT)
+                            var messageInvoke = Message.builder()
+                                    .role(Message.ROLE.ASSISTANT)
+                                    .type(Message.TYPE.TEXT)
                                     .toolCalls(llmCalls)
                                     .isForgotten(0)
                                     .build();
 
-                            var messageRes = Item.builder()
-                                    .role(Item.ROLE.TOOL)
+                            var messageRes = Message.builder()
+                                    .role(Message.ROLE.TOOL)
                                     .isForgotten(0)
                                     .toolCalls(llmCalls)
                                     .build();
@@ -507,8 +501,8 @@ public class Agent {
                             memory.add(messageInvoke);
                             memory.add(messageRes);
 
-                            // Todo 这里的tools参数是否可以去掉，节省token
-                            var newFlux = llm.send(memory.get(), null, tools);
+                            // Todo 这里的 tools 参数是否可以去掉，节省 token
+                            var newFlux = llm.send(memory, null, tools);
 
                             return fluxHandle(newFlux, format).thenMany(Flux.empty());
                         } else {
@@ -530,7 +524,7 @@ public class Agent {
      */
     private void checkMemorySize() {
 
-        var currentMemory = memory.get();
+        var currentMemory = this.memory;
         var promptTotal = currentMemory.stream()
                 .skip(1)
                 .filter(item -> item.getUsage() != null && item.getUsage().getPromptTotal() != null)
@@ -551,7 +545,7 @@ public class Agent {
         log.debug("handleRecovery items size: %s, events size: %s".formatted(items.size(), events.size()));
         
         // 恢复记忆
-        items.forEach(memory::add);
+        items.forEach(this.memory::add);
         
         // 重新触发未处理的事件
         events.stream()
@@ -561,10 +555,10 @@ public class Agent {
 
     @SneakyThrows
     public void send(String message, Class<?> cls) {
-        var item = Item
+        var item = Message
                 .builder()
-                .type(Item.TYPE.TEXT)
-                .role(Item.ROLE.USER)
+                .type(Message.TYPE.TEXT)
+                .role(Message.ROLE.USER)
                 .id("")
                 .isForgotten(0)
                 .text(message).build();
@@ -576,7 +570,7 @@ public class Agent {
         queue.offer(Event.builder()
                 .priority(1)
                 .type(Event.Type.MESSAGE)
-                .item(item)
+                .message(item)
                 .build());
     }
 
@@ -588,7 +582,7 @@ public class Agent {
      * 根据错误反馈更新工具内容
      * @deprecated
      */
-    public Mono<Void> updateTool(Item.ToolCall toolCall) {
+    public Mono<Void> updateTool(Message.ToolCall toolCall) {
         // 1. 根据ToolCall 匹配tool
         var matchedTool = tools.stream()
                 .filter(tool -> tool.getName().equals(toolCall.getName()))
@@ -624,12 +618,12 @@ public class Agent {
                         var prompt = "请根据以下错误信息更新代码:\n\n输入参数：\n\n%s\n\n错误信息: %s\n\n当前代码:\n%s\n\n 请修改runner里面的逻辑，仅需要告诉我最终的代码，不要带markdown标记"
                                 .formatted(toolCall.arguments.toString(), toolCall.getResult().toString(), currentCode);
 
-                        var userMessage = Item.builder()
+                        var userMessage = Message.builder()
                                 .role("user")
                                 .text(prompt)
                                 .build();
 
-                        var messages = new ArrayList<Item>();
+                        var messages = new ArrayList<Message>();
                         messages.add(userMessage);
 
                         // 调用LLM生成更新后的代码
@@ -680,7 +674,7 @@ public class Agent {
     }
 
     @SneakyThrows
-    private Mono<Void> updateToolWithRetry(Item.ToolCall toolCall, Integer attempt) {
+    private Mono<Void> updateToolWithRetry(Message.ToolCall toolCall, Integer attempt) {
         var matchedTool = tools.stream()
                 .filter(tool -> tool.getName().equals(toolCall.getName()))
                 .findFirst()
@@ -702,8 +696,8 @@ public class Agent {
         var prompt = "请根据以下错误信息更新代码:\n\n输入参数：\n\n%s\n\n错误信息: %s\n\n当前代码:\n%s\n\n 请修改runner里面的逻辑，仅需要告诉我最终的代码，不要带markdown标记"
                 .formatted(toolCall.arguments.toString(), toolCall.getResult().toString(), currentCode);
 
-        var userMessage = Item.builder()
-                .role(Item.ROLE.USER)
+        var userMessage = Message.builder()
+                .role(Message.ROLE.USER)
                 .text(prompt)
                 .build();
 
@@ -754,12 +748,12 @@ public class Agent {
      * @param chunks 流式响应块列表
      * @return 合并后的工具调用列表，每个choice对应一组ToolCall
      */
-    private List<List<Item.ToolCall>> mergeToolCalls(List<Output> chunks) {
+    private List<List<Message.ToolCall>> mergeToolCalls(List<Output> chunks) {
         if (chunks.isEmpty()) {
             return new ArrayList<>();
         }
 
-        var result = new ArrayList<List<Item.ToolCall>>();
+        var result = new ArrayList<List<Message.ToolCall>>();
 
         var mergedToolCalls = new HashMap<Integer, Output.ToolCall>();
 
@@ -797,10 +791,10 @@ public class Agent {
         }
 
         for (var entry : mergedToolCalls.entrySet()) {
-            var toolCallsForChoice = new ArrayList<Item.ToolCall>();
+            var toolCallsForChoice = new ArrayList<Message.ToolCall>();
             var outputToolCall = entry.getValue();
 
-            var itemToolCall = Item.ToolCall.builder()
+            var itemToolCall = Message.ToolCall.builder()
                     .id(outputToolCall.getId())
                     .name(outputToolCall.getName())
                     .arguments(JSONUtil.parse(outputToolCall.getArguments(), HashMap.class))
@@ -820,7 +814,7 @@ public class Agent {
      * @param calls 工具调用列表
      * @return 带有调用结果的工具调用列表
      */
-    private List<Item.ToolCall> invokeToolCalls(List<Item.ToolCall> calls) {
+    private List<Message.ToolCall> invokeToolCalls(List<Message.ToolCall> calls) {
 
         for (var call : calls) {
             // 根据 name 匹配对应的 Tool
@@ -832,7 +826,7 @@ public class Agent {
                 }
             }
 
-            var result = Item.ToolCall.Result.builder().build();
+            var result = Message.ToolCall.Result.builder().build();
 
             if (matchedTool == null) {
                 result.setLlm("Tool not found: " + call.name);
@@ -940,12 +934,12 @@ public class Agent {
      * 处理工具调用结果
      * 尝试解析为JSON，如果失败则将字符串作为llm返回
      */
-    private Item.ToolCall.Result handleToolCallResult(String resultString) {
+    private Message.ToolCall.Result handleToolCallResult(String resultString) {
         try {
-            return JSONUtil.parse(resultString != null ? resultString : "{}", Item.ToolCall.Result.class);
+            return JSONUtil.parse(resultString != null ? resultString : "{}", Message.ToolCall.Result.class);
         } catch (Exception e) {
             // 解析失败时，创建包含原始字符串的Result对象，将字符串设置为llm字段
-            var result = Item.ToolCall.Result.builder().build();
+            var result = Message.ToolCall.Result.builder().build();
             result.setLlm(resultString);
             return result;
         }
