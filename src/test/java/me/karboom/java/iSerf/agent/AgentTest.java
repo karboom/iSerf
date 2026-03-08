@@ -46,7 +46,7 @@ class AgentTest {
                         new Tool.Parameter("unit", "string", "Temperature unit (celsius or fahrenheit)", false)
                 ))
                 .type(Tool.TYPE.FUNCTION)
-                .function(params -> (Math.random() * 15 + 15) + "摄氏度")
+                .function((ctx, params) -> (Math.random() * 15 + 15) + "摄氏度")
 
                 .build();
         tools.add(weatherTool);

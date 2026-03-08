@@ -5,6 +5,10 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.llm.text.Base;
 import me.karboom.java.iSerf.llm.text.Output;
+import me.karboom.java.iSerf.schedule.ISchedule;
+import me.karboom.java.iSerf.schedule.Plan;
+import me.karboom.java.iSerf.schedule.Schedule;
+import me.karboom.java.iSerf.tool.Context;
 import me.karboom.java.iSerf.tool.Tool;
 import me.karboom.java.iSerf.util.CodeUtil;
 import me.karboom.java.iSerf.util.HttpUtil;
@@ -26,11 +30,13 @@ import tools.jackson.databind.node.ObjectNode;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Agent 基类
@@ -63,6 +69,10 @@ public class Agent {
     private ExecutorService broadcastPool;
 
     public IPersistence persistence;
+
+    public List<Plan> plans;
+    public ISchedule schedule;
+
 
     /**
      * 工具调用缓存
@@ -324,50 +334,54 @@ public class Agent {
         queue.offer(Event.builder().type(Event.Type.RECOVERY).build());
     }
 
+
+
     /**
-     * 直接从缓存的参数调用工具
-     * 1. 找出匹配的toolCallCache
-     * 2. 调用函数，获取result.direct并且返回
-     *
-     * Todo 跑在哪个线程池里面
+     * 检查记忆长度
+     * 计算prompt消耗，如果大于150k，那么触发记忆整理事件，Todo 弄一个支持自定义的map，根据model的70%压缩
      */
-    @SneakyThrows
-    public ObjectNode invokeToolCallCache(String toolCallId) {
-        log.debug("invokeToolCallCache toolCallId: " + toolCallId);
-        
-        // 根据 toolCallId 查找缓存
-        var cache = toolCallCaches.stream()
-                .filter(c -> c.callId.equals(toolCallId))
-                .findFirst()
-                .orElseThrow(() -> new RuntimeException("Tool call cache not found: " + toolCallId));
-        
-        // 根据 toolName 匹配对应的 Tool
-        var matchedTool = tools.stream()
-                .filter(tool -> tool.getName().equals(cache.toolName))
-                .findFirst()
-                .orElseThrow(() -> new RuntimeException("Tool not found: " + cache.toolName));
-        
-        var result = Message.ToolCall.Result.builder().build();
+    private void checkMemorySize() {
 
-        // Todo 这里可以封装一个函数专门调用iFunction
-        var functionPath = getIFunctionPath(matchedTool);
+        var currentMemory = this.memory;
+        var promptTotal = currentMemory.stream()
+                .skip(1)
+                .filter(item -> item.getUsage() != null && item.getUsage().getPromptTotal() != null)
+                .mapToInt(item -> item.getUsage().getPromptTotal())
+                .sum();
 
-        var classPath = "%s/%s/%s".formatted(functionPath.get(0), functionPath.get(1), functionPath.get(2));
-        var versionDir = "%s/%s".formatted(functionPath.get(0), functionPath.get(1));
-
-        // 判断 versionDir 下面是否有.class 文件，否则先编译
-        if (!new File("%s.class".formatted(classPath)).exists()) {
-            var javaFile = new File("%s.java".formatted(classPath));
-            CodeUtil.compile(Files.readString(javaFile.toPath()), versionDir);
+        if (promptTotal > 150000) {
+            queue.offer(Event.builder().type(Event.Type.ORGANIZE_MEMORY).build());
         }
-
-        // 加载类
-        var cls = (FunctionWrapper) CodeUtil.load(versionDir, functionPath.get(2));
-        result = handleToolCallResult(cls.run(cache.params));
-
-        return result.direct;
     }
 
+
+    @SneakyThrows
+    public void send(String message, Class<?> cls) {
+        var item = Message
+                .builder()
+                .type(Message.TYPE.TEXT)
+                .role(Message.ROLE.USER)
+                .id("")
+                .isForgotten(0)
+                .text(message).build();
+
+        if (cls != null) {
+            item.setFormatted(cls.getConstructors()[0].newInstance());
+        }
+
+        queue.offer(Event.builder()
+                .priority(1)
+                .type(Event.Type.MESSAGE)
+                .message(item)
+                .build());
+    }
+
+    public void send(String message) {
+        send(message, null);
+    }
+
+
+    // region ========== 事件处理 ==========
     /**
      * 整理记忆
      * 1.调用llm.query，将当前的memory压缩
@@ -403,13 +417,13 @@ public class Agent {
                         .build();
 
                 this.memory.add(summaryItem);
-                
+
                 this.memory.stream().skip(1).forEach(item -> {
                     if (item.getIsForgotten() == null || item.getIsForgotten() == 0) {
                         item.setIsForgotten(1);
                     }
                 });
-                
+
                 log.debug("handleOrganizeMemory Memory compressed successfully");
             }
         }
@@ -518,64 +532,87 @@ public class Agent {
         this.checkMemorySize();
     }
 
-    /**
-     * 检查记忆长度
-     * 计算prompt消耗，如果大于150k，那么触发记忆整理事件，Todo 弄一个支持自定义的map，根据model的70%压缩
-     */
-    private void checkMemorySize() {
-
-        var currentMemory = this.memory;
-        var promptTotal = currentMemory.stream()
-                .skip(1)
-                .filter(item -> item.getUsage() != null && item.getUsage().getPromptTotal() != null)
-                .mapToInt(item -> item.getUsage().getPromptTotal())
-                .sum();
-
-        if (promptTotal > 150000) {
-            queue.offer(Event.builder().type(Event.Type.ORGANIZE_MEMORY).build());
-        }
-    }
-
     private void handleRecovery(Event event) {
         var result = persistence.load(this.orgId, this.userId, this.id);
-        
+
         var items = result.getT1();
         var events = result.getT2();
-        
+
         log.debug("handleRecovery items size: %s, events size: %s".formatted(items.size(), events.size()));
-        
+
         // 恢复记忆
         items.forEach(this.memory::add);
-        
+
         // 重新触发未处理的事件
         events.stream()
                 .filter(e -> e.getType() != Event.Type.RECOVERY)
                 .forEach(queue::offer);
     }
 
-    @SneakyThrows
-    public void send(String message, Class<?> cls) {
-        var item = Message
-                .builder()
-                .type(Message.TYPE.TEXT)
-                .role(Message.ROLE.USER)
-                .id("")
-                .isForgotten(0)
-                .text(message).build();
+    // endregion
 
-        if (cls != null) {
-            item.setFormatted(cls.getConstructors()[0].newInstance());
-        }
+    // region ========== 定时任务 ==========
 
-        queue.offer(Event.builder()
-                .priority(1)
-                .type(Event.Type.MESSAGE)
-                .message(item)
-                .build());
+    /**
+     * 程序化创建定时任务
+     */
+    public void addPlan(String cron, LocalDateTime time, String name, Consumer<Map<String, Object>> function, Map<String, Object> params) {
+        var plan = Plan.builder()
+                .cron(cron)
+                .time(time)
+                .functionName(name)
+                .functionParams(params)
+                .build();
+
+        this.plans.add(plan);
+        this.schedule.addPlan(plan);
     }
 
-    public void send(String message) {
-        send(message, null);
+    // endregion
+
+    // region ========== 工具相关 ==========
+    /**
+     * 直接从缓存的参数调用工具
+     * 1. 找出匹配的toolCallCache
+     * 2. 调用函数，获取result.direct并且返回
+     *
+     * Todo 跑在哪个线程池里面
+     */
+    @SneakyThrows
+    public ObjectNode invokeToolCallCache(String toolCallId) {
+        log.debug("invokeToolCallCache toolCallId: " + toolCallId);
+
+        // 根据 toolCallId 查找缓存
+        var cache = toolCallCaches.stream()
+                .filter(c -> c.callId.equals(toolCallId))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Tool call cache not found: " + toolCallId));
+
+        // 根据 toolName 匹配对应的 Tool
+        var matchedTool = tools.stream()
+                .filter(tool -> tool.getName().equals(cache.toolName))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Tool not found: " + cache.toolName));
+
+        var result = Message.ToolCall.Result.builder().build();
+
+        // Todo 这里可以封装一个函数专门调用iFunction
+        var functionPath = getIFunctionPath(matchedTool);
+
+        var classPath = "%s/%s/%s".formatted(functionPath.get(0), functionPath.get(1), functionPath.get(2));
+        var versionDir = "%s/%s".formatted(functionPath.get(0), functionPath.get(1));
+
+        // 判断 versionDir 下面是否有.class 文件，否则先编译
+        if (!new File("%s.class".formatted(classPath)).exists()) {
+            var javaFile = new File("%s.java".formatted(classPath));
+            CodeUtil.compile(Files.readString(javaFile.toPath()), versionDir);
+        }
+
+        // 加载类
+        var cls = (FunctionWrapper) CodeUtil.load(versionDir, functionPath.get(2));
+        result = handleToolCallResult(cls.run(new Context(this), cache.params));
+
+        return result.direct;
     }
 
     /**
@@ -723,7 +760,7 @@ public class Agent {
                         CodeUtil.compile(updatedCode, targetDir);
                         var obj = CodeUtil.load(targetDir, StrUtil.upperFirst(StrUtil.toCamelCase(toolCall.getName())));
                         if (obj instanceof FunctionWrapper wrapper) {
-                            wrapper.run(toolCall.arguments);
+                            wrapper.run(new Context(this), toolCall.arguments);
                         } else {
                             throw new RuntimeException();
                         }
@@ -838,7 +875,7 @@ public class Agent {
                     case Tool.TYPE.FUNCTION:
                         // 调用本地函数
 
-                        String functionResult = matchedTool.getFunction().run(call.arguments);
+                        String functionResult = matchedTool.getFunction().run(new Context(this), call.arguments);
                         // 使用新的处理函数处理directResult
                         result = handleToolCallResult(functionResult);
 
@@ -861,7 +898,7 @@ public class Agent {
 
                             // 加载类
                             var cls = (FunctionWrapper) CodeUtil.load(versionDir, functionPath.get(2));
-                            result = handleToolCallResult(cls.run(call.arguments));
+                            result = handleToolCallResult(cls.run(new Context(this), call.arguments));
                         } catch (Exception e) {
                             result.setError("Error calling IFunction tool '" + call.name + "': " + e.getMessage());
                         }
@@ -880,7 +917,7 @@ public class Agent {
                         // 调用 CLI 工具
                     {
 
-                            result = handleToolCallResult("{\"content\":\"CLI tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
+                        result = handleToolCallResult("{\"content\":\"CLI tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
 
                     }
                     break;
@@ -944,4 +981,6 @@ public class Agent {
             return result;
         }
     }
+
+    // endregion
 }
