@@ -17,14 +17,20 @@ import java.util.Map;
  * Todo 虚拟线程引入
  */
 @Slf4j
-public class Dashscope extends Base {
+public class Dashscope implements IEmbedding {
+    protected final String type;
+    protected final Map<String, Object> config;
+    protected final String apiKey;
+
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     
     // Dashscope API base URL
     private static final String BASE_URL = "https://dashscope.aliyuncs.com/api/v1/services/embeddings/";
 
     public Dashscope(String type, Map<String, Object> config, String apiKey) {
-        super(type, config, apiKey);
+        this.type = type;
+        this.config = config;
+        this.apiKey = apiKey;
     }
 
     @Override
