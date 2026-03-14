@@ -1,6 +1,7 @@
 package me.karboom.java.iSerf.kit.tool;
 
-import me.karboom.java.iSerf.tool.Tool;
+import me.karboom.java.iSerf.agent.tool.CallResult;
+import me.karboom.java.iSerf.agent.tool.Tool;
 
 import java.io.IOException;
 import java.nio.file.*;
@@ -28,7 +29,7 @@ public class FileSystem {
                 .parameters(List.of(
                         new Tool.Parameter("path", "string", "要读取的文件路径", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var filePath = Path.of((String) params.get("path"));
                     var fullPath = Path.of(root).resolve(filePath).normalize();
                     
@@ -38,7 +39,10 @@ public class FileSystem {
                     }
                     
                     try {
-                        return Files.readString(fullPath);
+                        var content = Files.readString(fullPath);
+                        return CallResult.builder()
+                                .llm(content)
+                                .build();
                     } catch (IOException e) {
                         throw new RuntimeException("读取文件失败：" + e.getMessage());
                     }
@@ -59,11 +63,11 @@ public class FileSystem {
                         new Tool.Parameter("path", "string", "要写入的文件路径", true),
                         new Tool.Parameter("content", "string", "要写入文件的内容", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var filePath = Path.of((String) params.get("path"));
                     var fullPath = Path.of(root).resolve(filePath).normalize();
                     
-                    // 确保路径在root目录下
+                    // 确保路径在 root 目录下
                     if (!fullPath.startsWith(Path.of(root))) {
                         throw new SecurityException("访问被拒绝：路径在根目录之外");
                     }
@@ -77,7 +81,9 @@ public class FileSystem {
                     
                     try {
                         Files.writeString(fullPath, (String) params.get("content"));
-                        return "文件写入成功";
+                        return CallResult.builder()
+                                .llm("文件写入成功")
+                                .build();
                     } catch (IOException e) {
                         throw new RuntimeException("写入文件失败：" + e.getMessage());
                     }
@@ -97,7 +103,7 @@ public class FileSystem {
                 .parameters(List.of(
                         new Tool.Parameter("path", "string", "要列出的目录路径", false)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var dirPath = (String) params.get("path");
                     if (dirPath == null || dirPath.isEmpty()) {
                         dirPath = ".";
@@ -115,7 +121,9 @@ public class FileSystem {
                         var files = Files.list(fullPath)
                                 .map(path -> path.getFileName().toString())
                                 .toArray(String[]::new);
-                        return Arrays.toString(files);
+                        return CallResult.builder()
+                                .llm(Arrays.toString(files))
+                                .build();
                     } catch (IOException e) {
                         throw new RuntimeException("列出目录失败：" + e.getMessage());
                     }

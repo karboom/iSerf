@@ -1,4 +1,4 @@
-package me.karboom.java.iSlogger.kit.tool;
+package me.karboom.java.iSerf.kit.tool;
 
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.IdUtil;
@@ -7,16 +7,16 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSlogger.llm.text.BaseLLM;
-import me.karboom.java.iSlogger.llm.text.OpenAI;
-import me.karboom.java.iSlogger.memory.Item;
-import me.karboom.java.iSlogger.tool.Tool;
-import me.karboom.java.iSlogger.util.JSONUtil;
+import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.tool.CallResult;
+import me.karboom.java.iSerf.llm.text.Base;
+import me.karboom.java.iSerf.llm.text.OpenAI;
+import me.karboom.java.iSerf.agent.tool.Tool;
+import me.karboom.java.iSerf.util.JSONUtil;
 import net.bramp.ffmpeg.FFmpeg;
 import net.bramp.ffmpeg.FFprobe;
 import net.bramp.ffmpeg.builder.FFmpegBuilder;
 
-import java.net.InterfaceAddress;
 import java.util.HashMap;
 
 import java.nio.file.Files;
@@ -24,11 +24,10 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.IntStream;
 
 @Slf4j
-public class SRAG {
-    private BaseLLM llm;
+public class VideoSearch {
+    private Base llm;
 
     @Data
     @Builder
@@ -76,10 +75,10 @@ public class SRAG {
         public List<Text> texts;
     }
 
-    public SRAG() {
+    public VideoSearch() {
     }
 
-    public SRAG(BaseLLM llm) {
+    public VideoSearch(Base llm) {
         this.llm = llm;
     }
 
@@ -93,23 +92,25 @@ public class SRAG {
                 .description("当用户需要查询特定画面的时候，使用这个工具")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("sql", "string", "搜索查询语句", true),
-                        new Tool.Parameter("search_type", "string", "期望的搜索类型：'vector'(向量搜索), 'structured'(结构化搜索)", false)
+                        new Tool.Parameter("sql", "string", "结构化查询", true),
+                        new Tool.Parameter("textForVectorMatch", "string", "用于向量匹配的文本描述", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var query = params.get("sql").toString();
+                    var text = params.get("textForVectorMatch");
 
-                    System.out.println("query: " + query);
-                    
+                    log.debug("mixedSearch query: {}, text: {}", query, text);
+
                     var result = """
                             {
-                                "direct": {
-                              "query": "%s",
-                              "b": "%s",
-                            }}
-                            """.formatted(query, query);
+                                "query": "%s",
+                                "text": "%s"
+                            }
+                            """.formatted(query, text);
 
-                    return result;
+                    return CallResult.builder()
+                            .direct(JSONUtil.parse(result))
+                            .build();
                 })
                 .build();
     }
@@ -127,7 +128,7 @@ public class SRAG {
                         new Tool.Parameter("url", "string", "视频文件地址", true),
                         new Tool.Parameter("tags", "array", "期望创建的索引标签", false)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     try {
                         var url = params.get("url").toString();
                         var tags = params.get("tags");
@@ -179,12 +180,18 @@ public class SRAG {
 
                         log.debug("buildIndex saved result: {}", resultFile);
 
-                        return """
+                        var resultJson = """
                                 {
-                                    "direct": "success",
-                                   
+                                    "taskId": "%s",
+                                    "outputDir": "%s",
+                                    "frameCount": %d,
+                                    "resultFile": "%s"
                                 }
                                 """.formatted(taskId, outputDir, descriptions.size(), resultFile);
+
+                        return CallResult.builder()
+                                .direct(JSONUtil.parse(resultJson))
+                                .build();
                     } catch (Exception e) {
                         log.error("buildIndex error", e);
                         throw new RuntimeException(e);
@@ -200,9 +207,9 @@ public class SRAG {
         var base64Str = java.util.Base64.getEncoder().encodeToString(imageBase64);
         var imageUrl = "data:image/jpeg;base64,%s".formatted(base64Str);
 
-        var item = Item.builder()
-                .role(Item.ROLE.USER)
-                .type(Item.TYPE.IMAGE)
+        var item = Message.builder()
+                .role(Message.ROLE.USER)
+                .type(Message.TYPE.IMAGE)
                 .images(List.of(imageUrl))
                 .text("请描述这张图片的内容，提取关键信息，必须是中文结果")
                 .build();

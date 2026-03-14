@@ -1,7 +1,8 @@
 package me.karboom.java.iSerf.kit.tool;
 
 import lombok.SneakyThrows;
-import me.karboom.java.iSerf.tool.Tool;
+import me.karboom.java.iSerf.agent.tool.CallResult;
+import me.karboom.java.iSerf.agent.tool.Tool;
 import org.apache.commons.math3.util.FastMath;
 import org.apache.commons.math3.util.Precision;
 
@@ -24,7 +25,7 @@ public class Mathematics {
                         new Tool.Parameter("a", "number", "第一个数字", true),
                         new Tool.Parameter("b", "number", "第二个数字", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var a = Double.valueOf(params.get("a").toString());
                     var b = Double.valueOf(params.get("b").toString());
                     var result = a + b;
@@ -46,7 +47,7 @@ public class Mathematics {
                         new Tool.Parameter("a", "number", "被减数", true),
                         new Tool.Parameter("b", "number", "减数", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var a = Double.valueOf(params.get("a").toString());
                     var b = Double.valueOf(params.get("b").toString());
                     var result = a - b;
@@ -68,7 +69,7 @@ public class Mathematics {
                         new Tool.Parameter("a", "number", "第一个数字", true),
                         new Tool.Parameter("b", "number", "第二个数字", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var a = Double.valueOf(params.get("a").toString());
                     var b = Double.valueOf(params.get("b").toString());
                     var result = a * b;
@@ -91,7 +92,7 @@ public class Mathematics {
                         new Tool.Parameter("a", "number", "被除数", true),
                         new Tool.Parameter("b", "number", "除数", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var a = Double.valueOf(params.get("a").toString());
                     var b = Double.valueOf(params.get("b").toString());
                     if (b == 0) {
@@ -116,7 +117,7 @@ public class Mathematics {
                         new Tool.Parameter("base", "number", "底数", true),
                         new Tool.Parameter("exponent", "number", "指数", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var base = Double.valueOf(params.get("base").toString());
                     var exponent = Double.valueOf(params.get("exponent").toString());
                     var result = FastMath.pow(base, exponent);
@@ -139,7 +140,7 @@ public class Mathematics {
                         new Tool.Parameter("a", "number", "被除数", true),
                         new Tool.Parameter("b", "number", "除数", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var a = Double.valueOf(params.get("a").toString());
                     var b = Double.valueOf(params.get("b").toString());
                     if (b == 0) {
@@ -164,7 +165,7 @@ public class Mathematics {
                 .parameters(List.of(
                         new Tool.Parameter("number", "number", "要求平方根的数字", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
                     if (num < 0) {
                         throw new ArithmeticException("不能对负数开平方根");
@@ -187,7 +188,7 @@ public class Mathematics {
                 .parameters(List.of(
                         new Tool.Parameter("number", "number", "要求绝对值的数字", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
                     var result = FastMath.abs(num);
                     return formatResult(result);
@@ -208,7 +209,7 @@ public class Mathematics {
                 .parameters(List.of(
                         new Tool.Parameter("number", "number", "要求自然对数的数字", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
                     if (num <= 0) {
                         throw new ArithmeticException("数字必须大于零");
@@ -232,7 +233,7 @@ public class Mathematics {
                 .parameters(List.of(
                         new Tool.Parameter("number", "number", "要求常用对数的数字", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
                     if (num <= 0) {
                         throw new ArithmeticException("数字必须大于零");
@@ -255,7 +256,7 @@ public class Mathematics {
                 .parameters(List.of(
                         new Tool.Parameter("number", "number", "弧度值", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
                     var result = FastMath.sin(num);
                     return formatResult(result);
@@ -275,7 +276,7 @@ public class Mathematics {
                 .parameters(List.of(
                         new Tool.Parameter("number", "number", "弧度值", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
                     var result = FastMath.cos(num);
                     return formatResult(result);
@@ -295,7 +296,7 @@ public class Mathematics {
                 .parameters(List.of(
                         new Tool.Parameter("number", "number", "弧度值", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
                     var result = FastMath.tan(num);
                     return formatResult(result);
@@ -315,7 +316,7 @@ public class Mathematics {
                 .parameters(List.of(
                         new Tool.Parameter("number", "number", "正弦值(-1到1之间)", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
                     var result = FastMath.asin(num);
                     return formatResult(result);
@@ -335,7 +336,7 @@ public class Mathematics {
                 .parameters(List.of(
                         new Tool.Parameter("number", "number", "余弦值(-1到1之间)", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
                     var result = FastMath.acos(num);
                     return formatResult(result);
@@ -355,7 +356,7 @@ public class Mathematics {
                 .parameters(List.of(
                         new Tool.Parameter("number", "number", "正切值", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
                     var result = FastMath.atan(num);
                     return formatResult(result);
@@ -375,10 +376,12 @@ public class Mathematics {
                 .parameters(List.of(
                         new Tool.Parameter("number", "number", "要求向上取整的数字", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
                     var result = FastMath.ceil(num);
-                    return String.valueOf((long) result);
+                    return CallResult.builder()
+                            .llm(String.valueOf((long) result))
+                            .build();
                 })
                 .build();
     }
@@ -395,10 +398,12 @@ public class Mathematics {
                 .parameters(List.of(
                         new Tool.Parameter("number", "number", "要求向下取整的数字", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
                     var result = FastMath.floor(num);
-                    return String.valueOf((long) result);
+                    return CallResult.builder()
+                            .llm(String.valueOf((long) result))
+                            .build();
                 })
                 .build();
     }
@@ -415,10 +420,12 @@ public class Mathematics {
                 .parameters(List.of(
                         new Tool.Parameter("number", "number", "要求四舍五入的数字", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
                     var result = FastMath.round(num);
-                    return String.valueOf(result);
+                    return CallResult.builder()
+                            .llm(String.valueOf(result))
+                            .build();
                 })
                 .build();
     }
@@ -436,7 +443,7 @@ public class Mathematics {
                         new Tool.Parameter("a", "number", "第一个数字", true),
                         new Tool.Parameter("b", "number", "第二个数字", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var a = Double.valueOf(params.get("a").toString());
                     var b = Double.valueOf(params.get("b").toString());
                     var result = FastMath.max(a, b);
@@ -458,7 +465,7 @@ public class Mathematics {
                         new Tool.Parameter("a", "number", "第一个数字", true),
                         new Tool.Parameter("b", "number", "第二个数字", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var a = Double.valueOf(params.get("a").toString());
                     var b = Double.valueOf(params.get("b").toString());
                     var result = FastMath.min(a, b);
@@ -479,7 +486,7 @@ public class Mathematics {
                 .parameters(List.of(
                         new Tool.Parameter("number", "number", "指数n", true)
                 ))
-                .function((params) -> {
+                .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
                     var result = FastMath.exp(num);
                     return formatResult(result);
@@ -490,13 +497,18 @@ public class Mathematics {
     /**
      * 格式化结果
      * @param result 计算结果
-     * @return 格式化后的字符串
+     * @return 格式化后的 CallResult
      */
-    private String formatResult(Double result) {
+    private CallResult formatResult(Double result) {
+        String value;
         if (Precision.equals(result, FastMath.floor(result), 1.0e-10)) {
-            return String.valueOf(result.longValue());
+            value = String.valueOf(result.longValue());
+        } else {
+            value = String.valueOf(result);
         }
-        return String.valueOf(result);
+        return CallResult.builder()
+                .llm(value)
+                .build();
     }
 
     public List<Tool> all() {
