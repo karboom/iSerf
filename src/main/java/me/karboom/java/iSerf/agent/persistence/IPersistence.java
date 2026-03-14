@@ -1,5 +1,7 @@
-package me.karboom.java.iSerf.agent;
+package me.karboom.java.iSerf.agent.persistence;
 
+import me.karboom.java.iSerf.agent.Event;
+import me.karboom.java.iSerf.agent.Message;
 import reactor.util.function.Tuple2;
 
 import java.util.List;

@@ -1,4 +1,4 @@
-package me.karboom.java.iSerf.agent;
+package me.karboom.java.iSerf.agent.persistence;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -6,6 +6,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import me.karboom.java.iSerf.agent.Event;
+import me.karboom.java.iSerf.agent.Message;
 import me.karboom.java.iSerf.util.CBORUtil;
 import reactor.util.function.Tuple2;
 import reactor.util.function.Tuples;

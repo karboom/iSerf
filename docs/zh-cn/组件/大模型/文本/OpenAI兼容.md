@@ -255,15 +255,15 @@ var batchId = llm.batch(messageBatch, WeatherResponse.class);
 System.out.println("批量任务ID: " + batchId);
 
 // 查询任务状态
-var taskStatus = llm.taskStatus(batchId);
-while (TaskStatusBO.STATUS.DOING.equals(taskStatus.getStatus())) {
+var batchTaskInfo = llm.batchTaskInfo(batchId);
+while (TaskStatusBO.STATUS.DOING.equals(batchTaskInfo.getStatus())) {
     Thread.sleep(5000);
-    taskStatus = llm.taskStatus(batchId);
+    batchTaskInfo = llm.batchTaskInfo(batchId);
 }
 
 // 获取任务结果
-if (TaskStatusBO.STATUS.DONE.equals(taskStatus.getStatus())) {
-    var results = llm.taskResult(taskStatus);
+if (TaskStatusBO.STATUS.DONE.equals(batchTaskInfo.getStatus())) {
+    var results = llm.taskResult(batchTaskInfo);
     for (var result : results) {
         System.out.println(result.getChoices().getFirst().getText());
     }

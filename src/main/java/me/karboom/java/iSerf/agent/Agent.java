@@ -3,13 +3,16 @@ package me.karboom.java.iSerf.agent;
 import cn.hutool.core.util.StrUtil;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
+import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
+import me.karboom.java.iSerf.agent.persistence.IPersistence;
+import me.karboom.java.iSerf.agent.persistence.NonePersistence;
 import me.karboom.java.iSerf.llm.text.Base;
 import me.karboom.java.iSerf.llm.text.Output;
 import me.karboom.java.iSerf.schedule.ISchedule;
 import me.karboom.java.iSerf.schedule.Plan;
-import me.karboom.java.iSerf.schedule.Schedule;
-import me.karboom.java.iSerf.tool.Context;
-import me.karboom.java.iSerf.tool.Tool;
+import me.karboom.java.iSerf.agent.tool.Context;
+import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.util.CodeUtil;
 import me.karboom.java.iSerf.util.HttpUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
@@ -20,7 +23,7 @@ import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import me.karboom.java.iSerf.tool.FunctionWrapper;
+import me.karboom.java.iSerf.agent.tool.FunctionWrapper;
 import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.function.Tuple3;
@@ -36,7 +39,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.function.Consumer;
-import java.util.function.Function;
 
 /**
  * Agent 基类

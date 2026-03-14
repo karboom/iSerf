@@ -1,7 +1,7 @@
-package me.karboom.java.iSerf.agent;
+package me.karboom.java.iSerf.agent.llmProvider;
 
 import me.karboom.java.iSerf.llm.text.Base;
-import me.karboom.java.iSerf.tool.Tool;
+import me.karboom.java.iSerf.agent.tool.Tool;
 
 import java.util.List;
 

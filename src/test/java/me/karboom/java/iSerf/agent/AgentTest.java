@@ -1,8 +1,8 @@
 package me.karboom.java.iSerf.agent;
 
 import me.karboom.java.iSerf.llm.text.OpenAITest;
-import me.karboom.java.iSerf.tool.Loader;
-import me.karboom.java.iSerf.tool.Tool;
+import me.karboom.java.iSerf.agent.tool.Loader;
+import me.karboom.java.iSerf.agent.tool.Tool;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.tablesaw.api.StringColumn;

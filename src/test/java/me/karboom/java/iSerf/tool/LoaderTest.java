@@ -1,5 +1,7 @@
 package me.karboom.java.iSerf.tool;
 
+import me.karboom.java.iSerf.agent.tool.Loader;
+import me.karboom.java.iSerf.agent.tool.Tool;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

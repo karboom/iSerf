@@ -1,11 +1,12 @@
-package me.karboom.java.iSerf.rag.scene;
+package me.karboom.java.iSerf.rag.category;
 
 import io.milvus.v2.client.ConnectConfig;
 import io.milvus.v2.client.MilvusClientV2;
 import io.milvus.v2.service.collection.request.CreateCollectionReq;
 import me.karboom.java.iSerf.llm.embedding.Dashscope;
 import me.karboom.java.iSerf.llm.text.OpenAI;
-import me.karboom.java.iSerf.rag.vectorStore.MilvusVectorStore;
+import me.karboom.java.iSerf.rag.scene.Memory;
+import me.karboom.java.iSerf.rag.store.MilvusVectorStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
