@@ -1,7 +1,7 @@
 package me.karboom.java.iSerf.llm.text;
 
-import me.karboom.java.iSerf.tool.Tool;
-import me.karboom.java.iSerf.memory.Item;
+import me.karboom.java.iSerf.agent.tool.Tool;
+import me.karboom.java.iSerf.agent.Message;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
@@ -25,18 +25,18 @@ public abstract class Base {
     /**
      * 用于持续交流
      */
-    abstract public Flux<Output> send(List<Item> messages, Class<?> outputFormat, List<Tool> tools);
+    abstract public Flux<Output> send(List<Message> messages, Class<?> outputFormat, List<Tool> tools);
 
     /**
      * 用于工具查询
      */
-    abstract public Output query(List<Item> messages, Class<?> outputFormat);
+    abstract public Output query(List<Message> messages, Class<?> outputFormat);
 
     /**
      * 批量工具查询
      * @return 批量任务ID
      */
-    abstract public String batch(List<List<Item>> messageBatch, Class<?> outputFormat);
+    abstract public String batch(List<List<Message>> messageBatch, Class<?> outputFormat);
 
     /**
      * 查看批量任务状态

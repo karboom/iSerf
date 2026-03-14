@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import me.karboom.java.iSerf.agent.tool.CallResult;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.util.HashMap;
@@ -40,21 +41,10 @@ public class Message {
     @NoArgsConstructor
     @Builder
     public static class ToolCall {
-
-        @Data
-        @AllArgsConstructor
-        @Builder
-        @NoArgsConstructor
-        public static class Result {
-            public ObjectNode direct;
-            public String error;
-            public String llm;
-        }
-
         public String id;
         public String name;
         public HashMap<String, Object> arguments;
-        public Result result;
+        public CallResult result;
     }
 
     @Data

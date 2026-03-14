@@ -5,8 +5,8 @@ import com.github.victools.jsonschema.generator.SchemaGenerator;
 import com.github.victools.jsonschema.generator.SchemaGeneratorConfigBuilder;
 import com.github.victools.jsonschema.generator.SchemaVersion;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.memory.Item;
-import me.karboom.java.iSerf.tool.Tool;
+import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.util.HttpUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import okhttp3.*;
@@ -14,14 +14,11 @@ import okhttp3.sse.EventSource;
 import okhttp3.sse.EventSourceListener;
 import okhttp3.sse.EventSources;
 import reactor.core.publisher.Flux;
-import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Ollama - 本地运行的大模型
@@ -40,7 +37,7 @@ public class Ollama extends Base {
     }
 
     @Override
-    public Flux<Output> send(List<Item> messages, Class<?> outputFormat, List<Tool> tools) {
+    public Flux<Output> send(List<Message> messages, Class<?> outputFormat, List<Tool> tools) {
         return Flux.create(sink -> {
             var requestBody = buildRequestBody(messages, outputFormat, tools, true);
 
@@ -100,7 +97,7 @@ public class Ollama extends Base {
     }
 
     @Override
-    public Output query(List<Item> messages, Class<?> outputFormat) {
+    public Output query(List<Message> messages, Class<?> outputFormat) {
         var requestBody = buildRequestBody(messages, outputFormat, null, false);
 
         var request = new Request.Builder()
@@ -125,7 +122,7 @@ public class Ollama extends Base {
     }
 
     @Override
-    public String batch(List<List<Item>> messageBatch, Class<?> outputFormat) {
+    public String batch(List<List<Message>> messageBatch, Class<?> outputFormat) {
         throw new UnsupportedOperationException("Ollama does not support batch API");
     }
 
@@ -139,7 +136,7 @@ public class Ollama extends Base {
         throw new UnsupportedOperationException("Ollama does not support batch API");
     }
 
-    private String buildRequestBody(List<Item> messages, Class<?> outputFormat, List<Tool> tools, boolean stream) {
+    private String buildRequestBody(List<Message> messages, Class<?> outputFormat, List<Tool> tools, boolean stream) {
         var body = JSONUtil.create();
         body.put("model", llmType);
         body.put("stream", stream);
@@ -151,28 +148,28 @@ public class Ollama extends Base {
         var messagesArray = JSONUtil.createArray();
         for (var item : messages) {
             switch (item.role) {
-                case Item.ROLE.USER:
+                case Message.ROLE.USER:
                     var userMessage = JSONUtil.create();
                     userMessage.put("role", "user");
                     userMessage.put("content", item.text);
                     messagesArray.add(userMessage);
                     break;
 
-                case Item.ROLE.ASSISTANT:
+                case Message.ROLE.ASSISTANT:
                     var assistantMessage = JSONUtil.create();
                     assistantMessage.put("role", "assistant");
                     assistantMessage.put("content", item.text);
                     messagesArray.add(assistantMessage);
                     break;
 
-                case Item.ROLE.SYSTEM:
+                case Message.ROLE.SYSTEM:
                     var systemMessage = JSONUtil.create();
                     systemMessage.put("role", "system");
                     systemMessage.put("content", item.text);
                     messagesArray.add(systemMessage);
                     break;
 
-                case Item.ROLE.TOOL:
+                case Message.ROLE.TOOL:
                     if (item.toolCalls != null) {
                         for (var toolCall : item.toolCalls) {
                             var toolMessage = JSONUtil.create();

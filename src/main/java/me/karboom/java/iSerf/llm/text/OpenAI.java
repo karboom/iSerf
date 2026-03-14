@@ -3,8 +3,8 @@ package me.karboom.java.iSerf.llm.text;
 import com.github.victools.jsonschema.generator.*;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.tool.Tool;
-import me.karboom.java.iSerf.memory.Item;
+import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.util.HttpUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import okhttp3.*;
@@ -19,7 +19,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 /**
  * OpenAI
@@ -38,7 +37,7 @@ public class OpenAI extends Base {
         var builder = OpenAIOkHttpClient.builder()
                 .apiKey(this.apiKey)
                 .baseUrl(this.url)
-                .timeout(Duration.ofSeconds(60));
+                .timeout(Duration.ofSeconds(120));
 
         if (this.maxRetries != null) {
             builder.maxRetries(this.maxRetries);
@@ -54,7 +53,7 @@ public class OpenAI extends Base {
      * @return 自定义数据结构
      */
     @Override
-    public Flux<Output> send(List<Item> memory, Class<?> outputFormat, List<Tool> tools) {
+    public Flux<Output> send(List<Message> memory, Class<?> outputFormat, List<Tool> tools) {
         return Flux.create(sink -> {
             var requestBody = buildRequestBody(memory, outputFormat, tools);
 
@@ -104,7 +103,7 @@ public class OpenAI extends Base {
     }
 
     @Override
-    public Output query(List<Item> messages, Class<?> outputFormat) {
+    public Output query(List<Message> messages, Class<?> outputFormat) {
         var requestBody = buildRequestBody(messages, outputFormat, null);
         var requestJson = JSONUtil.parse(requestBody);
         requestJson.remove("stream");
@@ -133,7 +132,7 @@ public class OpenAI extends Base {
     }
 
     @Override
-    public String batch(List<List<Item>> messageBatch, Class<?> outputFormat) {
+    public String batch(List<List<Message>> messageBatch, Class<?> outputFormat) {
         // 构建批量请求的JSONL格式数据
         var jsonlBuilder = new StringBuilder();
         for (var i = 0; i < messageBatch.size(); i++) {
@@ -297,7 +296,7 @@ public class OpenAI extends Base {
     }
     
 
-    private String buildRequestBody(List<Item> memory, Class<?> outputFormat, List<Tool> tools) {
+    private String buildRequestBody(List<Message> memory, Class<?> outputFormat, List<Tool> tools) {
         var body = JSONUtil.create();
         body.put("model", llmType);
         body.put("stream", true);
@@ -322,15 +321,15 @@ public class OpenAI extends Base {
         var messagesArray = JSONUtil.createArray();
         for (var item : memory) {
             switch (item.role) {
-                case Item.ROLE.USER:
+                case Message.ROLE.USER:
                     var userMessage = JSONUtil.create();
                     userMessage.put("role", "user");
 
                     switch (item.type) {
-                        case Item.TYPE.TEXT:
+                        case Message.TYPE.TEXT:
                             userMessage.put("content", item.text);
                             break;
-                        case Item.TYPE.IMAGE:
+                        case Message.TYPE.IMAGE:
                             var content = JSONUtil.createArray();
                             if (item.images != null) {
                                 for (var image : item.images) {
@@ -345,7 +344,7 @@ public class OpenAI extends Base {
                             userMessage.set("content", content);
                             break;
 
-                        case Item.TYPE.AUDIO:
+                        case Message.TYPE.AUDIO:
                             var audioContent = JSONUtil.createArray();
                             if (item.audio != null) {
                                     audioContent.add(JSONUtil.create()
@@ -359,7 +358,7 @@ public class OpenAI extends Base {
 
                             break;
 
-                        case Item.TYPE.VIDEO:
+                        case Message.TYPE.VIDEO:
                             var videoContent = JSONUtil.createArray();
                             if (item.video != null) {
                                 videoContent.add(JSONUtil.create()
@@ -378,7 +377,7 @@ public class OpenAI extends Base {
                     messagesArray.add(userMessage);
                     break;
 
-                case Item.ROLE.ASSISTANT:
+                case Message.ROLE.ASSISTANT:
                     var assistantMessage = JSONUtil.create();
                     assistantMessage.put("role", "assistant");
 
@@ -400,13 +399,13 @@ public class OpenAI extends Base {
                     messagesArray.add(assistantMessage);
                     break;
 
-                case Item.ROLE.SYSTEM:
+                case Message.ROLE.SYSTEM:
                     messagesArray.add(JSONUtil.create()
                             .put("role", "system")
                             .put("content", item.text));
                     break;
 
-                case Item.ROLE.TOOL:
+                case Message.ROLE.TOOL:
                     if (item.toolCalls != null) {
                         for (var toolCall : item.toolCalls) {
                             messagesArray.add(JSONUtil.create()
