@@ -8,7 +8,7 @@ import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
 import me.karboom.java.iSerf.agent.persistence.IPersistence;
 import me.karboom.java.iSerf.agent.persistence.NonePersistence;
 import me.karboom.java.iSerf.agent.tool.*;
-import me.karboom.java.iSerf.llm.text.Base;
+import me.karboom.java.iSerf.llm.text.IText;
 import me.karboom.java.iSerf.llm.text.Output;
 import me.karboom.java.iSerf.schedule.ISchedule;
 import me.karboom.java.iSerf.schedule.Plan;
@@ -86,7 +86,7 @@ public class Agent {
      * @param llm   LLM 实例
      * @param tools 工具列表
      */
-    public Agent(String id, String prompt, Base llm, List<Tool> tools) {
+    public Agent(String id, String prompt, IText llm, List<Tool> tools) {
         this.id = id;
         this.prompt = prompt;
         this.tools = tools != null ? tools : new ArrayList<>();

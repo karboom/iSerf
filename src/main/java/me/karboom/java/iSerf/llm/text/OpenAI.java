@@ -24,11 +24,20 @@ import java.util.Map;
  * OpenAI
  */
 @Slf4j
-public class OpenAI extends Base {
+public class OpenAI implements IText {
+    public String llmType;
+    public Map<String, Object> llmConfig;
+    protected String apiKey;
+    protected String url;
+    protected Integer maxRetries;
     private final SchemaGenerator schemaGenerator;
 
     public OpenAI(String llmType, Map<String, Object> llmConfig, String apiKey, String url, Integer maxRetries) {
-        super(llmType, llmConfig, apiKey, url, maxRetries);
+        this.llmType = llmType;
+        this.llmConfig = llmConfig;
+        this.apiKey = apiKey;
+        this.url = url;
+        this.maxRetries = maxRetries;
 
         var configBuilder = new SchemaGeneratorConfigBuilder(SchemaVersion.DRAFT_7, OptionPreset.PLAIN_JSON);
         var config = configBuilder.forFields().withRequiredCheck(fieldScope -> true);
