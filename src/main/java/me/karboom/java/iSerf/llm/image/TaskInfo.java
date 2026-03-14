@@ -11,4 +11,8 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class TaskInfo {
+    public String id;
+    public String status;
+
+    public Output result;
 }

@@ -1,21 +1,19 @@
 package me.karboom.java.iSerf.llm.image;
 
-import me.karboom.java.iSerf.llm.video.Base;
+
+import me.karboom.java.iSerf.llm.video.TaskInfo;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.Map;
 
-public class Dashscope extends Base {
-    Dashscope(String llmType, Map<String, Object> llmConfig, String apiKey, String url) {
-        super(llmType, llmConfig, apiKey, url);
-    }
-
+public class Dashscope implements IImage {
     @Override
-    String generate() {
+    public String generate(Input input) {
         return "";
     }
 
     @Override
-    TaskInfo getTaskInfo() {
+    public TaskInfo getTaskInfo(String taskId) {
         return null;
     }
 }
