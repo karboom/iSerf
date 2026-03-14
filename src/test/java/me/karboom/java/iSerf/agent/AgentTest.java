@@ -1,5 +1,7 @@
 package me.karboom.java.iSerf.agent;
 
+import me.karboom.java.iSerf.agent.tool.CallCache;
+import me.karboom.java.iSerf.agent.tool.CallResult;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
 import me.karboom.java.iSerf.agent.tool.Loader;
 import me.karboom.java.iSerf.agent.tool.Tool;
@@ -46,7 +48,9 @@ class AgentTest {
                         new Tool.Parameter("unit", "string", "Temperature unit (celsius or fahrenheit)", false)
                 ))
                 .type(Tool.TYPE.FUNCTION)
-                .function((ctx, params) -> (Math.random() * 15 + 15) + "摄氏度")
+                .function((ctx, params) -> {
+                   return CallResult.builder().llm(( Math.random() * 15 + 15) + "摄氏度").build();
+                })
 
                 .build();
         tools.add(weatherTool);
@@ -176,8 +180,8 @@ class AgentTest {
                 .arguments(new HashMap<>(){{
                     put("location", "伦敦");
                 }})
-                .result(Message.ToolCall.Result.builder()
-                        .error("这不是一个中国的地点")
+                .result(CallResult.builder()
+                        .error(new RuntimeException("这不是一个中国的地点"))
                         .build())
                 .build();
 
@@ -191,8 +195,8 @@ class AgentTest {
         var nonExistentToolCall = Message.ToolCall.builder()
                 .name("non-existent-tool")
                 .arguments(new HashMap<>())
-                .result(Message.ToolCall.Result.builder()
-                        .error("这不是一个中国的地点")
+                .result(CallResult.builder()
+                        .error(new RuntimeException("这不是一个中国的地点"))
                         .build())
                 .build();
 
@@ -425,7 +429,7 @@ class AgentTest {
             }};
 
             // 创建缓存
-            var cache = ToolCallCache.builder()
+            var cache = CallCache.builder()
                     .callId("test-call-001")
                     .toolName("getWeather")
                     .params(testParams)
@@ -442,7 +446,7 @@ class AgentTest {
             }, "缓存不存在时应抛出异常");
 
             // 测试工具不存在的情况
-            var cacheWithNonExistentTool = ToolCallCache.builder()
+            var cacheWithNonExistentTool = CallCache.builder()
                     .callId("test-call-002")
                     .toolName("non-existent-tool")
                     .params(testParams)

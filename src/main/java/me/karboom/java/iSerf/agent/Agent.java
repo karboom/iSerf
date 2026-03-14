@@ -7,12 +7,11 @@ import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
 import me.karboom.java.iSerf.agent.persistence.IPersistence;
 import me.karboom.java.iSerf.agent.persistence.NonePersistence;
+import me.karboom.java.iSerf.agent.tool.*;
 import me.karboom.java.iSerf.llm.text.Base;
 import me.karboom.java.iSerf.llm.text.Output;
 import me.karboom.java.iSerf.schedule.ISchedule;
 import me.karboom.java.iSerf.schedule.Plan;
-import me.karboom.java.iSerf.agent.tool.Context;
-import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.util.CodeUtil;
 import me.karboom.java.iSerf.util.HttpUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
@@ -23,7 +22,6 @@ import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import me.karboom.java.iSerf.agent.tool.FunctionWrapper;
 import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.function.Tuple3;
@@ -79,7 +77,7 @@ public class Agent {
     /**
      * 工具调用缓存
      */
-    public List<ToolCallCache> toolCallCaches = new ArrayList<>();
+    public List<CallCache> toolCallCaches = new ArrayList<>();
 
     /**
      * 构造函数
@@ -476,7 +474,7 @@ public class Agent {
 
                             for (Message.ToolCall call : directCalls) {
                                 // 缓存工具调用参数，结果不管
-                                var cache = ToolCallCache.builder()
+                                var cache = CallCache.builder()
                                         .callId(call.getId())
                                         .toolName(call.getName())
                                         .params(call.getArguments())
@@ -596,7 +594,7 @@ public class Agent {
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("Tool not found: " + cache.toolName));
 
-        var result = Message.ToolCall.Result.builder().build();
+        var result = CallResult.builder().build();
 
         // Todo 这里可以封装一个函数专门调用iFunction
         var functionPath = getIFunctionPath(matchedTool);
@@ -612,7 +610,7 @@ public class Agent {
 
         // 加载类
         var cls = (FunctionWrapper) CodeUtil.load(versionDir, functionPath.get(2));
-        result = handleToolCallResult(cls.run(new Context(this), cache.params));
+        result = (cls.run(new Context(this), cache.params));
 
         return result.direct;
     }
@@ -865,7 +863,7 @@ public class Agent {
                 }
             }
 
-            var result = Message.ToolCall.Result.builder().build();
+            var result = CallResult.builder().build();
 
             if (matchedTool == null) {
                 result.setLlm("Tool not found: " + call.name);
@@ -877,10 +875,7 @@ public class Agent {
                     case Tool.TYPE.FUNCTION:
                         // 调用本地函数
 
-                        String functionResult = matchedTool.getFunction().run(new Context(this), call.arguments);
-                        // 使用新的处理函数处理directResult
-                        result = handleToolCallResult(functionResult);
-
+                        result = matchedTool.getFunction().run(new Context(this), call.arguments);
 
                         break;
 
@@ -900,9 +895,9 @@ public class Agent {
 
                             // 加载类
                             var cls = (FunctionWrapper) CodeUtil.load(versionDir, functionPath.get(2));
-                            result = handleToolCallResult(cls.run(new Context(this), call.arguments));
+                            result = (cls.run(new Context(this), call.arguments));
                         } catch (Exception e) {
-                            result.setError("Error calling IFunction tool '" + call.name + "': " + e.getMessage());
+                            result.setError(e);
                         }
                     }
                     break;
@@ -910,7 +905,7 @@ public class Agent {
                     case Tool.TYPE.MCP_HTTP:
                         // 调用 HTTP 工具
                     {
-                        result = handleToolCallResult("{\"content\":\"HTTP tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
+                        result.setLlm ("{\"content\":\"HTTP tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
 
                     }
                     break;
@@ -919,7 +914,7 @@ public class Agent {
                         // 调用 CLI 工具
                     {
 
-                        result = handleToolCallResult("{\"content\":\"CLI tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
+                        result.setLlm("{\"content\":\"CLI tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
 
                     }
                     break;
@@ -967,21 +962,6 @@ public class Agent {
 
         // 构建最终路径
         return List.of("%s/%s".formatted(directory, camelCaseName), currentVersion, upperFirstCamelCaseName);
-    }
-
-    /**
-     * 处理工具调用结果
-     * 尝试解析为JSON，如果失败则将字符串作为llm返回
-     */
-    private Message.ToolCall.Result handleToolCallResult(String resultString) {
-        try {
-            return JSONUtil.parse(resultString != null ? resultString : "{}", Message.ToolCall.Result.class);
-        } catch (Exception e) {
-            // 解析失败时，创建包含原始字符串的Result对象，将字符串设置为llm字段
-            var result = Message.ToolCall.Result.builder().build();
-            result.setLlm(resultString);
-            return result;
-        }
     }
 
     // endregion

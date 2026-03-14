@@ -4,5 +4,5 @@ import java.util.Map;
 
 @FunctionalInterface
 public interface FunctionWrapper {
-    String run(Context ctx, Map<String, Object> params);
+    CallResult run(Context ctx, Map<String, Object> params);
 }

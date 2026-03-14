@@ -1,4 +1,4 @@
-package me.karboom.java.iSerf.agent;
+package me.karboom.java.iSerf.agent.tool;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -11,7 +11,7 @@ import java.util.Map;
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-public class ToolCallCache {
+public class CallCache {
     public String callId;
 
     public String toolName;
