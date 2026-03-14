@@ -1,4 +1,4 @@
-package me.karboom.java.iSerf.rag;
+package me.karboom.java.iSerf.rag.store;
 
 import java.util.List;
 

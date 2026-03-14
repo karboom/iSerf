@@ -9,9 +9,9 @@ import lombok.Builder;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import me.karboom.java.iSerf.agent.Message;
 import me.karboom.java.iSerf.llm.text.OpenAI;
-import me.karboom.java.iSerf.memory.Item;
-import me.karboom.java.iSerf.rag.structStore.IStructStore;
+import me.karboom.java.iSerf.rag.store.IStructStore;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import tools.jackson.databind.node.ObjectNode;
@@ -436,15 +436,7 @@ public class MarkdownTreeBuilder {
         for (TreeNode node : nodeList) {
             int currentLevel = node.getLevel();
 
-            TreeNode treeNode = TreeNode.builder()
-                    .title(node.getTitle())
-                    .nodeId(node.getNodeId())
-                    .text(node.getText())
-                    .lineNum(node.getLineNum())
-                    .level(node.getLevel())
-                    .textTokenCount(node.getTextTokenCount())
-                    .nodes(new ArrayList<>())
-                    .build();
+            node.setNodes(new ArrayList<>());
 
             // 弹出栈中层级大于等于当前层级的节点
             while (!stack.isEmpty() && (int) stack.get(stack.size() - 1)[1] >= currentLevel) {
@@ -452,13 +444,13 @@ public class MarkdownTreeBuilder {
             }
 
             if (stack.isEmpty()) {
-                rootNodes.add(treeNode);
+                rootNodes.add(node);
             } else {
                 TreeNode parentNode = (TreeNode) stack.get(stack.size() - 1)[0];
-                parentNode.getNodes().add(treeNode);
+                parentNode.getNodes().add(node);
             }
 
-            stack.add(new Object[]{treeNode, currentLevel});
+            stack.add(new Object[]{node, currentLevel});
         }
 
         return rootNodes;
@@ -526,9 +518,9 @@ public class MarkdownTreeBuilder {
                 Directly return the description, do not include any other text.
                 """.formatted(node.getText());
 
-        var messages = List.of(Item.builder()
-                .role(Item.ROLE.USER)
-                .type(Item.TYPE.TEXT)
+        var messages = List.of(Message.builder()
+                .role(Message.ROLE.USER)
+                .type(Message.TYPE.TEXT)
                 .text(prompt)
                 .build());
 
@@ -570,9 +562,9 @@ public class MarkdownTreeBuilder {
                 Directly return the description, do not include any other text.
                 """.formatted(JSONUtil.stringify(cleanStructure));
 
-        var messages = List.of(Item.builder()
-                .role(Item.ROLE.USER)
-                .type(Item.TYPE.TEXT)
+        var messages = List.of(Message.builder()
+                .role(Message.ROLE.USER)
+                .type(Message.TYPE.TEXT)
                 .text(prompt)
                 .build());
 

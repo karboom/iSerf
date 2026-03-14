@@ -1,7 +1,5 @@
-package me.karboom.java.iSerf.rag.vectorStore;
+package me.karboom.java.iSerf.rag.store;
 
-
-import me.karboom.java.iSerf.rag.IStore;
 
 import java.util.List;
 import java.util.Map;

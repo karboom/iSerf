@@ -1,18 +1,15 @@
-package me.karboom.java.iSerf.rag.vectorStore;
+package me.karboom.java.iSerf.rag.store;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonObject;
 import io.milvus.v2.client.MilvusClientV2;
 import io.milvus.v2.service.vector.request.data.BaseVector;
 import io.milvus.v2.service.vector.request.data.FloatVec;
 
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.util.JSONUtil;
-import tools.jackson.core.type.TypeReference;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.ParameterizedType;
-import java.lang.reflect.Type;
 import java.util.*;
 import java.util.stream.Collectors;
 

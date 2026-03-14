@@ -1,7 +1,7 @@
 package me.karboom.java.iSerf.rag.util;
 
 import me.karboom.java.iSerf.llm.text.OpenAI;
-import me.karboom.java.iSerf.rag.structStore.RedisStructStore;
+import me.karboom.java.iSerf.rag.store.RedisStructStore;
 import me.karboom.java.iSerf.rag.util.MarkdownTreeBuilder.BuildOptions;
 import me.karboom.java.iSerf.rag.util.MarkdownTreeBuilder.TreeNode;
 import me.karboom.java.iSerf.rag.util.MarkdownTreeBuilder.BuildResult;
