@@ -9,17 +9,20 @@ version = "0.65.0-alpha"
 
 
 dependencies {
-    implementation("com.openai:openai-java:4.6.1")
 
     implementation("io.projectreactor:reactor-core:3.8.0-RC1")
-
     implementation("tools.jackson.core:jackson-databind:3.0.4")
+    implementation("tools.jackson.dataformat:jackson-dataformat-cbor:3.0.4")
+
+    // Source: https://mvnrepository.com/artifact/tools.jackson.module/jackson-module-blackbird
+    implementation("tools.jackson.module:jackson-module-blackbird:3.0.0")
 
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
     implementation("com.squareup.okhttp3:okhttp-sse:5.3.2")
 
     implementation("com.github.victools:jsonschema-generator:4.38.0")
 
+    implementation("com.openai:openai-java:4.6.1")
     implementation("io.modelcontextprotocol.sdk:mcp:0.14.1")
     implementation("io.modelcontextprotocol.sdk:mcp-spring-webflux:0.14.1")
     implementation("io.modelcontextprotocol.sdk:mcp-spring-webmvc:0.14.1")
@@ -32,9 +35,19 @@ dependencies {
 
     implementation("com.cronutils:cron-utils:9.2.1")
 
+    implementation("com.knuddels:jtokkit:1.1.0")
+
+    // Apache PDFBox for PDF processing
+    implementation("org.apache.pdfbox:pdfbox:3.0.4")
+
     implementation("io.lettuce:lettuce-core:7.4.0.RELEASE")
 
+    implementation("org.apache.pulsar:pulsar-client:4.1.3")
+
     implementation("cn.hutool:hutool-all:5.8.43")
+
+
+    implementation("io.milvus:milvus-sdk-java:2.6.6")
 
     implementation("org.apache.commons:commons-math3:3.6.1")
 
@@ -46,7 +59,11 @@ dependencies {
 
     compileOnly("org.projectlombok:lombok:1.18.42")
     annotationProcessor("org.projectlombok:lombok:1.18.42")
-//
+
+
+    testCompileOnly("org.projectlombok:lombok:1.18.42")
+    testAnnotationProcessor("org.projectlombok:lombok:1.18.42")
+
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
@@ -107,4 +124,6 @@ mavenPublishing {
 
 tasks.test {
     useJUnitPlatform()
+
+    jvmArgs("-Xmx6g", "-XX:MaxDirectMemorySize=4g")
 }
