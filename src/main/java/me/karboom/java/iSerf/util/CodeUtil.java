@@ -74,7 +74,7 @@ public class CodeUtil {
             throw new RuntimeException("Java Compiler not found. Please ensure you are running on a JDK.");
         }
 
-        var result = compiler.run(null, null, null, sourceFile.getPath());
+        var result = compiler.run(null, null, null, "-cp", System.getProperty("java.class.path"), sourceFile.getPath());
         if (result != 0) {
             throw new RuntimeException("Compilation failed");
         }

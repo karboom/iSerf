@@ -8,12 +8,13 @@ public class CodeUtilTest {
     public void testRun() throws Exception {
         var code = """
             import java.util.*;
-            import me.karboom.java.iSlogger.tool.FunctionWrapper;
+            import me.karboom.java.iSerf.tool.Context;
+            import me.karboom.java.iSerf.tool.FunctionWrapper;
             
             public class GetTime implements FunctionWrapper {
 
                 @Override
-                public String run(Map<String, Object> params) {
+                public String run(Context ctx, Map<String, Object> params) {
                     var a = List.of(1);
                     System.out.println("Hello from dynamic code!");
                     return "1";
