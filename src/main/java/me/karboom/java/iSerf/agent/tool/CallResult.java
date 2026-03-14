@@ -19,7 +19,7 @@ public class CallResult {
     /**
      * 错误信息
      */
-    public Throwable error;
+    public RuntimeException error;
 
     /**
      * 直接输出的调用结果

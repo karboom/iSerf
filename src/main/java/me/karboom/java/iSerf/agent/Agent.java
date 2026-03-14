@@ -897,7 +897,7 @@ public class Agent {
                             var cls = (FunctionWrapper) CodeUtil.load(versionDir, functionPath.get(2));
                             result = (cls.run(new Context(this), call.arguments));
                         } catch (Exception e) {
-                            result.setError(e);
+                            result.setError((RuntimeException) e);
                         }
                     }
                     break;
