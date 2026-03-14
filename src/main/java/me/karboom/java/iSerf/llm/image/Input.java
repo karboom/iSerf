@@ -13,5 +13,9 @@ import java.util.List;
 @AllArgsConstructor
 public class Input {
     public String prompt;
-    public List<String> images;
+
+    /**
+     * 内容图片
+     */
+    public List<String> contentImages;
 }

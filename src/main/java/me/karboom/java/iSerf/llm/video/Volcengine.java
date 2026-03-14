@@ -5,8 +5,8 @@ import java.util.Map;
 /**
  *
  */
-public class volcengine extends Base{
-    volcengine(String llmType, Map<String, Object> llmConfig, String apiKey, String url) {
+public class Volcengine extends Base{
+    Volcengine(String llmType, Map<String, Object> llmConfig, String apiKey, String url) {
         super(llmType, llmConfig, apiKey, url);
     }
 
@@ -16,7 +16,7 @@ public class volcengine extends Base{
     }
 
     @Override
-    String getTaskInfo() {
-        return "";
+    TaskInfo getTaskInfo() {
+        return null;
     }
 }
