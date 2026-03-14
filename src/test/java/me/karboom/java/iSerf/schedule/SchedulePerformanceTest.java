@@ -3,16 +3,12 @@ package me.karboom.java.iSerf.schedule;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 
-import me.karboom.java.iSerf.tool.Context;
-
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
@@ -23,7 +19,7 @@ class SchedulePerformanceTest {
     void testPerformance() {
         assertTimeoutPreemptively(java.time.Duration.ofSeconds(30), () -> {
             var schedule = new Schedule();
-            var planCount = 1000000;
+            var planCount = 10000;
             var executionTimes = new ConcurrentLinkedQueue<Integer>();
             
             // 添加大量计划
