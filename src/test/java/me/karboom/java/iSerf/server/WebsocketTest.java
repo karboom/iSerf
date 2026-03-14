@@ -121,7 +121,7 @@ class WebsocketTest {
                 socket2.on("agent/message", args -> {
                     if (args.length > 0 && args[0] instanceof String) {
                         var message = JSONUtil.parse((String) args[0]);
-                        System.out.println("on Message " + message.toString());
+                        System.out.println("on Communication " + message.toString());
                         messages.set(0, message);
                         messageLatch.countDown();
                     }
@@ -223,7 +223,7 @@ class WebsocketTest {
                 if (args.length > 0 && args[0] instanceof String) {
 
                     var message = JSONUtil.parse((String) args[0]);
-                    System.out.println("on Message " + message.toString());
+                    System.out.println("on Communication " + message.toString());
                     var agentId = message.path("agentId").asText();
                     for (int i = 0; i < n; i++) {
                         var storedId = agentIds.get(i);
