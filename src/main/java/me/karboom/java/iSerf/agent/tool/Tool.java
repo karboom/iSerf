@@ -27,6 +27,7 @@ public class Tool {
         public String type;
         public String description;
         public Boolean required;
+        public List<Parameter> properties;
     }
 
     public String name;
@@ -37,6 +38,7 @@ public class Tool {
 
     // function 特有
     public FunctionWrapper function;
+    
 
     // iFunction 特有
     public String iDirectory;

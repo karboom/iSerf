@@ -22,8 +22,8 @@ public class Mathematics {
                 .description("执行加法运算，将两个数字相加")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("a", "number", "第一个数字", true),
-                        new Tool.Parameter("b", "number", "第二个数字", true)
+                        new Tool.Parameter("a", "number", "第一个数字", true, null),
+                        new Tool.Parameter("b", "number", "第二个数字", true, null)
                 ))
                 .function((ctx, params) -> {
                     var a = Double.valueOf(params.get("a").toString());
@@ -44,8 +44,8 @@ public class Mathematics {
                 .description("执行减法运算，将两个数字相减")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("a", "number", "被减数", true),
-                        new Tool.Parameter("b", "number", "减数", true)
+                        new Tool.Parameter("a", "number", "被减数", true, null),
+                        new Tool.Parameter("b", "number", "减数", true, null)
                 ))
                 .function((ctx, params) -> {
                     var a = Double.valueOf(params.get("a").toString());
@@ -66,8 +66,8 @@ public class Mathematics {
                 .description("执行乘法运算，将两个数字相乘")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("a", "number", "第一个数字", true),
-                        new Tool.Parameter("b", "number", "第二个数字", true)
+                        new Tool.Parameter("a", "number", "第一个数字", true, null),
+                        new Tool.Parameter("b", "number", "第二个数字", true, null)
                 ))
                 .function((ctx, params) -> {
                     var a = Double.valueOf(params.get("a").toString());
@@ -89,8 +89,8 @@ public class Mathematics {
                 .description("执行除法运算，将两个数字相除")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("a", "number", "被除数", true),
-                        new Tool.Parameter("b", "number", "除数", true)
+                        new Tool.Parameter("a", "number", "被除数", true, null),
+                        new Tool.Parameter("b", "number", "除数", true, null)
                 ))
                 .function((ctx, params) -> {
                     var a = Double.valueOf(params.get("a").toString());
@@ -114,8 +114,8 @@ public class Mathematics {
                 .description("执行幂运算，计算a的b次方")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("base", "number", "底数", true),
-                        new Tool.Parameter("exponent", "number", "指数", true)
+                        new Tool.Parameter("base", "number", "底数", true, null),
+                        new Tool.Parameter("exponent", "number", "指数", true, null)
                 ))
                 .function((ctx, params) -> {
                     var base = Double.valueOf(params.get("base").toString());
@@ -134,11 +134,11 @@ public class Mathematics {
     public Tool modulo() {
         return Tool.builder()
                 .name("modulo")
-                .description("执行求模运算，计算a对b取余")
+                .description("执行求模运算，计算 a 对 b 取余")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("a", "number", "被除数", true),
-                        new Tool.Parameter("b", "number", "除数", true)
+                        new Tool.Parameter("a", "number", "被除数", true, null),
+                        new Tool.Parameter("b", "number", "除数", true, null)
                 ))
                 .function((ctx, params) -> {
                     var a = Double.valueOf(params.get("a").toString());
@@ -163,7 +163,7 @@ public class Mathematics {
                 .description("执行开方运算，计算数字的平方根")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("number", "number", "要求平方根的数字", true)
+                        new Tool.Parameter("number", "number", "要求平方根的数字", true, null)
                 ))
                 .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
@@ -186,7 +186,7 @@ public class Mathematics {
                 .description("计算数字的绝对值")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("number", "number", "要求绝对值的数字", true)
+                        new Tool.Parameter("number", "number", "要求绝对值的数字", true, null)
                 ))
                 .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
@@ -207,7 +207,7 @@ public class Mathematics {
                 .description("计算数字的自然对数(以e为底)")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("number", "number", "要求自然对数的数字", true)
+                        new Tool.Parameter("number", "number", "要求自然对数的数字", true, null)
                 ))
                 .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
@@ -228,10 +228,10 @@ public class Mathematics {
     public Tool log10() {
         return Tool.builder()
                 .name("log10")
-                .description("计算数字的常用对数(以10为底)")
+                .description("计算数字的常用对数 (以 10 为底)")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("number", "number", "要求常用对数的数字", true)
+                        new Tool.Parameter("number", "number", "要求常用对数的数字", true, null)
                 ))
                 .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
@@ -254,7 +254,7 @@ public class Mathematics {
                 .description("计算数字的正弦值(弧度制)")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("number", "number", "弧度值", true)
+                        new Tool.Parameter("number", "number", "弧度值", true, null)
                 ))
                 .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
@@ -271,10 +271,10 @@ public class Mathematics {
     public Tool cos() {
         return Tool.builder()
                 .name("cos")
-                .description("计算数字的余弦值(弧度制)")
+                .description("计算数字的余弦值 (弧度制)")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("number", "number", "弧度值", true)
+                        new Tool.Parameter("number", "number", "弧度值", true, null)
                 ))
                 .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
@@ -294,7 +294,7 @@ public class Mathematics {
                 .description("计算数字的正切值(弧度制)")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("number", "number", "弧度值", true)
+                        new Tool.Parameter("number", "number", "弧度值", true, null)
                 ))
                 .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
@@ -311,10 +311,10 @@ public class Mathematics {
     public Tool asin() {
         return Tool.builder()
                 .name("asin")
-                .description("计算数字的反正弦值(返回弧度)")
+                .description("计算数字的反正弦值 (返回弧度)")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("number", "number", "正弦值(-1到1之间)", true)
+                        new Tool.Parameter("number", "number", "正弦值 (-1 到 1 之间)", true, null)
                 ))
                 .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
@@ -334,7 +334,7 @@ public class Mathematics {
                 .description("计算数字的反余弦值(返回弧度)")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("number", "number", "余弦值(-1到1之间)", true)
+                        new Tool.Parameter("number", "number", "余弦值 (-1 到 1 之间)", true, null)
                 ))
                 .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
@@ -351,10 +351,10 @@ public class Mathematics {
     public Tool atan() {
         return Tool.builder()
                 .name("atan")
-                .description("计算数字的反正切值(返回弧度)")
+                .description("计算数字的反正切值 (返回弧度)")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("number", "number", "正切值", true)
+                        new Tool.Parameter("number", "number", "正切值", true, null)
                 ))
                 .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
@@ -374,7 +374,7 @@ public class Mathematics {
                 .description("计算数字的向上取整值")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("number", "number", "要求向上取整的数字", true)
+                        new Tool.Parameter("number", "number", "要求向上取整的数字", true, null)
                 ))
                 .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
@@ -396,7 +396,7 @@ public class Mathematics {
                 .description("计算数字的向下取整值")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("number", "number", "要求向下取整的数字", true)
+                        new Tool.Parameter("number", "number", "要求向下取整的数字", true, null)
                 ))
                 .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
@@ -418,7 +418,7 @@ public class Mathematics {
                 .description("计算数字的四舍五入值")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("number", "number", "要求四舍五入的数字", true)
+                        new Tool.Parameter("number", "number", "要求四舍五入的数字", true, null)
                 ))
                 .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());
@@ -440,8 +440,8 @@ public class Mathematics {
                 .description("计算两个数字中的最大值")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("a", "number", "第一个数字", true),
-                        new Tool.Parameter("b", "number", "第二个数字", true)
+                        new Tool.Parameter("a", "number", "第一个数字", true, null),
+                        new Tool.Parameter("b", "number", "第二个数字", true, null)
                 ))
                 .function((ctx, params) -> {
                     var a = Double.valueOf(params.get("a").toString());
@@ -462,8 +462,8 @@ public class Mathematics {
                 .description("计算两个数字中的最小值")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("a", "number", "第一个数字", true),
-                        new Tool.Parameter("b", "number", "第二个数字", true)
+                        new Tool.Parameter("a", "number", "第一个数字", true, null),
+                        new Tool.Parameter("b", "number", "第二个数字", true, null)
                 ))
                 .function((ctx, params) -> {
                     var a = Double.valueOf(params.get("a").toString());
@@ -481,10 +481,10 @@ public class Mathematics {
     public Tool exp() {
         return Tool.builder()
                 .name("exp")
-                .description("计算e的n次方(指数函数)")
+                .description("计算 e 的 n 次方 (指数函数)")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("number", "number", "指数n", true)
+                        new Tool.Parameter("number", "number", "指数 n", true, null)
                 ))
                 .function((ctx, params) -> {
                     var num = Double.valueOf(params.get("number").toString());

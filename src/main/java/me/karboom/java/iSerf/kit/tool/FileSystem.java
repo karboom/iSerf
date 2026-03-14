@@ -27,7 +27,7 @@ public class FileSystem {
                 .description("从文件中读取内容")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("path", "string", "要读取的文件路径", true)
+                        new Tool.Parameter("path", "string", "要读取的文件路径", true, null)
                 ))
                 .function((ctx, params) -> {
                     var filePath = Path.of((String) params.get("path"));
@@ -60,8 +60,8 @@ public class FileSystem {
                 .description("向文件写入内容")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("path", "string", "要写入的文件路径", true),
-                        new Tool.Parameter("content", "string", "要写入文件的内容", true)
+                        new Tool.Parameter("path", "string", "要写入的文件路径", true, null),
+                        new Tool.Parameter("content", "string", "要写入文件的内容", true, null)
                 ))
                 .function((ctx, params) -> {
                     var filePath = Path.of((String) params.get("path"));
@@ -101,7 +101,7 @@ public class FileSystem {
                 .description("列出目录内容")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("path", "string", "要列出的目录路径", false)
+                        new Tool.Parameter("path", "string", "要列出的目录路径", false, null)
                 ))
                 .function((ctx, params) -> {
                     var dirPath = (String) params.get("path");

@@ -106,7 +106,8 @@ public class Loader {
                             paramName,
                             paramType,
                             paramDesc,
-                            paramRequired
+                            paramRequired,
+                            null
                         ));
                     }
                 }
@@ -277,7 +278,8 @@ public class Loader {
                                         paramName,
                                         paramType,
                                         paramDesc,
-                                        isRequired
+                                        isRequired,
+                                        null
                                     ));
                                 }
                             }
@@ -379,7 +381,8 @@ public class Loader {
                                     paramName,
                                     paramType,
                                     paramDesc,
-                                    isRequired
+                                    isRequired,
+                                    null
                                 ));
                             });
                         }

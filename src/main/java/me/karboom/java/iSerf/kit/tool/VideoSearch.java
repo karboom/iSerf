@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Message;
 import me.karboom.java.iSerf.agent.tool.CallResult;
-import me.karboom.java.iSerf.llm.text.Base;
+import me.karboom.java.iSerf.llm.text.IText;
 import me.karboom.java.iSerf.llm.text.OpenAI;
 import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.util.JSONUtil;
@@ -27,7 +27,7 @@ import java.util.List;
 
 @Slf4j
 public class VideoSearch {
-    private Base llm;
+    private IText llm;
 
     @Data
     @Builder
@@ -78,7 +78,7 @@ public class VideoSearch {
     public VideoSearch() {
     }
 
-    public VideoSearch(Base llm) {
+    public VideoSearch(IText llm) {
         this.llm = llm;
     }
 
@@ -92,8 +92,8 @@ public class VideoSearch {
                 .description("当用户需要查询特定画面的时候，使用这个工具")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("sql", "string", "结构化查询", true),
-                        new Tool.Parameter("textForVectorMatch", "string", "用于向量匹配的文本描述", true)
+                        new Tool.Parameter("sql", "string", "结构化查询", true, null),
+                        new Tool.Parameter("textForVectorMatch", "string", "用于向量匹配的文本描述", true, null)
                 ))
                 .function((ctx, params) -> {
                     var query = params.get("sql").toString();
@@ -125,8 +125,8 @@ public class VideoSearch {
                 .description("当用户需要给指定视频构建索引，使用这个工具")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("url", "string", "视频文件地址", true),
-                        new Tool.Parameter("tags", "array", "期望创建的索引标签", false)
+                        new Tool.Parameter("url", "string", "视频文件地址", true, null),
+                        new Tool.Parameter("tags", "array", "期望创建的索引标签", false, null)
                 ))
                 .function((ctx, params) -> {
                     try {

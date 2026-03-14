@@ -5,6 +5,8 @@ import me.karboom.java.iSerf.agent.tool.Tool;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import tools.jackson.databind.node.ArrayNode;
+
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -129,8 +131,8 @@ public class OpenAITest {
                     .text("柏林天气如何，北京天气如何")
                     .build());
 
-            var p1 = new Tool.Parameter("location", "string", "地点", true);
-            var p2 = new Tool.Parameter("continent", "string", "欧洲还是亚洲", true);
+            var p1 = new Tool.Parameter("location", "string", "地点", true, null);
+            var p2 = new Tool.Parameter("continent", "string", "欧洲还是亚洲", true, null);
             var tool1 = Tool.builder().name("query").description("当你需要查询天气，使用这个工具").parameters(List.of(p1, p2)).build();
 
             var response = llm.send(messages, null, List.of(tool1));
@@ -492,5 +494,50 @@ public class OpenAITest {
             
             System.out.println("Query response: " + choice.getText());
         });
+    }
+
+    @Test
+    void testBuildToolsJson() {
+        var subParam1 = new Tool.Parameter("street", "string", "街道地址", true, null);
+        var subParam2 = new Tool.Parameter("city", "string", "城市名称", true, null);
+        var subParam3 = new Tool.Parameter("zipcode", "string", "邮政编码", false, null);
+
+        var addressParam = new Tool.Parameter("address", "object", "详细地址信息", true, List.of(subParam1, subParam2, subParam3));
+        var tool = Tool.builder()
+                .name("search_location")
+                .description("根据地址搜索地理位置")
+                .parameters(List.of(addressParam))
+                .build();
+
+        var toolsJson = llm.buildToolsJson(List.of(tool));
+
+        assertNotNull(toolsJson);
+        assertEquals(1, toolsJson.size());
+
+        var toolNode = toolsJson.get(0);
+        var function = toolNode.path("function");
+        var parameters = function.path("parameters");
+
+        var properties = parameters.path("properties");
+        var addressProperty = properties.path("address");
+        assertEquals("object", addressProperty.path("type").asText());
+        assertEquals("详细地址信息", addressProperty.path("description").asText());
+
+        var addressProperties = addressProperty.path("properties");
+        assertNotNull(addressProperties.path("street"));
+        assertEquals("string", addressProperties.path("street").path("type").asText());
+        assertEquals("街道地址", addressProperties.path("street").path("description").asText());
+
+        assertNotNull(addressProperties.path("city"));
+        assertEquals("string", addressProperties.path("city").path("type").asText());
+        assertEquals("城市名称", addressProperties.path("city").path("description").asText());
+
+        assertNotNull(addressProperties.path("zipcode"));
+        assertEquals("string", addressProperties.path("zipcode").path("type").asText());
+        assertEquals("邮政编码", addressProperties.path("zipcode").path("description").asText());
+
+        var addressRequired = addressProperty.path("required");
+        assertTrue(addressRequired.isArray());
+        assertEquals(2, addressRequired.size());
     }
 }

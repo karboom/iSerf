@@ -29,10 +29,10 @@ public class Time {
                 .description("当用户需要周期性执行某件事时使用，例如每天、每周、每月重复执行的任务。")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("description", "string", "任务的描述", true),
-                        new Tool.Parameter("cron", "string", "cron 表达式，用于指定执行周期", true),
-                        new Tool.Parameter("functionName", "string", "要执行的函数名称", true),
-                        new Tool.Parameter("functionParams", "object", "函数参数", true)
+                        new Tool.Parameter("description", "string", "任务的描述", true, null),
+                        new Tool.Parameter("cron", "string", "cron 表达式，用于指定执行周期", true, null),
+                        new Tool.Parameter("functionName", "string", "要执行的函数名称", true, null),
+                        new Tool.Parameter("functionParams", "object", "函数参数", true, null)
                 ))
                 .function((ctx, params) -> {
                     var description = (String) params.get("description");
@@ -72,12 +72,12 @@ public class Time {
                 .description("当用户需要在特定日期和时间点执行某件事时使用这个工具")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("description", "string", "任务的描述", true),
-                        new Tool.Parameter("time", "string", "ISO-8601 格式的绝对时间", true),
-                        new Tool.Parameter("offset", "string", "ISO-8601 格式的时间偏移量，如P12D", true),
+                        new Tool.Parameter("description", "string", "任务的描述", true, null),
+                        new Tool.Parameter("time", "string", "ISO-8601 格式的绝对时间", true, null),
+                        new Tool.Parameter("offset", "string", "ISO-8601 格式的时间偏移量，如 P12D", true, null),
 
-                        new Tool.Parameter("functionName", "string", "要执行的函数名称", true),
-                        new Tool.Parameter("functionParams", "object", "函数参数", true)
+                        new Tool.Parameter("functionName", "string", "要执行的函数名称", true, null),
+                        new Tool.Parameter("functionParams", "object", "函数参数", true, null)
                 ))
                 .function((ctx, params) -> {
                     var description = (String) params.get("description");
@@ -119,10 +119,10 @@ public class Time {
                 .description("当用户需要在相对于当前时间的某个时长后执行某件事时使用这个工具，例如 1 小时后、3 天后、一周后")
                 .type(Tool.TYPE.FUNCTION)
                 .parameters(List.of(
-                        new Tool.Parameter("description", "string", "任务的描述", true),
-                        new Tool.Parameter("duration", "string", "ISO-8601 格式的时长，例如 P1H(1 小时)、P1D(1 天)、P1M(1 个月)", true),
-                        new Tool.Parameter("functionName", "string", "要执行的函数名称", true),
-                        new Tool.Parameter("functionParams", "object", "函数参数", true)
+                        new Tool.Parameter("description", "string", "任务的描述", true, null),
+                        new Tool.Parameter("duration", "string", "ISO-8601 格式的时长，例如 P1H(1 小时)、P1D(1 天)、P1M(1 个月)", true, null),
+                        new Tool.Parameter("functionName", "string", "要执行的函数名称", true, null),
+                        new Tool.Parameter("functionParams", "object", "函数参数", true, null)
                 ))
                 .function((ctx, params) -> {
                     var description = (String) params.get("description");

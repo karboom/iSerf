@@ -451,7 +451,7 @@ public class OpenAI implements IText {
         return body.toString();
     }
 
-    private ArrayNode buildToolsJson(List<Tool> tools) {
+    public ArrayNode buildToolsJson(List<Tool> tools) {
         var toolsArray = JSONUtil.createArray();
         for (var tool : tools) {
             var toolNode = JSONUtil.create();
@@ -469,11 +469,7 @@ public class OpenAI implements IText {
                 var required = JSONUtil.createArray();
 
                 for (var param : tool.parameters) {
-                    var paramNode = JSONUtil.create();
-                    paramNode.put("type", param.type);
-                    if (param.description != null) {
-                        paramNode.put("description", param.description);
-                    }
+                    var paramNode = buildParamNode(param);
                     properties.set(param.name, paramNode);
 
                     if (param.required != null && param.required) {
@@ -493,6 +489,35 @@ public class OpenAI implements IText {
             toolsArray.add(toolNode);
         }
         return toolsArray;
+    }
+
+    private ObjectNode buildParamNode(Tool.Parameter param) {
+        var paramNode = JSONUtil.create();
+        paramNode.put("type", param.type);
+        if (param.description != null) {
+            paramNode.put("description", param.description);
+        }
+
+        if (param.properties != null && !param.properties.isEmpty()) {
+            var properties = JSONUtil.create();
+            var required = JSONUtil.createArray();
+
+            for (var subParam : param.properties) {
+                var subParamNode = buildParamNode(subParam);
+                properties.set(subParam.name, subParamNode);
+
+                if (subParam.required != null && subParam.required) {
+                    required.add(subParam.name);
+                }
+            }
+
+            paramNode.set("properties", properties);
+            if (required.size() > 0) {
+                paramNode.set("required", required);
+            }
+        }
+
+        return paramNode;
     }
 
     private List<Output> parseOutputBatch(String data) {
