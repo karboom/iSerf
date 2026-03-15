@@ -74,7 +74,10 @@ public class CodeUtil {
             throw new RuntimeException("Java Compiler not found. Please ensure you are running on a JDK.");
         }
 
-        var result = compiler.run(null, null, null, "-cp", System.getProperty("java.class.path"), sourceFile.getPath());
+        var result = compiler.run(null, null, null,
+                "-cp", System.getProperty("java.class.path"),
+                "-processorpath", System.getProperty("java.class.path"),
+                sourceFile.getPath());
         if (result != 0) {
             throw new RuntimeException("Compilation failed");
         }
@@ -86,21 +89,26 @@ public class CodeUtil {
      * @param path
      * @param className
      * @return
+     *  // Todo ClassLoader从哪里引用
      */
     @SneakyThrows
     public static Object load(String path, String className)  {
-        // Todo ClassLoader从哪里引用
-        try (var classLoader = new URLClassLoader(new URL[]{new File(path).toURI().toURL()}, CodeUtil.class.getClassLoader())) {
-            try {
-
-                var clazz = classLoader.loadClass(className);
-
-                return clazz.getDeclaredConstructor().newInstance();
-            } catch (Exception e) {
-                System.out.println(e);
+        var classLoader = new URLClassLoader(new URL[]{new File(path).toURI().toURL()}, CodeUtil.class.getClassLoader());
+        
+        // 加载主类
+        var clazz = classLoader.loadClass(className);
+        
+        // 遍历目录，加载所有静态子类（文件名格式：className$NestedClass.class）
+        var classFiles = new File(path).listFiles((dir, name) -> 
+            name.startsWith(className + "$") && name.endsWith(".class")
+        );
+        if (classFiles != null) {
+            for (var classFile : classFiles) {
+                var nestedClassName = classFile.getName().replace(".class", "");
+                classLoader.loadClass(nestedClassName);
             }
-
-            return 1;
         }
+        
+        return clazz.getDeclaredConstructor().newInstance();
     }
 }

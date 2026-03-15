@@ -10,5 +10,5 @@ import java.util.List;
  */
 public interface ILlmProvider {
 
-    IText get(List<Tool> tools, Class<?> outputFormat, Integer retryTimes);
+    IText get(List<Tool<?>> tools, Class<?> outputFormat, Integer retryTimes);
 }

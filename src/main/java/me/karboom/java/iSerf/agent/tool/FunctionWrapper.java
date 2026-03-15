@@ -3,6 +3,6 @@ package me.karboom.java.iSerf.agent.tool;
 import java.util.Map;
 
 @FunctionalInterface
-public interface FunctionWrapper {
-    CallResult run(Context ctx, Map<String, Object> params);
+public interface FunctionWrapper<T> {
+    CallResult run(Context ctx, T params);
 }

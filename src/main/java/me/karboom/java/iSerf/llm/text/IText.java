@@ -14,7 +14,7 @@ public interface IText {
     /**
      * 用于持续交流
      */
-    Flux<Output> send(List<Message> messages, Class<?> outputFormat, List<Tool> tools);
+    Flux<Output> send(List<Message> messages, Class<?> outputFormat, List<Tool<?>> tools);
 
     /**
      * 用于工具查询

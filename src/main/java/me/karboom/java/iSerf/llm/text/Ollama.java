@@ -46,7 +46,7 @@ public class Ollama implements IText {
     }
 
     @Override
-    public Flux<Output> send(List<Message> messages, Class<?> outputFormat, List<Tool> tools) {
+    public Flux<Output> send(List<Message> messages, Class<?> outputFormat, List<Tool<?>> tools) {
         return Flux.create(sink -> {
             var requestBody = buildRequestBody(messages, outputFormat, tools, true);
 
@@ -145,7 +145,7 @@ public class Ollama implements IText {
         throw new UnsupportedOperationException("Ollama does not support batch API");
     }
 
-    private String buildRequestBody(List<Message> messages, Class<?> outputFormat, List<Tool> tools, boolean stream) {
+    private String buildRequestBody(List<Message> messages, Class<?> outputFormat, List<Tool<?>> tools, boolean stream) {
         var body = JSONUtil.create();
         body.put("model", llmType);
         body.put("stream", stream);

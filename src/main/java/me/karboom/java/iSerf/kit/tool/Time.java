@@ -24,7 +24,7 @@ public class Time {
      * @return
      */
     public Tool addPeriodicPlan() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("add_periodic_plan")
                 .description("当用户需要周期性执行某件事时使用，例如每天、每周、每月重复执行的任务。")
                 .type(Tool.TYPE.FUNCTION)
@@ -67,7 +67,7 @@ public class Time {
      * @return
      */
     public Tool addAbsolutePlan() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("add_absolute_plan")
                 .description("当用户需要在特定日期和时间点执行某件事时使用这个工具")
                 .type(Tool.TYPE.FUNCTION)
@@ -114,7 +114,7 @@ public class Time {
      * @return
      */
     public Tool addRelativePlan() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("add_relative_plan")
                 .description("当用户需要在相对于当前时间的某个时长后执行某件事时使用这个工具，例如 1 小时后、3 天后、一周后")
                 .type(Tool.TYPE.FUNCTION)

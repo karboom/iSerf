@@ -54,7 +54,7 @@ public class Agent {
 
 
     public List<Message> memory = new ArrayList<>();
-    protected List<Tool> tools;
+    protected List<Tool<?>> tools;
     protected ILlmProvider llmProvider;
     public String prompt;
     protected PriorityBlockingQueue<Event> queue;
@@ -86,7 +86,7 @@ public class Agent {
      * @param llm   LLM 实例
      * @param tools 工具列表
      */
-    public Agent(String id, String prompt, IText llm, List<Tool> tools) {
+    public Agent(String id, String prompt, IText llm, List<Tool<?>> tools) {
         this.id = id;
         this.prompt = prompt;
         this.tools = tools != null ? tools : new ArrayList<>();
@@ -875,7 +875,7 @@ public class Agent {
                     case Tool.TYPE.FUNCTION:
                         // 调用本地函数
 
-                        result = matchedTool.getFunction().run(new Context(this), call.arguments);
+                        result = matchedTool.getFunction().run(new Context(this), JSONUtil.convert(call.arguments, matchedTool.paramType));
 
                         break;
 
@@ -895,7 +895,7 @@ public class Agent {
 
                             // 加载类
                             var cls = (FunctionWrapper) CodeUtil.load(versionDir, functionPath.get(2));
-                            result = (cls.run(new Context(this), call.arguments));
+                            result = (cls.run(new Context(this), JSONUtil.convert(call.arguments, matchedTool.paramType)));
                         } catch (Exception e) {
                             result.setError((RuntimeException) e);
                         }

@@ -4,15 +4,27 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.SneakyThrows;
 
+import java.lang.reflect.ParameterizedType;
 import java.util.HashMap;
 import java.util.List;
 
 @Data
 @AllArgsConstructor
-@NoArgsConstructor
 @Builder
-public class Tool {
+public class Tool<T> {
+
+    public Tool() {
+        var superClass = getClass().getGenericSuperclass();
+        if (superClass instanceof ParameterizedType parameterizedType) {
+            var typeArguments = parameterizedType.getActualTypeArguments();
+            if (typeArguments.length > 0 && typeArguments[0] instanceof Class<?> classType) {
+                this.paramType = (Class<T>) classType;
+            }
+        }
+    }
+
     static public class TYPE {
         public static final String MCP_HTTP = "MCP-HTTP";
         public static final String MCP_CLI = "MCP-CLI";
@@ -37,8 +49,9 @@ public class Tool {
     public String type;
 
     // function 特有
-    public FunctionWrapper function;
-    
+    public FunctionWrapper<T> function;
+
+    public Class<T> paramType;
 
     // iFunction 特有
     public String iDirectory;

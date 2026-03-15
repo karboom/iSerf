@@ -22,7 +22,7 @@ public class FileSystem {
      * @return
      */
     public Tool read() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("read_file")
                 .description("从文件中读取内容")
                 .type(Tool.TYPE.FUNCTION)
@@ -55,7 +55,7 @@ public class FileSystem {
      * @return
      */
     public Tool write() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("write_file")
                 .description("向文件写入内容")
                 .type(Tool.TYPE.FUNCTION)
@@ -96,7 +96,7 @@ public class FileSystem {
      * @return
      */
     public Tool list() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("list_directory")
                 .description("列出目录内容")
                 .type(Tool.TYPE.FUNCTION)

@@ -1,5 +1,7 @@
 package me.karboom.java.iSerf.agent;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import me.karboom.java.iSerf.agent.tool.CallCache;
 import me.karboom.java.iSerf.agent.tool.CallResult;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
@@ -29,9 +31,18 @@ class AgentTest {
     }
 
     private Map<String, Object> llmConfig;
-    private List<Tool> tools;
+    private List<Tool<?>> tools;
     private OpenAITest llmTest;
 
+
+    static class ToolParam {
+        @JsonPropertyDescription("城市名称")
+        public String location;
+
+        @JsonPropertyDescription("温度单位")
+        @JsonProperty(required = true)
+        public String unit;
+    }
 
     @BeforeEach
     void setUp() {
@@ -40,29 +51,18 @@ class AgentTest {
 
         // 创建测试工具
         tools = new ArrayList<>();
-        var weatherTool = Tool.builder()
-                .name("getWeather")
-                .description("Get the current weather for a location")
-                .parameters(List.of(
-                        new Tool.Parameter("location", "string", "The city name", true),
-                        new Tool.Parameter("unit", "string", "Temperature unit (celsius or fahrenheit)", false)
-                ))
-                .type(Tool.TYPE.FUNCTION)
-                .function((ctx, params) -> {
-                   return CallResult.builder().llm(( Math.random() * 15 + 15) + "摄氏度").build();
-                })
 
-                .build();
-        tools.add(weatherTool);
+        var weatherT = new Tool<ToolParam>(){};
+        weatherT.setType(Tool.TYPE.FUNCTION);
+        weatherT.setDescription("Get the current weather for a location");
+        weatherT.setName("getWeather");
+        weatherT.setFunction((ctx, params) -> {
+            return CallResult.builder().llm(( Math.random() * 15 + 15) + "摄氏度").build();
+        });
 
-        var timeTool = Tool.builder()
-                .name("GetTime")
-                .description("Get the current time")
-                .parameters(List.of())
-                .type(Tool.TYPE.IFUNCTION)
-                .iDirectory("/home/karboom/projects/karboom/java/iSlogger/class")
-                .build();
-        tools.add(timeTool);
+        tools.add(weatherT);
+
+
     }
 
     @Test
@@ -116,6 +116,8 @@ class AgentTest {
             System.out.println(table.print());
         });
     }
+
+
 
     @Test
     public void testAgentBroadcast() {
@@ -215,7 +217,7 @@ class AgentTest {
             var llm = llmTest.getLlm();
 //            llm.llmConfig.put("thinking", true);
             
-            var tools = new Loader(2000).fromIFunction("/home/karboom/projects/karboom/java/iSlogger/src/main/java/me/karboom/java/iSlogger/iFunction", null, null);
+            var tools = new Loader(2000).fromIFunction("/home/karboom/projects/karboom/iSerf/iSerf/src/main/java/me/karboom/java/iSerf/iFunction", "echarts", null);
 
             var prompt = """
                     CREATE TABLE users (
@@ -271,9 +273,9 @@ class AgentTest {
                     }
             );
 
-//            agent.send("我想直到用户最近一周创建订单数量的趋势");
-            agent.send("你好");
-            agent.send("3");
+            agent.send("我想直到用户最近一周创建订单数量的趋势");
+//            agent.send("你好");
+//            agent.send("3");
 
             Thread.sleep(1000*20);
 

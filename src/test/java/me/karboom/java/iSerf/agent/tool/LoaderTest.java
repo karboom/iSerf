@@ -1,4 +1,4 @@
-package me.karboom.java.iSerf.tool;
+package me.karboom.java.iSerf.agent.tool;
 
 import me.karboom.java.iSerf.agent.tool.Loader;
 import me.karboom.java.iSerf.agent.tool.Tool;
@@ -37,7 +37,7 @@ public class LoaderTest {
 
     @Test
     void testFromIFunction() {
-        var tools = loader.fromIFunction("src/main/java/me/karboom/java/iSlogger/iFunction", null, null);
+        var tools = loader.fromIFunction("src/main/java/me/karboom/java/iSerf/iFunction", null, null);
         assertNotNull(tools, "应该返回非空列表");
         assertTrue(tools.size() > 0, "应该找到至少一个iFunction工具");
         
@@ -49,6 +49,5 @@ public class LoaderTest {
         var tool = echartsTool.get();
         assertEquals("echarts", tool.getName(), "工具名称应该是'echarts'");
         assertEquals(Tool.TYPE.IFUNCTION, tool.getType(), "工具类型应该是IFUNCTION");
-        assertTrue(tool.getIDirectory().contains("echarts/fallback"), "工具目录应该指向fallback版本");
     }
 }

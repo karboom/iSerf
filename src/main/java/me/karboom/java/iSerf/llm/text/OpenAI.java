@@ -1,6 +1,8 @@
 package me.karboom.java.iSerf.llm.text;
 
 import com.github.victools.jsonschema.generator.*;
+import com.github.victools.jsonschema.module.jackson.JacksonModule;
+import com.github.victools.jsonschema.module.jackson.JacksonOption;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Message;
@@ -12,6 +14,8 @@ import okhttp3.sse.EventSource;
 import okhttp3.sse.EventSourceListener;
 import okhttp3.sse.EventSources;
 import reactor.core.publisher.Flux;
+
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -39,8 +43,8 @@ public class OpenAI implements IText {
         this.url = url;
         this.maxRetries = maxRetries;
 
-        var configBuilder = new SchemaGeneratorConfigBuilder(SchemaVersion.DRAFT_7, OptionPreset.PLAIN_JSON);
-        var config = configBuilder.forFields().withRequiredCheck(fieldScope -> true);
+        var configBuilder = new SchemaGeneratorConfigBuilder(SchemaVersion.DRAFT_7, OptionPreset.PLAIN_JSON).with(new JacksonModule(JacksonOption.RESPECT_JSONPROPERTY_REQUIRED));
+        configBuilder.forFields().withRequiredCheck(fieldScope -> true);
         this.schemaGenerator = new SchemaGenerator(configBuilder.build());
 
         var builder = OpenAIOkHttpClient.builder()
@@ -62,7 +66,7 @@ public class OpenAI implements IText {
      * @return 自定义数据结构
      */
     @Override
-    public Flux<Output> send(List<Message> memory, Class<?> outputFormat, List<Tool> tools) {
+    public Flux<Output> send(List<Message> memory, Class<?> outputFormat, List<Tool<?>> tools) {
         return Flux.create(sink -> {
             var requestBody = buildRequestBody(memory, outputFormat, tools);
 
@@ -151,14 +155,14 @@ public class OpenAI implements IText {
             // 将stream设置为false，因为batch API不支持流式响应
             var requestJson = JSONUtil.parse(requestBody);
             requestJson.put("stream", false);
-            
+
             var requestNode = JSONUtil.create();
             requestNode.put("custom_id", "request-%d".formatted(i));
             requestNode.put("method", "POST");
             requestNode.put("url", "/v1/chat/completions");
 //            requestNode.put("url", "/v1/chat/ds-test");
             requestNode.set("body", requestJson);
-            
+
             jsonlBuilder.append(requestNode.toString()).append("\n");
         }
 
@@ -247,7 +251,7 @@ public class OpenAI implements IText {
                 throw new RuntimeException("Task status response is null");
             }
             var responseJson = JSONUtil.parse(responseBody.string());
-            
+
             var statusNode = responseJson.path("status");
             var apiStatus = statusNode.isMissingNode() || statusNode.isNull() ? "unknown" : statusNode.asText();
             var mappedStatus = switch (apiStatus) {
@@ -257,22 +261,22 @@ public class OpenAI implements IText {
                 case "cancelled" -> BatchTaskInfo.STATUS.CANCELLED;
                 default -> BatchTaskInfo.STATUS.DOING;
             };
-            
+
             var taskStatus = BatchTaskInfo.builder()
                     .id(responseJson.path("id").asText())
                     .status(mappedStatus)
                     .build();
-            
+
             var outputFilesNode = responseJson.path("output_file_id");
             if (!outputFilesNode.isMissingNode() && !outputFilesNode.isNull()) {
                 taskStatus.setSuccessResultId(outputFilesNode.asText());
             }
-            
+
             var errorFilesNode = responseJson.path("error_file_id");
             if (!errorFilesNode.isMissingNode() && !errorFilesNode.isNull()) {
                 taskStatus.setErrorResultId(errorFilesNode.asText());
             }
-            
+
             return taskStatus;
         } catch (Exception e) {
             throw new RuntimeException("Task status query error", e);
@@ -296,16 +300,16 @@ public class OpenAI implements IText {
             if (responseBody == null) {
                 throw new RuntimeException("Task result response is null");
             }
-            
+
             var content = responseBody.string();
             return parseOutputBatch(content);
         } catch (Exception e) {
             throw new RuntimeException("Task result download error", e);
         }
     }
-    
 
-    private String buildRequestBody(List<Message> memory, Class<?> outputFormat, List<Tool> tools) {
+
+    private String buildRequestBody(List<Message> memory, Class<?> outputFormat, List<Tool<?>> tools) {
         var body = JSONUtil.create();
         body.put("model", llmType);
         body.put("stream", true);
@@ -451,7 +455,7 @@ public class OpenAI implements IText {
         return body.toString();
     }
 
-    public ArrayNode buildToolsJson(List<Tool> tools) {
+    public ArrayNode buildToolsJson(List<Tool<?>> tools) {
         var toolsArray = JSONUtil.createArray();
         for (var tool : tools) {
             var toolNode = JSONUtil.create();
@@ -461,30 +465,7 @@ public class OpenAI implements IText {
             function.put("name", tool.name);
             function.put("description", tool.description);
 
-            var parameters = JSONUtil.create();
-            parameters.put("type", "object");
-
-            if (tool.parameters != null && !tool.parameters.isEmpty()) {
-                var properties = JSONUtil.create();
-                var required = JSONUtil.createArray();
-
-                for (var param : tool.parameters) {
-                    var paramNode = buildParamNode(param);
-                    properties.set(param.name, paramNode);
-
-                    if (param.required != null && param.required) {
-                        required.add(param.name);
-                    }
-                }
-
-                parameters.set("properties", properties);
-                if (required.size() > 0) {
-                    parameters.set("required", required);
-                }
-            }
-
-            parameters.put("additionalProperties", false);
-            function.set("parameters", parameters);
+            function.set("parameters", JSONUtil.parse((this.schemaGenerator.generateSchema(tool.paramType).toString())));
             toolNode.set("function", function);
             toolsArray.add(toolNode);
         }

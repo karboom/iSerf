@@ -11,6 +11,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -133,7 +134,7 @@ public class OpenAITest {
 
             var p1 = new Tool.Parameter("location", "string", "地点", true, null);
             var p2 = new Tool.Parameter("continent", "string", "欧洲还是亚洲", true, null);
-            var tool1 = Tool.builder().name("query").description("当你需要查询天气，使用这个工具").parameters(List.of(p1, p2)).build();
+            var tool1 = Tool.<Map>builder().name("query").description("当你需要查询天气，使用这个工具").parameters(List.of(p1, p2)).build();
 
             var response = llm.send(messages, null, List.of(tool1));
 
@@ -503,7 +504,7 @@ public class OpenAITest {
         var subParam3 = new Tool.Parameter("zipcode", "string", "邮政编码", false, null);
 
         var addressParam = new Tool.Parameter("address", "object", "详细地址信息", true, List.of(subParam1, subParam2, subParam3));
-        var tool = Tool.builder()
+        var tool = Tool.<Map>builder()
                 .name("search_location")
                 .description("根据地址搜索地理位置")
                 .parameters(List.of(addressParam))

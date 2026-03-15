@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 public class VideoSearch {
@@ -87,7 +88,7 @@ public class VideoSearch {
      * @return
      */
     public Tool mixedSearch() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("mixed_search")
                 .description("当用户需要查询特定画面的时候，使用这个工具")
                 .type(Tool.TYPE.FUNCTION)
@@ -120,7 +121,7 @@ public class VideoSearch {
      * @return
      */
     public Tool buildIndex() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("build_index")
                 .description("当用户需要给指定视频构建索引，使用这个工具")
                 .type(Tool.TYPE.FUNCTION)

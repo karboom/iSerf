@@ -12,7 +12,7 @@ public class FixedLlmProvider implements ILlmProvider {
         this.llm = llm;
     }
     @Override
-    public IText get(List<Tool> tools, Class<?> outputFormat, Integer retryTimes) {
+    public IText get(List<Tool<?>> tools, Class<?> outputFormat, Integer retryTimes) {
         return this.llm;
     }
 }

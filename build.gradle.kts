@@ -20,7 +20,10 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
     implementation("com.squareup.okhttp3:okhttp-sse:5.3.2")
 
+
     implementation("com.github.victools:jsonschema-generator:4.38.0")
+    implementation("com.github.victools:jsonschema-module-jackson:4.38.0")
+
 
     implementation("com.openai:openai-java:4.6.1")
     implementation("io.modelcontextprotocol.sdk:mcp:0.14.1")
@@ -32,6 +35,9 @@ dependencies {
 
     implementation("com.hivemq:hivemq-mqtt-client:1.3.3")
     implementation("com.hivemq:hivemq-community-edition-embedded:2025.5")
+
+    implementation("io.vertx:vertx-core:5.0.4")
+    implementation("io.vertx:vertx-web:5.0.4")
 
     implementation("com.cronutils:cron-utils:9.2.1")
 
@@ -57,7 +63,7 @@ dependencies {
     implementation("org.postgresql:postgresql:42.7.5")
 
 
-    compileOnly("org.projectlombok:lombok:1.18.42")
+    implementation("org.projectlombok:lombok:1.18.42")
     annotationProcessor("org.projectlombok:lombok:1.18.42")
 
 

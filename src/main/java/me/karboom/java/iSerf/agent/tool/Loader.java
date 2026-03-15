@@ -1,9 +1,11 @@
 package me.karboom.java.iSerf.agent.tool;
 
+import cn.hutool.core.util.StrUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.transport.*;
 import lombok.SneakyThrows;
+import me.karboom.java.iSerf.util.CodeUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import okhttp3.*;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -29,14 +31,16 @@ public class Loader {
     }
 
     /**
-     * 遍历目录，所有的一级子文件夹为工具名称，二级子文件夹为工具的版本，工具文件夹下的info.json记录了当前引用的版本，每个版本下有info.json记录了工具说明
-     * @param targetTool  如果非null，只筛选对应的一级子文件夹
-     * @param targetVersion 如果非null，直接访问对应的版本
+     * 遍历目录，所有的一级子文件夹为工具名称，二级子文件夹为工具的版本
+     * 工具文件夹下的 info.json 记录了当前引用的版本
+     * 每个版本下的静态类 Parameter 记录了参数内容，静态变量 description 记录了工具的说明，需要调用 CodeUtil 编译后获取
+     * @param targetTool  如果非 null，只筛选对应的一级子文件夹
+     * @param targetVersion 如果非 null，直接访问对应的版本
      * @return
      */
     @SneakyThrows
-    public List<Tool> fromIFunction(String directory, String targetTool, String targetVersion){
-        var tools = new ArrayList<Tool>();
+    public List<Tool<?>> fromIFunction(String directory, String targetTool, String targetVersion){
+        var tools = new ArrayList<Tool<?>>();
         var iFunctionDir = Path.of(directory);
         
         if (!Files.exists(iFunctionDir)) {
@@ -55,7 +59,7 @@ public class Loader {
                     continue;
                 }
                 
-                // 读取工具目录下的info.json获取当前版本
+                // 读取工具目录下的 info.json 获取当前版本
                 var toolInfoPath = toolDir.resolve("info.json");
                 var currentVersion = "fallback"; // 默认值
                 
@@ -76,50 +80,71 @@ public class Loader {
                     continue;
                 }
                 
-                // 读取版本目录下的info.json获取工具说明
-                var versionInfoPath = versionDir.resolve("info.json");
-                if (!Files.exists(versionInfoPath)) {
+                // 读取工具类源码
+                var toolClassName = StrUtil.upperFirst(toolName);
+                var toolClassFile = versionDir.resolve("%s.java".formatted(toolClassName));
+                
+                if (!Files.exists(toolClassFile)) {
                     continue;
                 }
                 
-                var versionInfoContent = Files.readString(versionInfoPath);
-                var versionInfo = JSONUtil.parse(versionInfoContent);
+                var toolClassCode = Files.readString(toolClassFile);
                 
-                var description = versionInfo.has("description") ? 
-                    versionInfo.get("description").asText() : "";
+                // 创建临时编译目录
+                var compileDir = Path.of(System.getProperty("java.io.tmpdir"), "iSerf", "compiled", toolName, versionToUse);
+                Files.createDirectories(compileDir);
                 
-                // 解析参数
-                var parameters = new ArrayList<Tool.Parameter>();
-                if (versionInfo.has("parameters") && versionInfo.get("parameters").isArray()) {
-                    var paramsArray = versionInfo.get("parameters");
-                    for (var paramNode : paramsArray) {
-                        var paramName = paramNode.has("name") ? 
-                            paramNode.get("name").asText() : "";
-                        var paramType = paramNode.has("type") ? 
-                            paramNode.get("type").asText() : "string";
-                        var paramDesc = paramNode.has("description") ? 
-                            paramNode.get("description").asText() : "";
-                        var paramRequired = paramNode.has("required") && 
-                            paramNode.get("required").asBoolean();
-                        
-                        parameters.add(new Tool.Parameter(
-                            paramName,
-                            paramType,
-                            paramDesc,
-                            paramRequired,
-                            null
-                        ));
+                // 编译工具类
+                CodeUtil.compile(toolClassCode, compileDir.toString());
+                
+                // 加载工具类
+                var fullClassName = "%s.%s.%s".formatted(toolName, versionToUse, toolClassName);
+                var toolInstance = CodeUtil.load(compileDir.toString(), toolClassName);
+                CodeUtil.load(compileDir.toString(), "%s$Parameter".formatted(toolClassName));
+                
+                if (toolInstance == null || toolInstance instanceof Integer) {
+                    continue;
+                }
+                
+                // 通过反射获取工具类的 description 静态字段
+                String description = null;
+                try {
+                    var descriptionField = toolInstance.getClass().getDeclaredField("description");
+                    description = (String) descriptionField.get(null);
+                } catch (Exception e) {
+                    // description 字段可选，没有则使用 null
+                }
+                
+                // 通过反射从 toolInstance 获取 Parameter 静态内部类
+                Class<?> parameterClass = null;
+                try {
+                    for (var declaredClass : toolInstance.getClass().getDeclaredClasses()) {
+                        if ("Parameter".equals(declaredClass.getSimpleName())) {
+                            parameterClass = (Class<?>) declaredClass;
+                            break;
+                        }
                     }
+                } catch (Exception e) {
+                    // Parameter 类可选
                 }
                 
                 // 创建工具对象
-                var tool = Tool.builder()
+                var toolBuilder = Tool.<Object>builder()
                     .name(toolName)
                     .description(description)
-                    .parameters(parameters)
                     .type(Tool.TYPE.IFUNCTION)
-                    .iDirectory(directory)
-                    .build();
+                        .iDirectory(directory);
+//                    .iDirectory("%s/%s".formatted(directory, toolName));
+                
+                if (description != null) {
+                    toolBuilder.description(description);
+                }
+                
+                if (parameterClass != null) {
+                    toolBuilder.paramType((Class<Object>) parameterClass);
+                }
+                
+                var tool = toolBuilder.build();
                 
                 tools.add(tool);
             }
@@ -129,7 +154,7 @@ public class Loader {
     }
 
     /**
-     * 通过命令行解析所有MCP工具
+     * 通过命令行解析所有 MCP 工具
      *
      * @param command MCP 服务命令
      * @param args    命令行参数
@@ -191,7 +216,7 @@ public class Loader {
     }
 
     /**
-     * 通过HTTP接口解析所有MCP工具
+     * 通过 HTTP 接口解析所有 MCP 工具
      *
      * @param url     MCP 服务 URL
      * @param headers HTTP 请求头
@@ -201,7 +226,7 @@ public class Loader {
         List<Tool> tools = new ArrayList<>();
         
         try {
-            // 创建WebClient
+            // 创建 WebClient
             var webClientBuilder = WebClient.builder()
                     .baseUrl(url)
                     .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(1024 * 1024));
@@ -214,21 +239,21 @@ public class Loader {
             }
 
 
-            // 创建WebClient传输层
+            // 创建 WebClient 传输层
             var transport = WebClientStreamableHttpTransport.builder(webClientBuilder).build();
             
-            // 创建MCP客户端 (同步API)
+            // 创建 MCP 客户端 (同步 API)
             try (var client = McpClient.sync(transport).build()) {
                 // 初始化连接
                 client.initialize();
                 
-                // 发送list_tools请求
+                // 发送 list_tools 请求
                 var response = client.listTools();
                 
                 // 转换工具列表
                 if (response.tools() != null) {
                     for (var mcpTool : response.tools()) {
-                        var builder = Tool.builder();
+                        var builder = Tool.<Map>builder();
                         
                         // 设置基本信息
                         builder.name(mcpTool.name());
@@ -236,7 +261,7 @@ public class Loader {
                         builder.type("mcp-http");
                         builder.url(url);
                         
-                        // 转换headers为String类型
+                        // 转换 headers 为 String 类型
                         var httpHeaders = new HashMap<String, String>();
                         if (headers != null) {
                             for (var entry : headers.entrySet()) {
@@ -340,7 +365,7 @@ public class Loader {
                 var toolsArray = root.get("result").get("tools");
                 
                 for (var toolNode : toolsArray) {
-                    var builder = Tool.builder();
+                    var builder = Tool.<Map>builder();
                     
                     // 设置基本信息
                     if (toolNode.has("name")) {

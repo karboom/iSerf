@@ -7,6 +7,7 @@ import org.apache.commons.math3.util.FastMath;
 import org.apache.commons.math3.util.Precision;
 
 import java.util.List;
+import java.util.Map;
 
 public class Mathematics {
     public Mathematics() {
@@ -17,7 +18,7 @@ public class Mathematics {
      * @return
      */
     public Tool add() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("add")
                 .description("执行加法运算，将两个数字相加")
                 .type(Tool.TYPE.FUNCTION)
@@ -39,7 +40,7 @@ public class Mathematics {
      * @return
      */
     public Tool subtract() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("subtract")
                 .description("执行减法运算，将两个数字相减")
                 .type(Tool.TYPE.FUNCTION)
@@ -61,7 +62,7 @@ public class Mathematics {
      * @return
      */
     public Tool multiply() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("multiply")
                 .description("执行乘法运算，将两个数字相乘")
                 .type(Tool.TYPE.FUNCTION)
@@ -84,7 +85,7 @@ public class Mathematics {
      */
     @SneakyThrows
     public Tool divide() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("divide")
                 .description("执行除法运算，将两个数字相除")
                 .type(Tool.TYPE.FUNCTION)
@@ -109,7 +110,7 @@ public class Mathematics {
      * @return
      */
     public Tool power() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("power")
                 .description("执行幂运算，计算a的b次方")
                 .type(Tool.TYPE.FUNCTION)
@@ -132,7 +133,7 @@ public class Mathematics {
      */
     @SneakyThrows
     public Tool modulo() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("modulo")
                 .description("执行求模运算，计算 a 对 b 取余")
                 .type(Tool.TYPE.FUNCTION)
@@ -158,7 +159,7 @@ public class Mathematics {
      */
     @SneakyThrows
     public Tool sqrt() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("sqrt")
                 .description("执行开方运算，计算数字的平方根")
                 .type(Tool.TYPE.FUNCTION)
@@ -181,7 +182,7 @@ public class Mathematics {
      * @return
      */
     public Tool abs() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("abs")
                 .description("计算数字的绝对值")
                 .type(Tool.TYPE.FUNCTION)
@@ -202,7 +203,7 @@ public class Mathematics {
      */
     @SneakyThrows
     public Tool log() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("log")
                 .description("计算数字的自然对数(以e为底)")
                 .type(Tool.TYPE.FUNCTION)
@@ -226,7 +227,7 @@ public class Mathematics {
      */
     @SneakyThrows
     public Tool log10() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("log10")
                 .description("计算数字的常用对数 (以 10 为底)")
                 .type(Tool.TYPE.FUNCTION)
@@ -249,7 +250,7 @@ public class Mathematics {
      * @return
      */
     public Tool sin() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("sin")
                 .description("计算数字的正弦值(弧度制)")
                 .type(Tool.TYPE.FUNCTION)
@@ -269,7 +270,7 @@ public class Mathematics {
      * @return
      */
     public Tool cos() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("cos")
                 .description("计算数字的余弦值 (弧度制)")
                 .type(Tool.TYPE.FUNCTION)
@@ -289,7 +290,7 @@ public class Mathematics {
      * @return
      */
     public Tool tan() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("tan")
                 .description("计算数字的正切值(弧度制)")
                 .type(Tool.TYPE.FUNCTION)
@@ -309,7 +310,7 @@ public class Mathematics {
      * @return
      */
     public Tool asin() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("asin")
                 .description("计算数字的反正弦值 (返回弧度)")
                 .type(Tool.TYPE.FUNCTION)
@@ -329,7 +330,7 @@ public class Mathematics {
      * @return
      */
     public Tool acos() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("acos")
                 .description("计算数字的反余弦值(返回弧度)")
                 .type(Tool.TYPE.FUNCTION)
@@ -349,7 +350,7 @@ public class Mathematics {
      * @return
      */
     public Tool atan() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("atan")
                 .description("计算数字的反正切值 (返回弧度)")
                 .type(Tool.TYPE.FUNCTION)
@@ -369,7 +370,7 @@ public class Mathematics {
      * @return
      */
     public Tool ceil() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("ceil")
                 .description("计算数字的向上取整值")
                 .type(Tool.TYPE.FUNCTION)
@@ -391,7 +392,7 @@ public class Mathematics {
      * @return
      */
     public Tool floor() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("floor")
                 .description("计算数字的向下取整值")
                 .type(Tool.TYPE.FUNCTION)
@@ -413,7 +414,7 @@ public class Mathematics {
      * @return
      */
     public Tool round() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("round")
                 .description("计算数字的四舍五入值")
                 .type(Tool.TYPE.FUNCTION)
@@ -435,7 +436,7 @@ public class Mathematics {
      * @return
      */
     public Tool max() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("max")
                 .description("计算两个数字中的最大值")
                 .type(Tool.TYPE.FUNCTION)
@@ -457,7 +458,7 @@ public class Mathematics {
      * @return
      */
     public Tool min() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("min")
                 .description("计算两个数字中的最小值")
                 .type(Tool.TYPE.FUNCTION)
@@ -479,7 +480,7 @@ public class Mathematics {
      * @return
      */
     public Tool exp() {
-        return Tool.builder()
+        return Tool.<Map>builder()
                 .name("exp")
                 .description("计算 e 的 n 次方 (指数函数)")
                 .type(Tool.TYPE.FUNCTION)
