@@ -47,13 +47,13 @@ public class TeamTest {
 
     @Test
     public void testSend() throws Exception {
-        var receivedMessages = new ArrayList<Message>();
+        var receivedMessages = new ArrayList<Communication>();
         var receivedEvents = new ArrayList<Event>();
 
-        team.subscribe(message -> {
-            if (message.getItem().getIsSegment() == 1) return;
-            System.out.println("Received message: " + message);
-            receivedMessages.add(message);
+        team.subscribe(communication -> {
+            if (communication.getMessage().getIsSegment() == 1) return;
+            System.out.println("Received communication: " + communication);
+            receivedMessages.add(communication);
         });
 
         // 订阅事件总线

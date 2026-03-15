@@ -2,6 +2,7 @@ package me.karboom.java.iSerf.rag.vectorStore;
 
 import io.milvus.v2.client.ConnectConfig;
 import io.milvus.v2.client.MilvusClientV2;
+import me.karboom.java.iSerf.rag.store.MilvusVectorStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

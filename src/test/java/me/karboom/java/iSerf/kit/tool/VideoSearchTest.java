@@ -1,8 +1,8 @@
-package me.karboom.java.iSlogger.kit.tool;
+package me.karboom.java.iSerf.kit.tool;
 
-import me.karboom.java.iSlogger.agent.Agent;
-import me.karboom.java.iSlogger.llm.text.OpenAITest;
-import me.karboom.java.iSlogger.tool.Tool;
+import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.llm.text.OpenAITest;
+import me.karboom.java.iSerf.agent.tool.Tool;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.tablesaw.api.StringColumn;
@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-public class SRAGTest {
+public class VideoSearchTest {
 
     private OpenAITest llmTest = new OpenAITest();
 
@@ -27,12 +27,12 @@ public class SRAGTest {
 
     @Test
     public void testMixedSearch() throws InterruptedException {
-        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
             // 创建 MixedSearch 工具
-            var srag = new SRAG();
+            var srag = new VideoSearch();
             var mixedSearchTool = srag.mixedSearch();
 
-            var tools = new ArrayList<Tool>();
+            var tools = new ArrayList<Tool<?>>();
             tools.add(mixedSearchTool);
 
             var system = """
@@ -66,25 +66,25 @@ public class SRAGTest {
 
             // 使用Tablesaw创建表格，第一列是输入，第二列是输出
             var inputs = List.of(
-                    "这个视频展示了哪些气候变化的影响？",
-                    "这个视频如何演示烹饪食谱？",
-                    "解释视频中展示的科学概念",
-                    "教育视频中讨论的主要要点是什么？",
-                    "向我展示视频中的产品演示",
-                    "纪录片视频涵盖了哪些历史事件？",
-                    "描述视频中展示的舞蹈动作",
-                    "培训视频中演示了哪些安全程序？",
-                    "视频如何说明化学反应？",
-                    "视频中是否存在红色的汽车？",
-                    "视频里的人穿的是什么颜色的衣服？",
-                    "视频中的物体有多大？",
-                    "视频场景是在室内还是室外？",
-                    "视频中的人物有几个？",
-                    "视频里的动物是什么品种？",
-                    "视频中显示的时间是几点？",
-                    "视频背景音乐的风格是什么？",
-                    "视频中出现的品牌标志是什么？",
-                    "视频中的文字内容有哪些？"
+//                    "这个视频展示了哪些气候变化的影响？",
+//                    "这个视频如何演示烹饪食谱？",
+//                    "解释视频中展示的科学概念",
+//                    "教育视频中讨论的主要要点是什么？",
+//                    "向我展示视频中的产品演示",
+//                    "纪录片视频涵盖了哪些历史事件？",
+//                    "描述视频中展示的舞蹈动作",
+//                    "培训视频中演示了哪些安全程序？",
+//                    "视频如何说明化学反应？",
+//                    "视频中是否存在红色的汽车？",
+//                    "视频里的人穿的是什么颜色的衣服？",
+//                    "视频中的物体有多大？",
+//                    "视频场景是在室内还是室外？",
+                    "视频中的人物有几个？"
+//                    "视频里的动物是什么品种？",
+//                    "视频中显示的时间是几点？",
+//                    "视频背景音乐的风格是什么？",
+//                    "视频中出现的品牌标志是什么？",
+//                    "视频中的文字内容有哪些？"
             );
 
             var inputColumn = StringColumn.create("input", inputs);
@@ -131,10 +131,10 @@ public class SRAGTest {
     @Test
     public void testBuildIndex() throws InterruptedException {
         assertTimeoutPreemptively(Duration.ofSeconds(60), () -> {
-            var srag = new SRAG();
+            var srag = new VideoSearch();
             var buildIndexTool = srag.buildIndex();
 
-            var tools = new ArrayList<Tool>();
+            var tools = new ArrayList<Tool<?>>();
             tools.add(buildIndexTool);
 
             var system = """

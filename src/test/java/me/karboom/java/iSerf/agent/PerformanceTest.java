@@ -2,6 +2,7 @@ package me.karboom.java.iSerf.agent;
 
 import me.karboom.java.iSerf.llm.text.OpenAITest;
 import me.karboom.java.iSerf.agent.tool.Tool;
+import me.karboom.java.iSerf.agent.tool.CallResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -20,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class PerformanceTest {
 
     private Map<String, Object> llmConfig;
-    private List<Tool> tools;
+    private List<Tool<?>> tools;
     private OpenAITest llmTest;
 
     @BeforeEach
@@ -30,19 +31,23 @@ class PerformanceTest {
 
         // 创建测试工具
         tools = new ArrayList<>();
-        var weatherTool = Tool.builder()
+        var weatherTool = Tool.<Map>builder()
                 .name("getWeather")
                 .description("Get the current weather for a location")
                 .parameters(List.of(
-                        new Tool.Parameter("location", "string", "The city name", true),
-                        new Tool.Parameter("unit", "string", "Temperature unit (celsius or fahrenheit)", false)
+                        new Tool.Parameter("location", "string", "The city name", true, null),
+                        new Tool.Parameter("unit", "string", "Temperature unit (celsius or fahrenheit)", false, null)
                 ))
                 .type(Tool.TYPE.FUNCTION)
-                .function((ctx, params) -> (Math.random() * 15 + 15) + "摄氏度")
+                .function((ctx, params) -> CallResult.builder()
+                        .llm((Math.random() * 15 + 15) + "摄氏度")
+                        .error(null)
+                        .direct(null)
+                        .build())
                 .build();
         tools.add(weatherTool);
 
-        var timeTool = Tool.builder()
+        var timeTool = Tool.<Map>builder()
                 .name("GetTime")
                 .description("Get the current time")
                 .parameters(List.of())
