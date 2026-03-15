@@ -6,9 +6,10 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.llm.embedding.IEmbedding;
 import me.karboom.java.iSerf.llm.embedding.Input;
-import me.karboom.java.iSerf.memory.Item;
-import me.karboom.java.iSerf.rag.vectorStore.IVectorStore;
+import me.karboom.java.iSerf.rag.store.IVectorStore;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 
@@ -65,13 +66,13 @@ public class Memory {
 
 
 
-    private final me.karboom.java.iSerf.llm.text.Base llm;
-    private final me.karboom.java.iSerf.llm.embedding.Base embedding;
+    private final me.karboom.java.iSerf.llm.text.IText llm;
+    private final IEmbedding embedding;
     public IVectorStore<VectorItem> vectorStore;
     private String prompt;
 
     @SneakyThrows
-    public Memory(me.karboom.java.iSerf.llm.text.Base llm, me.karboom.java.iSerf.llm.embedding.Base embedding, IVectorStore<VectorItem> vectorStore) {
+    public Memory(me.karboom.java.iSerf.llm.text.IText llm, IEmbedding embedding, IVectorStore<VectorItem> vectorStore) {
         this.llm = llm;
         this.embedding = embedding;
         this.vectorStore = vectorStore;
@@ -141,9 +142,9 @@ public class Memory {
 
         // 调用 llm 提取记忆
         var messageList = List.of(
-                Item.builder()
-                        .role(Item.ROLE.USER)
-                        .type(Item.TYPE.TEXT)
+                Message.builder()
+                        .role(Message.ROLE.USER)
+                        .type(Message.TYPE.TEXT)
                         .text(fullPrompt)
                         .build()
         );
@@ -157,7 +158,7 @@ public class Memory {
             return;
         }
 
-        // 为每个 item 生成 id 并填充向量
+        // 为每个 message 生成 id 并填充向量
         var newVectorItems = extractResult.items.stream()
                 .map(item -> VectorItem.builder()
                         .userId(userId)

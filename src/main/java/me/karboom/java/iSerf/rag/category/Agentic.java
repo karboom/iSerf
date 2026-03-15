@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Message;
 import me.karboom.java.iSerf.llm.text.OpenAI;
 import io.lettuce.core.RedisClient;
+import me.karboom.java.iSerf.rag.store.IStructStore;
 import me.karboom.java.iSerf.rag.store.RedisStructStore;
 import me.karboom.java.iSerf.rag.util.MarkdownTreeBuilder;
 import me.karboom.java.iSerf.util.JSONUtil;
@@ -25,9 +26,7 @@ public class Agentic {
     public RedisStructStore<MarkdownTreeBuilder.MdToTreeTask> structStore;
     public MarkdownTreeBuilder builder;
 
-    public Agentic() {
-        this.redisClient = RedisClient.create("redis://localhost");
-        this.structStore = new RedisStructStore<>(redisClient, "task:doc:%s"){};
+    public Agentic(IStructStore structStore) {
         this.builder = new MarkdownTreeBuilder(
             structStore,
             new OpenAI("qwen-plus", Map.of("temperature", 0.0), System.getenv("OPENAI_API_KEY"), System.getenv("OPENAI_BASE_URL"), 3)
