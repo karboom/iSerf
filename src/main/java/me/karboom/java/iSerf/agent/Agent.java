@@ -13,6 +13,7 @@ import me.karboom.java.iSerf.llm.text.Output;
 import me.karboom.java.iSerf.schedule.ISchedule;
 import me.karboom.java.iSerf.schedule.Plan;
 import me.karboom.java.iSerf.util.CodeUtil;
+import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.HttpUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import okhttp3.MediaType;
@@ -197,12 +198,35 @@ public class Agent {
                 });
     }
 
+    public String eventTransId;
+    public Disposable eventDisposable;
+
+
+    /**
+     * 取消当前的操作
+     */
+    public void interrupt() {
+        this.stop();
+        this.run();
+    }
+
+    /**
+     * 停止运行
+     */
+    public void stop() {
+        eventDisposable.dispose();
+    }
+
+    /**
+     * 开始运行
+     */
     private void run() {
-        // Todo 何时释放
-        Schedulers.fromExecutor(eventPool).schedule(() -> {
+        eventDisposable = Schedulers.fromExecutor(eventPool).schedule(() -> {
             while (true) {
+
+                Event event = null;
                 try {
-                    var event = queue.take();
+                    event = queue.take();
 
                     switch (event.getType()) {
                         case Event.Type.MESSAGE -> {
@@ -217,8 +241,26 @@ public class Agent {
                             handleRecovery(event);
                         }
                     }
-                } catch (InterruptedException e) {
-                    sink.tryEmitError(e);
+
+                } catch (Exception e) {
+                    // 不管发生了啥错误，先回滚
+                    if (event != null) {
+
+                        switch (event.getType()) {
+                            case Event.Type.MESSAGE -> {
+                                // Todo 清理中间状态的memory
+                            }
+                        }
+                    }
+
+                    // 不管发生了啥，一并通知上层, Todo 避免EmitError，它会终结整个流
+//                    sink.tryEmitError(e);
+
+
+                    // 如果是人工触发中断，停止循环
+                    if (e instanceof InterruptedException) {
+                        break;
+                    }
                 }
             }
         });
@@ -338,7 +380,7 @@ public class Agent {
 
     /**
      * 检查记忆长度
-     * 计算prompt消耗，如果大于150k，那么触发记忆整理事件，Todo 弄一个支持自定义的map，根据model的70%压缩
+     * 计算prompt消耗，如果大于150k，那么触发记忆整理事件，Todo 弄一个支持自定义的map，根据model的60%压缩
      */
     private void checkMemorySize() {
 

@@ -460,4 +460,58 @@ class AgentTest {
             }, "工具不存在时应抛出异常");
         });
     }
+
+    /**
+     * 测试 interrupt 方法 - 发送 500 字输出请求，2 秒后中断，然后立即让 Agent 做一首诗词
+     */
+    @Test
+    void testInterrupt() {
+        assertTimeoutPreemptively(Duration.ofSeconds(60), () -> {
+            var llm = llmTest.getLlm();
+            var agent = new Agent("test-interrupt-agent", "你是一个有用的助手", llm, tools) {};
+
+            var receivedItems = new ArrayList<Message>();
+            agent.subscribe(item -> {
+                System.out.println("收到消息：" + item);
+                receivedItems.add(item);
+            });
+
+
+            // 发送要求输出 500 字的消息
+            agent.send("输出一篇英文短文500单次");
+
+            // 等待 2 秒后中断
+            Thread.sleep(3000);
+
+            // 调用 interrupt 中断当前处理
+            System.out.println("调用 interrupt 中断...");
+            agent.interrupt();
+
+
+            // 验证 interrupt 后 agent 的事件处理器重新运行
+            assertNotNull(agent.eventDisposable, "interrupt 后 eventDisposable 应不为空");
+            assertFalse(agent.eventDisposable.isDisposed(), "interrupt 后事件处理器应重新运行");
+
+            System.out.println("中断前收到消息总数：" + receivedItems.size());
+
+            // 中断后立即让 Agent 做一首诗词
+            System.out.println("中断后发送做诗词请求...");
+            receivedItems.clear();
+            agent.send("无视之前的要求，创作一首七言绝句");
+
+            // 等待诗词生成完成
+            Thread.sleep(5000);
+
+            System.out.println("做诗词后收到消息总数：" + receivedItems.size());
+            var textItems = receivedItems.stream()
+                    .filter(item -> item.getType().equals(Message.TYPE.TEXT))
+                    .toList();
+            assertFalse(textItems.isEmpty(), "应包含文本类型的响应");
+
+            // 输出诗词内容
+            textItems.forEach(item -> System.out.println("诗词内容：" + item.getText()));
+            
+            assertTrue(true, "interrupt 方法执行成功，且中断后能正常响应新请求");
+        });
+    }
 }
