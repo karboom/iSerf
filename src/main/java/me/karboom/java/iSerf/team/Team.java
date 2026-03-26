@@ -3,6 +3,7 @@ package me.karboom.java.iSerf.team;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.util.DataUtil;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
@@ -85,6 +86,7 @@ public class Team {
                     if (task.getUpstreamIds() == null || task.getUpstreamIds().isEmpty()) {
                         task.setStatus(Task.STATUS.DOING);
                         eventQueue.offer(Event.builder()
+                                .id(DataUtil.getFlakeId())
                                 .type(Event.TYPE.TASK_CHANGE)
                                 .desc("Task " + task.getId() + " changed to doing")
                                 .build());
@@ -123,6 +125,7 @@ public class Team {
                     var allDone = tasks.stream().allMatch(task -> task.getStatus().equals(Task.STATUS.DONE));
                     if (allDone) {
                         eventQueue.offer(Event.builder()
+                                .id(DataUtil.getFlakeId())
                                 .type(Event.TYPE.COMPLETE)
                                 .desc("All tasks completed")
                                 .build());
@@ -146,6 +149,7 @@ public class Team {
                                 if (allUpstreamDone) {
                                     task.setStatus(Task.STATUS.DOING);
                                     eventQueue.offer(Event.builder()
+                                            .id(DataUtil.getFlakeId())
                                             .type(Event.TYPE.TASK_CHANGE)
                                             .desc("Task " + task.getId() + " changed to doing")
                                             .build());
@@ -175,7 +179,7 @@ public class Team {
 
 
     public void send(String message) {
-        eventQueue.offer(Event.builder().type(Event.TYPE.TARGET).desc(message).build());
+        eventQueue.offer(Event.builder().id(DataUtil.getFlakeId()).type(Event.TYPE.TARGET).desc(message).build());
     }
 
 
@@ -187,7 +191,7 @@ public class Team {
      * 修改任务状态
      */
     public void taskChangeStatus(String id, String status) {
-        eventQueue.offer(Event.builder().desc("%s-%s".formatted(id, status)).build());
+        eventQueue.offer(Event.builder().id(DataUtil.getFlakeId()).desc("%s-%s".formatted(id, status)).build());
     }
 
 

@@ -124,4 +124,9 @@ public class Message {
      * 是否遗忘
      */
     public Integer isForgotten;
+
+    /**
+     * 事件ID
+     */
+    public String eventId;
 }

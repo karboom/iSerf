@@ -16,6 +16,7 @@ public class Event {
         final static public String RECOVERY = "RECOVERY";
     }
 
+    public String id;
     public Integer priority;
     public String type;
     public Message message;

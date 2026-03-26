@@ -93,7 +93,7 @@ public class Agent {
         this.tools = tools != null ? tools : new ArrayList<>();
         this.queue = new PriorityBlockingQueue<>(100, Comparator.comparing(Event::getPriority));
 
-        this.memory.add(Message.builder().id(id).role(Message.ROLE.SYSTEM).text(this.prompt).type(Message.TYPE.TEXT).isForgotten(0).build());
+        this.memory.add(Message.builder().id(id).role(Message.ROLE.SYSTEM).text(this.prompt).type(Message.TYPE.TEXT).isForgotten(0).eventId("0").build());
 
         this.sink = Sinks.many().multicast().onBackpressureBuffer();
         this.broadcast = sink.asFlux();
@@ -114,13 +114,13 @@ public class Agent {
         return broadcast.subscribe(consumer);
     }
 
-    private Mono<Tuple3<Message, List<Output>, Message>> fluxHandle(Flux<Output> flux, Class format) {
+    private Mono<Tuple3<Message, List<Output>, Message>> fluxHandle(Flux<Output> flux, Class format, Event event) {
         return flux
                 .publishOn(Schedulers.fromExecutor(this.eventPool))
                 .reduce(Tuples.of(
                         Message.builder().type(Message.TYPE.THINKING).text("").isSegment(0).build(),
                         new ArrayList<>(),
-                        Message.builder().role(Message.ROLE.ASSISTANT).type(Message.TYPE.TEXT).text("").isSegment(0).build()
+                        Message.builder().role(Message.ROLE.ASSISTANT).type(Message.TYPE.TEXT).text("").isSegment(0).eventId(event.getId()).build()
                 ), (acc, chunk) -> {
                     var thinkingItem = acc.getT1();
                     var toolCall = acc.getT2();
@@ -189,6 +189,7 @@ public class Agent {
                                 contentItem.setFormatted(JSONUtil.parse(contentItem.getText(), format));
                             }
                             sink.tryEmitNext(contentItem);
+                            memory.add(contentItem);
                         }
                     } else {
 
@@ -246,9 +247,11 @@ public class Agent {
                     // 不管发生了啥错误，先回滚
                     if (event != null) {
 
+                        var eventId = event.getId();
                         switch (event.getType()) {
                             case Event.Type.MESSAGE -> {
-                                // Todo 清理中间状态的memory
+                                // 清理中间状态的 memory
+                                memory.removeIf(msg -> eventId.equals(msg.getEventId()));
                             }
                         }
                     }
@@ -373,7 +376,7 @@ public class Agent {
     }
 
     public void recovery () {
-        queue.offer(Event.builder().type(Event.Type.RECOVERY).build());
+        queue.offer(Event.builder().id(DataUtil.getFlakeId()).type(Event.Type.RECOVERY).build());
     }
 
 
@@ -392,13 +395,14 @@ public class Agent {
                 .sum();
 
         if (promptTotal > 150000) {
-            queue.offer(Event.builder().type(Event.Type.ORGANIZE_MEMORY).build());
+            queue.offer(Event.builder().id(DataUtil.getFlakeId()).type(Event.Type.ORGANIZE_MEMORY).build());
         }
     }
 
 
     @SneakyThrows
     public void send(String message, Class<?> cls) {
+        var eventId = DataUtil.getFlakeId();
         var item = Message
                 .builder()
                 .type(Message.TYPE.TEXT)
@@ -412,6 +416,7 @@ public class Agent {
         }
 
         queue.offer(Event.builder()
+                .id(eventId)
                 .priority(1)
                 .type(Event.Type.MESSAGE)
                 .message(item)
@@ -456,6 +461,7 @@ public class Agent {
                         .type(Message.TYPE.TEXT)
                         .text(summaryText)
                         .isForgotten(0)
+                        .eventId(event.getId())
                         .build();
 
                 this.memory.add(summaryItem);
@@ -477,6 +483,7 @@ public class Agent {
      */
     private void handleMessage(Event event) {
         var userMessage = event.getMessage();
+        userMessage.setEventId(event.getId());
 
         // 添加到记忆中
         memory.add(userMessage);
@@ -485,7 +492,7 @@ public class Agent {
 
         var flux = llmProvider.get(tools, format, null).send(this.memory.stream().filter(item -> item.getIsForgotten() == 0).toList(), format, tools);
 
-        fluxHandle(flux, format)
+        fluxHandle(flux, format, event)
                 .flatMapMany(holder -> {
                     var toolCallHolder = holder.getT2();
 
@@ -546,10 +553,12 @@ public class Agent {
                                     .type(Message.TYPE.TEXT)
                                     .toolCalls(llmCalls)
                                     .isForgotten(0)
+                                    .eventId(event.getId())
                                     .build();
 
                             var messageRes = Message.builder()
                                     .role(Message.ROLE.TOOL)
+                                    .eventId(event.getId())
                                     .isForgotten(0)
                                     .toolCalls(llmCalls)
                                     .build();
@@ -560,7 +569,7 @@ public class Agent {
                             // Todo 这里的 tools 参数是否可以去掉，节省 token
                             var newFlux = llmProvider.get(tools, null, null).send(memory, null, tools);
 
-                            return fluxHandle(newFlux, format).thenMany(Flux.empty());
+                            return fluxHandle(newFlux, format, event).thenMany(Flux.empty());
                         } else {
                             return Flux.empty();
                         }
