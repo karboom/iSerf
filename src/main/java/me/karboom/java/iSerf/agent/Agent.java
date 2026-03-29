@@ -8,6 +8,10 @@ import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
 import me.karboom.java.iSerf.agent.persistence.IPersistence;
 import me.karboom.java.iSerf.agent.persistence.NonePersistence;
 import me.karboom.java.iSerf.agent.tool.*;
+import me.karboom.java.iSerf.billing.ILedger;
+import me.karboom.java.iSerf.billing.Cost;
+import org.openjdk.jol.info.GraphLayout;
+import me.karboom.java.iSerf.config.Config;
 import me.karboom.java.iSerf.llm.text.IText;
 import me.karboom.java.iSerf.llm.text.Output;
 import me.karboom.java.iSerf.schedule.ISchedule;
@@ -32,6 +36,7 @@ import tools.jackson.databind.node.ObjectNode;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
@@ -74,6 +79,7 @@ public class Agent {
     public List<Plan> plans;
     public ISchedule schedule;
 
+    public ILedger ledger = Config.getInstance().getDefaultLedger();
 
     /**
      * 工具调用缓存
@@ -109,100 +115,12 @@ public class Agent {
     }
 
 
-    // Todo 支持3个入参的版本
-    public Disposable subscribe(Consumer<Message> consumer) {
-        return broadcast.subscribe(consumer);
-    }
-
-    private Mono<Tuple3<Message, List<Output>, Message>> fluxHandle(Flux<Output> flux, Class format, Event event) {
-        return flux
-                .publishOn(Schedulers.fromExecutor(this.eventPool))
-                .reduce(Tuples.of(
-                        Message.builder().type(Message.TYPE.THINKING).text("").isSegment(0).build(),
-                        new ArrayList<>(),
-                        Message.builder().role(Message.ROLE.ASSISTANT).type(Message.TYPE.TEXT).text("").isSegment(0).eventId(event.getId()).build()
-                ), (acc, chunk) -> {
-                    var thinkingItem = acc.getT1();
-                    var toolCall = acc.getT2();
-                    var contentItem = acc.getT3();
-
-                    var usage = chunk.getUsage();
-                    var choices = chunk.getChoices();
-
-                    if (choices != null) {
-                        var delta = choices.get(0);
-
-                        var toolCalls = delta.getToolCall();
-                        var thinking = delta.getThinking();
-                        var content = delta.getText();
-
-                        if (thinking != null && !thinking.toString().equals("null")) {
-                            thinkingItem.setId(UUID.randomUUID().toString()); // 为thinkingItem设置ID
-                            thinkingItem.setText(thinkingItem.getText() + thinking);
-
-                            var thinkingSegment = Message.builder().text(thinking.toString()).isSegment(1).build();
-
-                            sink.tryEmitNext(thinkingSegment);
-                        } else if (toolCalls != null) {
-                            // Todo toolcall返回不及预期的时候，有可能先出问题再出toolCall
-                            // Todo toolcall可能被循环触发
-                            if (thinkingItem.getId() != null) {
-                                // thinking阶段结束，更新thinkingItem为非片段并发送
-                                sink.tryEmitNext(thinkingItem);
-                            }
-                            // 将当前chunk添加到toolCall列表中用于后续处理
-                            toolCall.add(chunk);
-                        } else if (content != null) {
-
-                            if (thinkingItem.getId() != null) {
-                                // thinking阶段结束，更新thinkingItem为非片段并发送
-                                sink.tryEmitNext(thinkingItem);
-                            }
-
-                            var contentText = content;
-
-                            contentItem.setId(UUID.randomUUID().toString());
-                            contentItem.setText(contentItem.getText() + contentText);
-
-
-                            if (format == null) {
-                                var contentItemSegment = Message.builder().id(UUID.randomUUID().toString()).role(contentItem.getRole()).type(Message.TYPE.TEXT).text(contentText).isSegment(1).build();
-                                sink.tryEmitNext(contentItemSegment);
-                            }
-                        } else {
-                            // 其他情况，可能需要处理其他类型的响应
-                            // 目前暂不处理
-                        }
-
-                    } else if (usage != null) {
-                        if (contentItem.getId() != null) {
-                            var usageBuilder = Message.Usage.builder()
-                                    .total((int) usage.getTotalTokens())
-                                    .promptTotal((int) usage.getPromptTokens())
-                                    .completionTotal((int) usage.getCompletionTokens())
-                                    .completionThinking(usage.getThinkingTokens())
-                                    .build();
-
-                            contentItem.setUsage(usageBuilder);
-
-                            if (format != null) {
-                                contentItem.setFormatted(JSONUtil.parse(contentItem.getText(), format));
-                            }
-                            sink.tryEmitNext(contentItem);
-                            memory.add(contentItem);
-                        }
-                    } else {
-
-                    }
-
-                    return acc;
-                });
-    }
 
     public String eventTransId;
     public Disposable eventDisposable;
 
 
+    // region ========== 外部调用 ==========
     /**
      * 取消当前的操作
      */
@@ -380,26 +298,6 @@ public class Agent {
     }
 
 
-
-    /**
-     * 检查记忆长度
-     * 计算prompt消耗，如果大于150k，那么触发记忆整理事件，Todo 弄一个支持自定义的map，根据model的60%压缩
-     */
-    private void checkMemorySize() {
-
-        var currentMemory = this.memory;
-        var promptTotal = currentMemory.stream()
-                .skip(1)
-                .filter(item -> item.getUsage() != null && item.getUsage().getPromptTotal() != null)
-                .mapToInt(item -> item.getUsage().getPromptTotal())
-                .sum();
-
-        if (promptTotal > 150000) {
-            queue.offer(Event.builder().id(DataUtil.getFlakeId()).type(Event.Type.ORGANIZE_MEMORY).build());
-        }
-    }
-
-
     @SneakyThrows
     public void send(String message, Class<?> cls) {
         var eventId = DataUtil.getFlakeId();
@@ -427,6 +325,105 @@ public class Agent {
         send(message, null);
     }
 
+    // Todo 支持3个入参的版本
+    public Disposable subscribe(Consumer<Message> consumer) {
+        return broadcast.subscribe(consumer);
+    }
+
+    private Mono<Tuple3<Message, List<Output>, Message>> fluxHandle(Flux<Output> flux, Class format, Event event) {
+        return flux
+                .publishOn(Schedulers.fromExecutor(this.eventPool))
+                .reduce(Tuples.of(
+                        Message.builder().type(Message.TYPE.THINKING).text("").isSegment(0).build(),
+                        new ArrayList<>(),
+                        Message.builder().role(Message.ROLE.ASSISTANT).type(Message.TYPE.TEXT).text("").isSegment(0).eventId(event.getId()).build()
+                ), (acc, chunk) -> {
+                    var thinkingItem = acc.getT1();
+                    var toolCall = acc.getT2();
+                    var contentItem = acc.getT3();
+
+                    var usage = chunk.getUsage();
+                    var choices = chunk.getChoices();
+
+                    if (choices != null) {
+                        var delta = choices.get(0);
+
+                        var toolCalls = delta.getToolCall();
+                        var thinking = delta.getThinking();
+                        var content = delta.getText();
+
+                        if (thinking != null && !thinking.toString().equals("null")) {
+                            thinkingItem.setId(UUID.randomUUID().toString()); // 为thinkingItem设置ID
+                            thinkingItem.setText(thinkingItem.getText() + thinking);
+
+                            var thinkingSegment = Message.builder().text(thinking.toString()).isSegment(1).build();
+
+                            sink.tryEmitNext(thinkingSegment);
+                        } else if (toolCalls != null) {
+                            // Todo toolcall返回不及预期的时候，有可能先出问题再出toolCall
+                            // Todo toolcall可能被循环触发
+                            if (thinkingItem.getId() != null) {
+                                // thinking阶段结束，更新thinkingItem为非片段并发送
+                                sink.tryEmitNext(thinkingItem);
+                            }
+                            // 将当前chunk添加到toolCall列表中用于后续处理
+                            toolCall.add(chunk);
+                        } else if (content != null) {
+
+                            if (thinkingItem.getId() != null) {
+                                // thinking阶段结束，更新thinkingItem为非片段并发送
+                                sink.tryEmitNext(thinkingItem);
+                            }
+
+                            var contentText = content;
+
+                            contentItem.setId(UUID.randomUUID().toString());
+                            contentItem.setText(contentItem.getText() + contentText);
+
+
+                            if (format == null) {
+                                var contentItemSegment = Message.builder().id(UUID.randomUUID().toString()).role(contentItem.getRole()).type(Message.TYPE.TEXT).text(contentText).isSegment(1).build();
+                                sink.tryEmitNext(contentItemSegment);
+                            }
+                        } else {
+                            // 其他情况，可能需要处理其他类型的响应
+                            // 目前暂不处理
+                        }
+
+                    } else if (usage != null) {
+                        if (contentItem.getId() != null) {
+                            var usageBuilder = Message.Usage.builder()
+                                    .total((int) usage.getTotalTokens())
+                                    .promptTotal((int) usage.getPromptTokens())
+                                    .completionTotal((int) usage.getCompletionTokens())
+                                    .completionThinking(usage.getThinkingTokens())
+                                    .build();
+
+                            contentItem.setUsage(usageBuilder);
+
+                            if (format != null) {
+                                contentItem.setFormatted(JSONUtil.parse(contentItem.getText(), format));
+                            }
+                            sink.tryEmitNext(contentItem);
+                            memory.add(contentItem);
+                        }
+                    } else {
+
+                    }
+
+                    return acc;
+                });
+    }
+
+    // endregion
+
+
+
+    // region ========== 资费相关 ==========
+
+
+
+    // endregion
 
     // region ========== 事件处理 ==========
     /**
@@ -601,6 +598,29 @@ public class Agent {
     }
 
     // endregion
+
+    // region ========== 记忆相关 ==========
+
+    /**
+     * 检查记忆长度
+     * 计算prompt消耗，如果大于150k，那么触发记忆整理事件，Todo 弄一个支持自定义的map，根据model的60%压缩
+     */
+    private void checkMemorySize() {
+
+        var currentMemory = this.memory;
+        var promptTotal = currentMemory.stream()
+                .skip(1)
+                .filter(item -> item.getUsage() != null && item.getUsage().getPromptTotal() != null)
+                .mapToInt(item -> item.getUsage().getPromptTotal())
+                .sum();
+
+        if (promptTotal > 150000) {
+            queue.offer(Event.builder().id(DataUtil.getFlakeId()).type(Event.Type.ORGANIZE_MEMORY).build());
+        }
+    }
+
+    // endregion
+
 
     // region ========== 定时任务 ==========
 
