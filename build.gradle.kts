@@ -62,6 +62,8 @@ dependencies {
     implementation("org.jooq:jooq:3.20.0")
     implementation("org.postgresql:postgresql:42.7.5")
 
+    implementation("org.openjdk.jol:jol-core:0.17")
+
 
     implementation("org.projectlombok:lombok:1.18.42")
     annotationProcessor("org.projectlombok:lombok:1.18.42")

@@ -421,7 +421,26 @@ public class Agent {
 
     // region ========== 资费相关 ==========
 
+    /**
+     * 计算内存账单
+     * 1. 采用 jol 统计 memory 字段 bytes 数量
+     * 2. 调用 ledge.record
+     */
+    public void calcMemoryBillings() {
+        var memorySize = GraphLayout.parseInstance(this.memory).totalSize();
+        var cost = Cost.builder()
+                .id(DataUtil.getFlakeId())
+                .targetType("agent")
+                .targetId(this.id)
+                .memory((int) memorySize)
+                .captureTime(Instant.now())
+                .build();
 
+        // Todo 这个操作可以再开一个线程去做，加快响应时间
+        ledger.record(cost);
+
+        log.debug("calcMemoryBillings memory size: %s bytes".formatted(memorySize));
+    }
 
     // endregion
 

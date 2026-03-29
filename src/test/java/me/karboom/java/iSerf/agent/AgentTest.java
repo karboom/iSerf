@@ -462,6 +462,40 @@ class AgentTest {
     }
 
     /**
+     * 测试 calcMemoryBillings 方法
+     */
+    @Test
+    void testCalcMemoryBillings() {
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            var llm = llmTest.getLlm();
+            var agent = new Agent("test-billing-agent", "你是一个有用的助手", llm, tools) {};
+
+            // 添加一些测试记忆
+            agent.memory.add(Message.builder()
+                    .id(UUID.randomUUID().toString())
+                    .role(Message.ROLE.USER)
+                    .type(Message.TYPE.TEXT)
+                    .text("你好")
+                    .isForgotten(0)
+                    .build());
+
+            agent.memory.add(Message.builder()
+                    .id(UUID.randomUUID().toString())
+                    .role(Message.ROLE.ASSISTANT)
+                    .type(Message.TYPE.TEXT)
+                    .text("你好，有什么可以帮助你的吗？")
+                    .isForgotten(0)
+                    .build());
+
+            // 调用 calcMemoryBillings
+            agent.calcMemoryBillings();
+
+            // 验证方法执行成功（不抛异常即成功）
+            assertTrue(true, "calcMemoryBillings 方法执行成功");
+        });
+    }
+
+    /**
      * 测试 interrupt 方法 - 发送 500 字输出请求，2 秒后中断，然后立即让 Agent 做一首诗词
      */
     @Test

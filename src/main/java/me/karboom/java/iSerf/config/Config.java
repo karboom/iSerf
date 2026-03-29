@@ -25,6 +25,7 @@ public class Config {
 
 
     private Config() {
-        this.defaultLedger = new NfsLedger("", NfsLedger.Format.JSONL);
+        // Todo 默认目录设置
+        this.defaultLedger = new NfsLedger("/tmp/iserf.ledge", NfsLedger.Format.JSONL);
     }
 }
