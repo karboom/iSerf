@@ -3,25 +3,25 @@ package me.karboom.java.iSerf.rag.scene;
 import io.lettuce.core.RedisClient;
 import me.karboom.java.iSerf.llm.text.OpenAI;
 import me.karboom.java.iSerf.rag.store.RedisStructStore;
-import me.karboom.java.iSerf.util.HttpUtil;
-import okhttp3.Request;
+import me.karboom.java.iSerf.rag.util.ImgCompare;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import lombok.*;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
+
+import lombok.extern.slf4j.Slf4j;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Video 测试类
  */
+@Slf4j
 public class VideoTest {
 
     @Data
@@ -94,22 +94,11 @@ public class VideoTest {
     @Test
     void testParseVideo() {
         assertTimeoutPreemptively(Duration.ofMinutes(10), () -> {
-            var testVideoPath = java.nio.file.Paths.get("src/test/resources/rag/test-video.mp4");
-            
-            System.out.println("下载测试视频文件...");
-            Files.createDirectories(testVideoPath.getParent());
-            var request = new Request.Builder()
-                    .url("https://karboom-blog.oss-cn-hangzhou.aliyuncs.com/iSlogger/c000002xh60.hnFM10002.mp4")
-                    .build();
-            try (var response = HttpUtil.getClient().newCall(request).execute()) {
-                var body = response.body();
-                if (body != null) {
-                    Files.copy(body.byteStream(), testVideoPath, StandardCopyOption.REPLACE_EXISTING);
-                    System.out.println("测试视频文件下载完成：" + testVideoPath);
-                }
-            }
+            var testVideoPath = java.nio.file.Paths.get("src/test/resources/rag/scene/video/test-1.mp4");
 
-            video.parseVideo(testVideoPath, true, FrameDesc.class);
+
+            var imgCompare = new ImgCompare();
+            video.parseVideo(testVideoPath, 2, imgCompare::hashCompare, true, FrameDesc.class);
 
             var videoInfos = videoStore.getByIds(List.of());
             assertNotNull(videoInfos);

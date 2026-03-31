@@ -20,12 +20,9 @@ import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiFunction;
 
 @Slf4j
 @AllArgsConstructor
@@ -80,33 +77,30 @@ public class Video {
     }
 
     /**
-     * 解析视频文件为结构化数据，并且通过 IStore 保存
-     * 1. ffmpeg 场景变化阈值 0.3 + 每 1 秒强制 1 帧，文件命名为 %d.jpg,  从 log 中提取时间戳，找出 jpg 对应的毫秒
-     * 2. ffmpeg 提取音轨
-     * 3. 所有图片通过 IText.query 理解，并且输出为 frameDesc
-     * 4. 音频通过 IText.query 理解，转换为多个 AudioInfo
+     * 解析视频文件为结构化数据
+     * - ffprobe解析视频基本信息，保存到videoStore
+     * - 创建临时目录video_parse_[videoId]，根据指定的fps将视频切分为图片，保存到frames子目录，需要输出进度
+     * - 遍历frames子目录，根据自定义函数去除重复图片，去重的图片放到filter_frames目录下，命名为[开始序号]_[结束序号].jpg
+     * - 根据参数决定，ffmpeg 提取音轨，保存到audio子目录
+     * - 所有filter_frames图片通过 IText.query 理解，并且输出为 frameDesc
+     * - 音频通过 IText.query 理解，转换为多个 AudioInfo
      *
      * Todo 背景音乐、音效、人声的分离提取
      */
     @SneakyThrows
-    public void parseVideo(Path videoFile, Boolean needAudio, Class<?> frameDesc) {
+    public void parseVideo(Path videoFile, Integer fps, BiFunction<Path, Path, Boolean> func, Boolean needAudio, Class<?> frameDesc) {
         var videoId = DataUtil.getFlakeId();
-        var outputDir = videoFile.getParent().resolve("video_parse_" + videoId);
-
+        var outputDir = Path.of(System.getProperty("java.io.tmpdir"), "video_parse_" + videoId);
         Files.createDirectories(outputDir);
+
         var frameDir = outputDir.resolve("frames");
         var audioDir = outputDir.resolve("audios");
         Files.createDirectories(frameDir);
         Files.createDirectories(audioDir);
 
-        // 1. 获取视频信息
+        // 1. ffprobe 解析视频基本信息
         var ffprobe = new FFprobe();
         var probeResult = ffprobe.probe(videoFile.toString());
-        var videoStream = probeResult.getStreams().stream()
-                .filter(s -> "video".equals(s.codec_type))
-                .findFirst()
-                .orElse(null);
-        var fps = videoStream != null ? videoStream.r_frame_rate.intValue() : 30;
         var duration = probeResult.getFormat().duration;
 
         var videoInfo = VideoInfo.builder()
@@ -114,43 +108,95 @@ public class Video {
                 .startTime(LocalDateTime.now())
                 .fps(fps)
                 .build();
-
         videoStore.create(videoInfo);
         log.debug("parseVideo videoId: {}, fps: {}, duration: {}", videoId, fps, duration);
 
-        // 2. 提取场景变化帧 + 每秒强制 1 帧
+        // 2. 根据指定的 fps 将视频切分为图片
         var ffmpeg = new FFmpeg();
         var frameOutputPattern = frameDir.resolve("%d.jpg").toString();
 
         var ffmpegBuilder = new FFmpegBuilder()
                 .setInput(videoFile.toString())
                 .addOutput(frameOutputPattern)
-                .addExtraArgs("-vf", "select='gt(scene,0.3)',fps=1")
-                .addExtraArgs("-vsync", "vfr")
+                .addExtraArgs("-vf", "fps=%d".formatted(fps))
                 .addExtraArgs("-q:v", "2")
                 .done();
 
+        log.debug("parseVideo extracting frames with fps: {}", fps);
         ffmpeg.run(ffmpegBuilder);
         log.debug("parseVideo extracted frames to: {}", frameDir);
 
-        // 3. 从 ffmpeg 日志中提取时间戳映射
-        var frameTimestamps = extractFrameTimestamps(videoFile.toString(), frameDir);
-        log.debug("parseVideo extracted {} frame timestamps", frameTimestamps.size());
-
-        // 4. 分析每一帧
-        var frameInfos = new ArrayList<FrameInfo>();
+        // 3. 遍历 frames 子目录，根据自定义函数去除重复图片
         var frameFiles = Files.list(frameDir)
+                .filter(Files::isRegularFile)
+                .sorted(Comparator.comparingInt(p -> {
+                    var name = p.getFileName().toString().replace(".jpg", "");
+                    return Integer.parseInt(name);
+                }))
+                .toList();
+
+        var filterFramesDir = outputDir.resolve("filter_frames");
+        Files.createDirectories(filterFramesDir);
+
+        var totalFrames = frameFiles.size();
+        var processedFrames = 0;
+        Path baseFrameFile = null;
+
+        for (var i = 0; i < frameFiles.size(); i++) {
+            var frameFile = frameFiles.get(i);
+            var fileName = frameFile.getFileName().toString();
+            var frameNumber = Integer.parseInt(fileName.replace(".jpg", ""));
+
+            if (baseFrameFile == null) {
+                baseFrameFile = frameFile;
+                continue;
+            }
+
+            var baseFrameNumber = Integer.parseInt(baseFrameFile.getFileName().toString().replace(".jpg", ""));
+            var isDuplicate = func.apply(baseFrameFile, frameFile);
+
+            if (isDuplicate) {
+                processedFrames++;
+                if (processedFrames % 10 == 0 || processedFrames == totalFrames) {
+                    log.debug("parseVideo deduplication progress: {}/{}", processedFrames, totalFrames);
+                }
+                continue;
+            }
+
+            if (baseFrameNumber < frameNumber - 1) {
+                var filterFrameName = "%d_%d.jpg".formatted(baseFrameNumber, frameNumber - 1);
+                Files.copy(baseFrameFile, filterFramesDir.resolve(filterFrameName));
+                log.debug("parseVideo duplicate frames: start={}, end={}", baseFrameNumber, frameNumber - 1);
+            }
+
+            baseFrameFile = frameFile;
+
+            processedFrames++;
+            if (processedFrames % 10 == 0 || processedFrames == totalFrames) {
+                log.debug("parseVideo deduplication progress: {}/{}", processedFrames, totalFrames);
+            }
+        }
+
+        // 复制最后一个基准文件
+        if (baseFrameFile != null) {
+            var baseFrameNumber = Integer.parseInt(baseFrameFile.getFileName().toString().replace(".jpg", ""));
+            var filterFrameName = "%d.jpg".formatted(baseFrameNumber);
+            Files.copy(baseFrameFile, filterFramesDir.resolve(filterFrameName));
+            log.debug("parseVideo copied last base frame: {}", filterFrameName);
+        }
+
+        // 从 filter_frames 目录读取所有去重后的图片，统一通过 IText.query 理解
+        var filterFrameFiles = Files.list(filterFramesDir)
                 .filter(Files::isRegularFile)
                 .sorted()
                 .toList();
 
-        for (var frameFile : frameFiles) {
-            var frameId = DataUtil.getFlakeId();
+        var frameInfos = new ArrayList<FrameInfo>();
+        for (var frameFile : filterFrameFiles) {
             var fileName = frameFile.getFileName().toString();
-            var frameNumber = Integer.parseInt(fileName.replace(".jpg", ""));
-            var startMs = frameTimestamps.getOrDefault(frameNumber, 0L);
+            var frameId = DataUtil.getFlakeId();
+            var startMs = Integer.parseInt(fileName.split("_")[0]) * 1000 / fps;
 
-            // 使用 IText 分析图片
             var imageBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(frameFile));
             var imageUrl = "data:image/jpeg;base64,%s".formatted(imageBase64);
 
@@ -167,7 +213,7 @@ public class Video {
                     .id(frameId)
                     .videoId(videoId)
                     .audioIds(new ArrayList<>())
-                    .startMs(startMs.toString())
+                    .startMs(String.valueOf(startMs))
                     .fileName(fileName)
                     .llm(output)
                     .build();
@@ -179,7 +225,7 @@ public class Video {
         frameStore.create(frameInfos);
         log.debug("parseVideo analyzed {} frames", frameInfos.size());
 
-        // 5. 提取音频（如果需要）
+        // 5. 根据参数决定，ffmpeg 提取音轨
         var audioInfos = new ArrayList<AudioInfo>();
         if (needAudio) {
             var audioOutput = audioDir.resolve("audio.wav").toString();
@@ -195,14 +241,12 @@ public class Video {
             ffmpeg.run(audioFfmpeg);
             log.debug("parseVideo extracted audio to: {}", audioOutput);
 
-            // 音频分割和转录
-            audioInfos = splitAndTranscribeAudio(audioDir.resolve("audio.wav").toString(), videoId, frameInfos);
+            audioInfos = splitAndTranscribeAudio(audioOutput, videoId, frameInfos);
             audioStore.create(audioInfos);
         }
 
         log.debug("parseVideo completed: {} frames, {} audio segments", frameInfos.size(), audioInfos.size());
     }
-
 
     /**
      * 整体提取并转录音频
