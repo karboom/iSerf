@@ -58,6 +58,7 @@ public class Video {
         public List<String> audioIds;
 
         public String startMs;
+        public Integer endMs;
 
         public String fileName;
 
@@ -243,6 +244,21 @@ public class Video {
         log.debug("parseVideo completed: {} frames, {} audio segments", frameInfos.size(), audioInfos.size());
     }
 
+    @SneakyThrows
+    public void extractAudio(Path videoFile, Path audioFile) {
+
+        var ffmpeg = new FFmpeg();
+        var ffmpegBuilder = new FFmpegBuilder()
+                .setInput(videoFile.toString())
+                .addOutput(audioFile.toString())
+                .addExtraArgs("-vn")
+                .addExtraArgs("-ac", "1")
+                .addExtraArgs("-ar", "16000")
+                .done();
+
+        ffmpeg.run(ffmpegBuilder);
+    }
+
     /**
      * 提取音轨并转录音频
      * - 在videoFile目录创建audio文件夹，提取音轨为audio.wav，保存进去
@@ -260,16 +276,7 @@ public class Video {
         var audioFile = outputDir.resolve("audio.wav");
         log.debug("splitAndTranscribeAudio extracting audio to: {}", audioFile.toString());
 
-        var ffmpeg = new FFmpeg();
-        var ffmpegBuilder = new FFmpegBuilder()
-                .setInput(videoFile.toString())
-                .addOutput(audioFile.toString())
-                .addExtraArgs("-vn")
-                .addExtraArgs("-ac", "1")
-                .addExtraArgs("-ar", "16000")
-                .done();
-
-        ffmpeg.run(ffmpegBuilder);
+        extractAudio(videoFile, audioFile);
         log.debug("splitAndTranscribeAudio extracted audio completed");
 
         var silenceSegments = detectSilence(audioFile);
