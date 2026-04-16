@@ -10,10 +10,11 @@ import me.karboom.java.iSerf.agent.Message;
 import me.karboom.java.iSerf.llm.text.IText;
 import me.karboom.java.iSerf.rag.store.IStructStore;
 import me.karboom.java.iSerf.util.DataUtil;
-import me.karboom.java.iSerf.util.ErrorUtil;
+import me.karboom.java.iSerf.util.JSONUtil;
 import net.bramp.ffmpeg.FFmpeg;
 import net.bramp.ffmpeg.FFprobe;
 import net.bramp.ffmpeg.builder.FFmpegBuilder;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -76,6 +77,15 @@ public class Video {
         public List<String> frameIds;
     }
 
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    static class AudioAnalysisResult {
+        public String type;
+        public String text;
+    }
+
     /**
      * 解析视频文件为结构化数据
      * - ffprobe解析视频基本信息，保存到videoStore
@@ -85,12 +95,10 @@ public class Video {
      * - 所有filter_frames图片通过 IText.query 理解，并且输出为 frameDesc
      * - 音频通过 IText.query 理解，转换为多个 AudioInfo
      *
-     * Todo 背景音乐、音效、人声的分离提取
      */
     @SneakyThrows
-    public void parseVideo(Path videoFile, Integer fps, BiFunction<Path, Path, Boolean> func, Boolean needAudio, Class<?> frameDesc) {
+    public void parseVideo(Path videoFile, Path outputDir, Integer fps, BiFunction<Path, Path, Boolean> func, Boolean needAudio, Class<?> frameDesc) {
         var videoId = DataUtil.getFlakeId();
-        var outputDir = Path.of(System.getProperty("java.io.tmpdir"), "video_parse_" + videoId);
         Files.createDirectories(outputDir);
 
         var frameDir = outputDir.resolve("frames");
@@ -180,7 +188,7 @@ public class Video {
         // 复制最后一个基准文件
         if (baseFrameFile != null) {
             var baseFrameNumber = Integer.parseInt(baseFrameFile.getFileName().toString().replace(".jpg", ""));
-            var filterFrameName = "%d.jpg".formatted(baseFrameNumber);
+            var filterFrameName = "%d_%d.jpg".formatted(baseFrameNumber, baseFrameNumber);
             Files.copy(baseFrameFile, filterFramesDir.resolve(filterFrameName));
             log.debug("parseVideo copied last base frame: {}", filterFrameName);
         }
@@ -225,23 +233,10 @@ public class Video {
         frameStore.create(frameInfos);
         log.debug("parseVideo analyzed {} frames", frameInfos.size());
 
-        // 5. 根据参数决定，ffmpeg 提取音轨
+        // 5. 根据参数决定，ffmpeg 提取音轨并转录
         var audioInfos = new ArrayList<AudioInfo>();
         if (needAudio) {
-            var audioOutput = audioDir.resolve("audio.wav").toString();
-            var audioFfmpeg = new FFmpegBuilder()
-                    .setInput(videoFile.toString())
-                    .addOutput(audioOutput)
-                    .addExtraArgs("-vn")
-                    .addExtraArgs("-acodec", "pcm_s16le")
-                    .addExtraArgs("-ar", "16000")
-                    .addExtraArgs("-ac", "1")
-                    .done();
-
-            ffmpeg.run(audioFfmpeg);
-            log.debug("parseVideo extracted audio to: {}", audioOutput);
-
-            audioInfos = splitAndTranscribeAudio(audioOutput, videoId, frameInfos);
+            audioInfos = parseAudio(videoFile, outputDir.resolve("audios"));
             audioStore.create(audioInfos);
         }
 
@@ -249,63 +244,186 @@ public class Video {
     }
 
     /**
-     * 整体提取并转录音频
-     * @param audioFile 音频文件路径
-     * @param videoId 视频 ID
-     * @param frameInfos 帧信息列表，用于关联音频和帧
+     * 提取音轨并转录音频
+     * - 在videoFile目录创建audio文件夹，提取音轨为audio.wav，保存进去
+     * - 通过 FFmpeg + silencedetect 将音频切分到split_audio文件夹，文件名格式为[start]_[end].wav
+     * - 遍历split_audio，使用IText分析音频内容
      * @return 音频信息列表
      */
     @SneakyThrows
-    private ArrayList<AudioInfo> splitAndTranscribeAudio(String audioFile, String videoId, ArrayList<FrameInfo> frameInfos) {
+    public ArrayList<AudioInfo> parseAudio(Path videoFile, Path outputDir) {
+        var splitAudioDir = outputDir.resolve("split_audio");
+
+        Files.createDirectories(outputDir);
+        Files.createDirectories(splitAudioDir);
+
+        var audioFile = outputDir.resolve("audio.wav");
+        log.debug("splitAndTranscribeAudio extracting audio to: {}", audioFile.toString());
+
+        var ffmpeg = new FFmpeg();
+        var ffmpegBuilder = new FFmpegBuilder()
+                .setInput(videoFile.toString())
+                .addOutput(audioFile.toString())
+                .addExtraArgs("-vn")
+                .addExtraArgs("-ac", "1")
+                .addExtraArgs("-ar", "16000")
+                .done();
+
+        ffmpeg.run(ffmpegBuilder);
+        log.debug("splitAndTranscribeAudio extracted audio completed");
+
+        var silenceSegments = detectSilence(audioFile);
+        log.debug("splitAndTranscribeAudio detected {} silence segments", silenceSegments.size());
+
+        var audioSegments = extractAudioSegments(audioFile, silenceSegments, splitAudioDir);
+        log.debug("splitAndTranscribeAudio split into {} audio segments", audioSegments.size());
+
         var audioInfos = new ArrayList<AudioInfo>();
+        for (var segment : audioSegments) {
+            var audioBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(segment.path));
+            var audioUrl = "data:audio/wav;base64,%s".formatted(audioBase64);
 
-        // 1. 获取音频时长
-        var ffprobe = new FFprobe();
-        var probeResult = ffprobe.probe(audioFile);
-        var duration = probeResult.getFormat().duration;
-        log.debug("splitAndTranscribeAudio duration: {}", duration);
+            var message = Message.builder()
+                    .role(Message.ROLE.USER)
+                    .type(Message.TYPE.AUDIO)
+                    .audio((audioUrl))
+                    .text("请分析这段音频内容，识别语音类型（如对话、音乐、噪音等）和文字内容")
+                    .build();
 
-        // 2. 直接转录整个音频文件
-        var audioId = DataUtil.getFlakeId();
-        var startTimeMs = 0;
-        var endTimeMs = (int) (duration * 1000);
+            var analysisResult = audioLlm.query(List.of(message), AudioAnalysisResult.class);
+            var result = JSONUtil.convert(analysisResult.getChoices().getFirst().getText(), AudioAnalysisResult.class);
+            log.debug("splitAndTranscribeAudio analyzed segment: {}", segment.path.getFileName());
 
-        // 读取音频文件并转换为 base64
-        var audioBytes = Files.readAllBytes(Path.of(audioFile));
-        var audioBase64 = Base64.getEncoder().encodeToString(audioBytes);
+            var audioInfo = AudioInfo.builder()
+                    .id(DataUtil.getFlakeId())
+                    .type(result.getType())
+                    .text(result.getText())
+                    .startMs(segment.startMs)
+                    .endMs(segment.endMs)
+                    .frameIds(new ArrayList<>())
+                    .build();
 
-        // 使用 IText 转录音频
-        var message = Message.builder()
-                .role(Message.ROLE.USER)
-                .type(Message.TYPE.AUDIO)
-                .audio("data:audio/wav;base64," + audioBase64)
-                .text("请转录这段音频的内容，提取所有对话和重要声音信息")
-                .build();
+            audioInfos.add(audioInfo);
+        }
 
-        var output = audioLlm.query(List.of(message), String.class);
+        log.debug("splitAndTranscribeAudio completed: {} segments", audioInfos.size());
+        return audioInfos;
+    }
 
-        var audioInfo = AudioInfo.builder()
-                .id(audioId)
-                .type("speech")
-                .text(output != null && output.getChoices() != null && !output.getChoices().isEmpty() ? output.getChoices().get(0).getText() : "")
-                .startMs(startTimeMs)
-                .endMs(endTimeMs)
-                .frameIds(new ArrayList<>())
-                .build();
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    static class AudioSegment {
+        public Path path;
+        public Integer startMs;
+        public Integer endMs;
+    }
 
-        // 关联音频和帧
-        for (var frameInfo : frameInfos) {
-            var frameStartMs = Long.parseLong(frameInfo.getStartMs());
-            if (frameStartMs >= startTimeMs && frameStartMs < endTimeMs) {
-                audioInfo.getFrameIds().add(frameInfo.getId());
-                frameInfo.getAudioIds().add(audioInfo.getId());
+
+    @SneakyThrows
+    public ArrayList<Long[]> detectSilence(Path audioFile) {
+        var silences = new ArrayList<Long[]>();
+
+        var process = new ProcessBuilder(
+                "ffmpeg",
+                "-i", audioFile.toString(),
+                "-af", "silencedetect=noise=-30dB:d=0.5",
+                "-f", "null",
+                "-"
+        ).redirectErrorStream(false).start();
+
+        try (var reader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
+            String line;
+            Long silenceStart = null;
+
+            while ((line = reader.readLine()) != null) {
+                if (line.contains("silence_start:")) {
+                    var value = line.split("silence_start:")[1].trim();
+                    if (!value.equals("-inf")) {
+                        silenceStart = (long) (Double.parseDouble(value) * 1000);
+                    }
+                } else if (line.contains("silence_end:")) {
+                    var value = line.split("silence_end:")[1].split(" ")[1].trim();
+                    var silenceEnd = (long) (Double.parseDouble(value) * 1000);
+                    if (silenceStart != null) {
+                        silences.add(new Long[]{silenceStart, silenceEnd});
+                    }
+                    silenceStart = null;
+                }
             }
         }
 
-        audioInfos.add(audioInfo);
-        log.debug("splitAndTranscribeAudio transcribed audio: {}, text: {}", audioId, audioInfo.getText());
+        process.waitFor(60, TimeUnit.SECONDS);
+        return silences;
+    }
 
-        return audioInfos;
+    private ArrayList<AudioSegment> extractAudioSegments(Path audioFile, ArrayList<Long[]> silences, Path outputDir) throws Exception {
+        var segments = new ArrayList<AudioSegment>();
+
+        var ffprobe = new FFprobe();
+        var probeResult = ffprobe.probe(audioFile.toString());
+        var durationMs = (long) (probeResult.getFormat().duration * 1000);
+
+        var audioStarts = new ArrayList<Long>();
+        var audioEnds = new ArrayList<Long>();
+
+        if (silences.isEmpty()) {
+            audioStarts.add(0L);
+            audioEnds.add(durationMs);
+        } else {
+            var firstSilence = silences.get(0);
+            if (firstSilence[0] > 0) {
+                audioStarts.add(0L);
+                audioEnds.add(firstSilence[0]);
+            }
+
+            for (var i = 0; i < silences.size() - 1; i++) {
+                var currentEnd = silences.get(i)[1];
+                var nextStart = silences.get(i + 1)[0];
+                if (nextStart > currentEnd) {
+                    audioStarts.add(currentEnd);
+                    audioEnds.add(nextStart);
+                }
+            }
+
+            var lastSilence = silences.get(silences.size() - 1);
+            if (durationMs > lastSilence[1]) {
+                audioStarts.add(lastSilence[1]);
+                audioEnds.add(durationMs);
+            }
+        }
+
+        var ffmpeg = new FFmpeg();
+        for (var i = 0; i < audioStarts.size(); i++) {
+            var startMs = audioStarts.get(i);
+            var endMs = audioEnds.get(i);
+            var durationSec = (endMs - startMs) / 1000.0;
+
+            if (durationSec < 0.5) {
+                log.debug("extractAudioSegments skipping segment {}-{} (too short)", startMs, endMs);
+                continue;
+            }
+
+            var outputFile = outputDir.resolve("%s_%s.wav".formatted(startMs, endMs));
+            var ffmpegBuilder = new FFmpegBuilder()
+                    .setInput(audioFile.toString())
+                    .setStartOffset(startMs, TimeUnit.MILLISECONDS)
+                    .addOutput(outputFile.toString())
+                    .addExtraArgs("-t", String.valueOf(durationSec))
+                    .done();
+
+            ffmpeg.run(ffmpegBuilder);
+            log.debug("extractAudioSegments extracted segment: {}-{}ms", startMs, endMs);
+
+            segments.add(AudioSegment.builder()
+                    .path(outputFile)
+                    .startMs(startMs.intValue())
+                    .endMs(endMs.intValue())
+                    .build());
+        }
+
+        return segments;
     }
 
     /**
