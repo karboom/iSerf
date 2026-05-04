@@ -3,6 +3,7 @@ package me.karboom.java.iSerf.server.protocol;
 import cn.hutool.core.util.IdUtil;
 import com.corundumstudio.socketio.*;
 import com.corundumstudio.socketio.listener.DataListener;
+import com.corundumstudio.socketio.listener.EventInterceptor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
@@ -27,6 +28,11 @@ import java.util.function.Function;
  */
 @Slf4j
 public abstract class Websocket {
+
+    /**
+     * 关闭状态下的拒绝消息
+     */
+    private static final String SHUTTING_DOWN_ERROR = "{\"error\":\"server is shutting down\"}";
 
     protected SocketIOServer server;
 
@@ -61,6 +67,11 @@ public abstract class Websocket {
      */
     private Map<String, UUID> agentClient = new HashMap<>();
 
+    /**
+     * 关闭状态标志
+     */
+    private volatile boolean isShuttingDown = false;
+
 
     public Websocket (String clusterIp, Integer port, IMessageBus messageBus, IMetaData metaData) {
         this.id = DataUtil.getFlakeId();
@@ -82,12 +93,37 @@ public abstract class Websocket {
             setReuseAddress(true);
         }});
 
+
+        // 添加连接授权监听，关闭状态下拒绝新连接
+        // 使用 sleep 让连接超时，触发 Nginx upstream 超时 failover 到下一个节点
+        // Nginx 默认 proxy_next_upstream 包含 timeout，但不包含 http_401
+        // 如果 Nginx 配置了 proxy_next_upstream error timeout http_401，则可以直接返回 FAILED_AUTHORIZATION
+        config.setAuthorizationListener(data -> {
+            if (isShuttingDown) {
+                // 阻塞让 Nginx 等待超时，自动切换到下一个 upstream 节点
+                // 超时时间应大于 Nginx 的 proxy_connect_timeout（默认 60 秒）
+                try {
+                    Thread.sleep(70000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return AuthorizationResult.FAILED_AUTHORIZATION;
+            }
+            return AuthorizationResult.SUCCESSFUL_AUTHORIZATION;
+        });
+
         server = new SocketIOServer(config);
 
         // Agent 命名空间
         var agentNamespace = server.addNamespace("/user");
         setupUserNS(agentNamespace);
 
+
+        // 注册JVM关闭钩子，监听SIGTERM/SIGINT信号
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            log.debug("start Received shutdown signal, setting isShuttingDown to true");
+            isShuttingDown = true;
+        }, "websocket-shutdown-hook"));
 
         server.start();
 
@@ -97,7 +133,11 @@ public abstract class Websocket {
     }
 
     public void stop() {
+        isShuttingDown = true;
         metaData.removeNode(this.id);
+        if (server != null) {
+            server.stop();
+        }
     }
 
 
@@ -114,7 +154,7 @@ public abstract class Websocket {
      *  agent/toolCall: {agentId, toolCallId}。
      *
      *  客户端监听服务端事件
-     *  agent/message: {"agentId":"xxx","item":{}}
+     *  agent/message: {"agentId":"xxx","message":{}}
      *
      *
      */
@@ -153,7 +193,7 @@ public abstract class Websocket {
             if (agent != null) {
 
                 agent.subscribe(item -> {
-                    var messageJson = "{\"agentId\":\"%s\",\"item\":%s}".formatted(agentId, JSONUtil.stringify(item));
+                    var messageJson = "{\"agentId\":\"%s\",\"message\":%s}".formatted(agentId, JSONUtil.stringify(item));
 
                     switch (client) {
                         case SocketIOClient ioClient -> {
@@ -235,6 +275,11 @@ public abstract class Websocket {
 
             switch (type) {
                 case "proxy" -> {
+                    if (isShuttingDown) {
+                        var msg = "%s|%s|%s|%s".formatted(this.id, "reverse", "ack", SHUTTING_DOWN_ERROR);
+                        messageBus.publish("%s-message".formatted(sourceNode), msg);
+                        return;
+                    }
                     var handler = userEventHandler.get(event);
                     if (handler != null) {
                         var result = handler.apply(sourceNode, bodyJson);
@@ -300,8 +345,23 @@ public abstract class Websocket {
 
     protected void setupUserNS(SocketIONamespace userNS) {
         initUserEventHandler();
+        
+        // 添加事件拦截器，关闭状态下统一拒绝
+        userNS.addEventInterceptor(new EventInterceptor() {
+            @Override
+            public void onEvent(com.corundumstudio.socketio.transport.NamespaceClient client, String eventName, java.util.List<Object> args, AckRequest ackRequest) {
+                if (isShuttingDown) {
+                    ackRequest.sendAckData(SHUTTING_DOWN_ERROR);
+                }
+            }
+        });
+        
         userEventHandler.forEach((event, handler) -> {
             userNS.addEventListener(event, String.class, (client, dataJson, ackSender) -> {
+                if (isShuttingDown) {
+                    ackSender.sendAckData(SHUTTING_DOWN_ERROR);
+                    return;
+                }
                 var result = handler.apply(client, dataJson);
                 if (result != null) {
                     ackSender.sendAckData(result);
