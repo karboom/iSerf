@@ -80,6 +80,7 @@ public class OpenAI implements IText {
             var listener = new EventSourceListener() {
                 @Override
                 public void onOpen(EventSource eventSource, Response response) {
+                    System.out.println("open");
                 }
 
                 @Override
@@ -99,6 +100,7 @@ public class OpenAI implements IText {
 
                 @Override
                 public void onClosed(EventSource eventSource) {
+                    System.out.println("close");
 //                    sink.complete();
                 }
 
@@ -111,7 +113,7 @@ public class OpenAI implements IText {
             var factory = EventSources.createFactory(HttpUtil.getClient());
             var eventSource = factory.newEventSource(request, listener);
 
-//            sink.onDispose(eventSource::cancel);
+            sink.onDispose(eventSource::cancel);
         });
     }
 

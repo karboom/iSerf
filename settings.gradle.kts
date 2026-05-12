@@ -1,4 +1,4 @@
-rootProject.name = "iSlogger"
+rootProject.name = "iSerf"
 
 dependencyResolutionManagement {
     repositories {
