@@ -1,19 +1,21 @@
 plugins {
-    id("java")
+    id("java-library")
     id("com.vanniktech.maven.publish") version "0.36.0"
     id("org.graalvm.buildtools.native") version "0.11.4"
+    id("com.gradleup.shadow") version "9.4.1"
+    id ("io.freefair.lombok") version "9.5.0"
 }
 
 group = "io.github.karboom"
-version = "0.65.0-alpha"
+version = "0.7.0-alpha"
 
 
 dependencies {
 
     implementation("io.projectreactor:reactor-core:3.8.0-RC1")
-    implementation("tools.jackson.core:jackson-databind:3.0.4")
-    implementation("tools.jackson.dataformat:jackson-dataformat-cbor:3.0.4")
 
+    api("tools.jackson.core:jackson-databind:3.0.4")
+    implementation("tools.jackson.dataformat:jackson-dataformat-cbor:3.0.4")
     // Source: https://mvnrepository.com/artifact/tools.jackson.module/jackson-module-blackbird
     implementation("tools.jackson.module:jackson-module-blackbird:3.0.0")
 
@@ -65,12 +67,12 @@ dependencies {
     implementation("org.openjdk.jol:jol-core:0.17")
 
 
-    implementation("org.projectlombok:lombok:1.18.42")
-    annotationProcessor("org.projectlombok:lombok:1.18.42")
+//    implementation("org.projectlombok:lombok:1.18.42")
+//    annotationProcessor("org.projectlombok:lombok:1.18.42")
 
 
-    testCompileOnly("org.projectlombok:lombok:1.18.42")
-    testAnnotationProcessor("org.projectlombok:lombok:1.18.42")
+//    testCompileOnly("org.projectlombok:lombok:1.18.42")
+//    testAnnotationProcessor("org.projectlombok:lombok:1.18.42")
 
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
@@ -130,8 +132,15 @@ mavenPublishing {
     }
 }
 
+tasks.shadowJar {
+    isZip64 = true
+}
+
 tasks.test {
     useJUnitPlatform()
 
-    jvmArgs("-Xmx6g", "-XX:MaxDirectMemorySize=4g")
+    jvmArgs(
+        "-Xmx6g",
+        "-XX:MaxDirectMemorySize=4g"
+    )
 }
