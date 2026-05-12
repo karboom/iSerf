@@ -56,6 +56,8 @@ public abstract class Websocket {
     // Todo 没有经过stop，异常退出了，如何解决数据
     public IMetaData metaData;
 
+    public List<AuthorizationListener> userAuthListener = new ArrayList<>();
+    public List<AuthorizationListener> sysAuthListener = new ArrayList<>();
 
     /**
      *  agent 缓存：AgentId 对应 Nodes 索引，-1 表示不明确
@@ -94,11 +96,8 @@ public abstract class Websocket {
         }});
 
 
-        // 添加连接授权监听，关闭状态下拒绝新连接
-        // 使用 sleep 让连接超时，触发 Nginx upstream 超时 failover 到下一个节点
-        // Nginx 默认 proxy_next_upstream 包含 timeout，但不包含 http_401
-        // 如果 Nginx 配置了 proxy_next_upstream error timeout http_401，则可以直接返回 FAILED_AUTHORIZATION
-        config.setAuthorizationListener(data -> {
+        // 系统授权链：优先检查关闭状态
+        sysAuthListener.addFirst(data -> {
             if (isShuttingDown) {
                 // 阻塞让 Nginx 等待超时，自动切换到下一个 upstream 节点
                 // 超时时间应大于 Nginx 的 proxy_connect_timeout（默认 60 秒）
@@ -109,6 +108,25 @@ public abstract class Websocket {
                 }
                 return AuthorizationResult.FAILED_AUTHORIZATION;
             }
+            return AuthorizationResult.SUCCESSFUL_AUTHORIZATION;
+        });
+
+        // 添加连接授权监听，依次调用 sysAuthListener 和 userAuthListener，失败则不继续
+        config.setAuthorizationListener(data -> {
+            for (var listener : sysAuthListener) {
+                var result = listener.getAuthorizationResult(data);
+                if (result != AuthorizationResult.SUCCESSFUL_AUTHORIZATION) {
+                    return AuthorizationResult.FAILED_AUTHORIZATION;
+                }
+            }
+
+            for (var listener : userAuthListener) {
+                var result = listener.getAuthorizationResult(data);
+                if (result != AuthorizationResult.SUCCESSFUL_AUTHORIZATION) {
+                    return AuthorizationResult.FAILED_AUTHORIZATION;
+                }
+            }
+
             return AuthorizationResult.SUCCESSFUL_AUTHORIZATION;
         });
 
