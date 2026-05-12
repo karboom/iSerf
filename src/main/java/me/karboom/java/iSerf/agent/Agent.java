@@ -34,8 +34,10 @@ import reactor.util.function.Tuples;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -112,6 +114,14 @@ public class Agent {
 
         run();
         this.recovery();
+    }
+
+    /**
+     * 支持自定义文件夹初始化
+     * path/system-prompt.md 系统提示词
+     */
+    public Agent(String id, Path path, IText llm, List<Tool<?>> tools) throws IOException {
+        this(id, Files.readString(path.resolve("system-prompt.md"), StandardCharsets.UTF_8), llm, tools);
     }
 
 

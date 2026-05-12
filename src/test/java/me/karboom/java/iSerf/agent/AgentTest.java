@@ -12,6 +12,8 @@ import org.junit.jupiter.api.Test;
 import tech.tablesaw.api.StringColumn;
 import tech.tablesaw.api.Table;
 
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -546,6 +548,24 @@ class AgentTest {
             textItems.forEach(item -> System.out.println("诗词内容：" + item.getText()));
             
             assertTrue(true, "interrupt 方法执行成功，且中断后能正常响应新请求");
+        });
+    }
+
+    /**
+     * 测试 Path 初始化构造函数
+     */
+    @Test
+    void testConstructor() {
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            var llm = llmTest.getLlm();
+            var testPath = Paths.get("src/test/resources/agent/path-init-test");
+            var agent = new Agent("test-path-init-agent", testPath, llm, tools) {};
+
+            assertEquals("test-path-init-agent", agent.id);
+            assertEquals("你是一个基于路径初始化的测试助手。", agent.prompt);
+            assertEquals(1, agent.memory.size());
+            assertEquals(Message.ROLE.SYSTEM, agent.memory.getFirst().getRole());
+            assertEquals("你是一个基于路径初始化的测试助手。", agent.memory.getFirst().getText());
         });
     }
 }
