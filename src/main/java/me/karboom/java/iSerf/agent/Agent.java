@@ -95,7 +95,7 @@ public class Agent {
      * @param llm   LLM 实例
      * @param tools 工具列表
      */
-    public Agent(String id, String prompt, IText llm, List<Tool<?>> tools) {
+    public Agent(String id, String prompt, ILlmProvider llm, List<Tool<?>> tools) {
         this.id = id;
         this.prompt = prompt;
         this.tools = tools != null ? tools : new ArrayList<>();
@@ -110,12 +110,20 @@ public class Agent {
         this.broadcastPool =  Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Broadcast-", 0).factory());
 
         this.persistence = new NonePersistence();
-        this.llmProvider = new FixedLlmProvider(llm);
+        this.llmProvider = llm;
 
         run();
         this.recovery();
     }
 
+    public Agent(String id, String prompt, IText llm, List<Tool<?>> tools) {
+        this(id, prompt, new FixedLlmProvider(llm), tools);
+    }
+
+    public Agent(String id, ILlmProvider provider, Path path) throws IOException {
+        var tools = new Loader(2000).fromToolDir(path.resolve("tool"), null);
+        this(id, path, provider, tools);
+    }
     /**
      * 支持自定义文件夹初始化
      * path/system-prompt.md 系统提示词
@@ -124,9 +132,8 @@ public class Agent {
         this(id, Files.readString(path.resolve("system-prompt.md"), StandardCharsets.UTF_8), llm, tools);
     }
 
-    public Agent(String id, Path directory, IText llm) throws IOException{
-        var tools = new Loader(2000).fromToolDir(directory.resolve("tool"), null);
-        this(id, directory, llm, tools);
+    public Agent(String id, Path path, ILlmProvider llm, List<Tool<?>> tools) throws IOException {
+        this(id, Files.readString(path.resolve("system-prompt.md"), StandardCharsets.UTF_8), llm, tools);
     }
 
 
