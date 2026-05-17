@@ -1,10 +1,12 @@
 package me.karboom.java.iSerf.agent.tool;
 
-import me.karboom.java.iSerf.agent.tool.Loader;
+import me.karboom.java.iSerf.agent.tool.Context;
 import me.karboom.java.iSerf.agent.tool.Tool;
+import me.karboom.java.iSerf.agent.tool.WeatherTool;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
 import java.util.HashMap;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -14,7 +16,36 @@ public class LoaderTest {
 
     @BeforeEach
     void setUp() {
-        loader = new Loader(5); // 5秒超时
+        loader = new Loader(5);
+    }
+
+    @Test
+    void testFromToolDir() {
+        var toolDir = Path.of("src/test/resources/agent/tool");
+        var tools = loader.fromToolDir(toolDir, null);
+
+        assertNotNull(tools, "应该返回非空列表");
+        assertEquals(2, tools.size(), "应该找到2个工具");
+
+        var weatherTool = tools.stream()
+                .filter(tool -> "weather".equals(tool.getName()))
+                .findFirst();
+        assertTrue(weatherTool.isPresent(), "应该找到weather工具");
+
+        var tool = weatherTool.get();
+        assertEquals("weather", tool.getName());
+        assertEquals("天气查询工具", tool.getDescription());
+        assertEquals(Tool.TYPE.FUNCTION, tool.getType());
+        assertNotNull(tool.getFunction(), "FUNCTION类型工具的function字段不应为空");
+
+        var params = new WeatherTool.Parameter();
+        params.setCity("Beijing");
+        params.setDays(7);
+        var ctx = Context.builder().build();
+        var result = ((FunctionWrapper<Object>) tool.getFunction()).run(ctx, (Object) params);
+        assertNotNull(result, "调用结果不应为空");
+        assertNotNull(result.getLlm(), "调用结果的llm字段不应为空");
+        assertEquals("Weather for Beijing: 7 days", result.getLlm());
     }
 
     @Test

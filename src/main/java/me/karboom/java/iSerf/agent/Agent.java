@@ -124,6 +124,11 @@ public class Agent {
         this(id, Files.readString(path.resolve("system-prompt.md"), StandardCharsets.UTF_8), llm, tools);
     }
 
+    public Agent(String id, Path directory, IText llm) throws IOException{
+        var tools = new Loader(2000).fromToolDir(directory.resolve("tool"), null);
+        this(id, directory, llm, tools);
+    }
+
 
 
     public String eventTransId;

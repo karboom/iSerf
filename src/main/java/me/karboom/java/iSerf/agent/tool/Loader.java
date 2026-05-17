@@ -7,6 +7,8 @@ import io.modelcontextprotocol.client.transport.*;
 import lombok.SneakyThrows;
 import me.karboom.java.iSerf.util.CodeUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
+import me.karboom.java.iSerf.util.YAMLUtil;
+import tools.jackson.databind.node.ObjectNode;
 import okhttp3.*;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -30,6 +32,113 @@ public class Loader {
         this.timeout = timeout != null ? timeout : 30;
     }
 
+    /**
+     * 遍历目录解析yaml或者json文件为Tool工具类
+     * - 如果input.type==FUNCTION，需要从input.class字段解析出类名，加载之后赋值tool.function字段
+     * @param directory 扫描的目录
+     * @param targetTool 文件名称（不含后缀）不匹配的跳过
+     * @return 工具列表
+     */
+    @SneakyThrows
+    public List<Tool<?>> fromToolDir(Path directory, String targetTool) {
+        var tools = new ArrayList<Tool<?>>();
+
+        if (!Files.exists(directory)) {
+            return tools;
+        }
+
+        try (var dirStream = Files.list(directory)) {
+            var files = dirStream.filter(Files::isRegularFile).toList();
+
+            for (var file : files) {
+                var fileName = file.getFileName().toString();
+                var extension = "";
+                var dotIndex = fileName.lastIndexOf('.');
+                if (dotIndex > 0) {
+                    extension = fileName.substring(dotIndex + 1).toLowerCase();
+                }
+
+                if (!"yaml".equals(extension) && !"yml".equals(extension) && !"json".equals(extension)) {
+                    continue;
+                }
+
+                var baseName = dotIndex > 0 ? fileName.substring(0, dotIndex) : fileName;
+                if (targetTool != null && !targetTool.isEmpty() && !targetTool.equals(baseName)) {
+                    continue;
+                }
+
+                var content = Files.readString(file);
+                ObjectNode node;
+                if ("json".equals(extension)) {
+                    node = JSONUtil.parse(content);
+                } else {
+                    node = YAMLUtil.parse(content.getBytes());
+                }
+
+                var nameNode = node.path("name");
+                if (nameNode.isMissingNode() || nameNode.isNull()) {
+                    continue;
+                }
+                var name = nameNode.asText(baseName);
+
+                var descriptionNode = node.path("description");
+                var description = descriptionNode.isMissingNode() || descriptionNode.isNull() ? null : descriptionNode.asText();
+
+                var typeNode = node.path("type");
+                var type = typeNode.isMissingNode() || typeNode.isNull() ? null : typeNode.asText();
+
+                var classNode = node.path("class");
+                var className = classNode.isMissingNode() || classNode.isNull() ? null : classNode.asText();
+
+                var parameters = new ArrayList<Tool.Parameter>();
+                var paramsNode = node.path("parameters");
+                if (!paramsNode.isMissingNode() && !paramsNode.isNull() && paramsNode.isArray()) {
+                    paramsNode.forEach(paramNode -> {
+                        var paramName = paramNode.path("name").isMissingNode() ? null : paramNode.path("name").asText();
+                        if (paramName == null) {
+                            return;
+                        }
+                        var paramType = paramNode.path("type").isMissingNode() ? "string" : paramNode.path("type").asText();
+                        var paramDescNode = paramNode.path("description");
+                        var paramDesc = paramDescNode.isMissingNode() || paramDescNode.isNull() ? null : paramDescNode.asText();
+                        var requiredNode = paramNode.path("required");
+                        var required = !requiredNode.isMissingNode() && requiredNode.asBoolean(false);
+
+                        var itemsNode = paramNode.path("items");
+                        List<Tool.Parameter> properties = null;
+                        if (!itemsNode.isMissingNode() && !itemsNode.isNull() && itemsNode.has("type")) {
+                            var itemType = itemsNode.path("type").asText("string");
+                            properties = new ArrayList<>();
+                            properties.add(new Tool.Parameter("item", itemType, null, false, null));
+                        }
+
+                        parameters.add(new Tool.Parameter(paramName, paramType, paramDesc, required, properties));
+                    });
+                }
+
+                FunctionWrapper<Object> function = null;
+                if (Tool.TYPE.FUNCTION.equals(type) && className != null) {
+                    var clazz = Class.forName(className);
+                    var instance = clazz.getDeclaredConstructor().newInstance();
+                    function = (FunctionWrapper<Object>) instance;
+                }
+
+                var toolBuilder = Tool.<Object>builder()
+                        .name(name)
+                        .type(type != null ? type : Tool.TYPE.FUNCTION)
+                        .function(function)
+                        .parameters(parameters);
+
+                if (description != null) {
+                    toolBuilder.description(description);
+                }
+
+                tools.add(toolBuilder.build());
+            }
+        }
+
+        return tools;
+    }
     /**
      * 遍历目录，所有的一级子文件夹为工具名称，二级子文件夹为工具的版本
      * 工具文件夹下的 info.json 记录了当前引用的版本

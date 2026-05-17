@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "io.github.karboom"
-version = "0.7.0-alpha"
+version = "0.71.0-alpha"
 
 
 dependencies {
@@ -15,19 +15,20 @@ dependencies {
     implementation("io.projectreactor:reactor-core:3.8.0-RC1")
 
     api("tools.jackson.core:jackson-databind:3.0.4")
-    implementation("tools.jackson.dataformat:jackson-dataformat-cbor:3.0.4")
+    api("tools.jackson.dataformat:jackson-dataformat-cbor:3.0.4")
+    api("tools.jackson.dataformat:jackson-dataformat-yaml:3.0.4")
     // Source: https://mvnrepository.com/artifact/tools.jackson.module/jackson-module-blackbird
-    implementation("tools.jackson.module:jackson-module-blackbird:3.0.0")
+    api("tools.jackson.module:jackson-module-blackbird:3.0.0")
 
-    implementation("com.squareup.okhttp3:okhttp:5.3.2")
-    implementation("com.squareup.okhttp3:okhttp-sse:5.3.2")
-
-
-    implementation("com.github.victools:jsonschema-generator:4.38.0")
-    implementation("com.github.victools:jsonschema-module-jackson:4.38.0")
+    api("com.squareup.okhttp3:okhttp:5.3.2")
+    api("com.squareup.okhttp3:okhttp-sse:5.3.2")
 
 
-    implementation("com.openai:openai-java:4.6.1")
+    api("com.github.victools:jsonschema-generator:4.38.0")
+    api("com.github.victools:jsonschema-module-jackson:4.38.0")
+
+
+    api("com.openai:openai-java:4.6.1")
     implementation("io.modelcontextprotocol.sdk:mcp:0.14.1")
     implementation("io.modelcontextprotocol.sdk:mcp-spring-webflux:0.14.1")
     implementation("io.modelcontextprotocol.sdk:mcp-spring-webmvc:0.14.1")
