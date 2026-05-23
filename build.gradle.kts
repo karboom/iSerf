@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "io.github.karboom"
-version = "0.72.0-alpha"
+version = "0.73.0-alpha"
 
 
 dependencies {
@@ -135,6 +135,11 @@ mavenPublishing {
 
 tasks.shadowJar {
     isZip64 = true
+}
+
+tasks.withType<Javadoc> {
+    exclude("**/*.json")
+    enabled = false
 }
 
 tasks.test {

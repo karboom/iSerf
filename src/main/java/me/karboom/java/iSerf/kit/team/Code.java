@@ -1,13 +1,12 @@
-package me.karboom.java.iSlogger.kit.team;
+package me.karboom.java.iSerf.kit.team;
 
-import me.karboom.java.iSlogger.agent.Agent;
-import me.karboom.java.iSlogger.llm.text.OpenAI;
-import me.karboom.java.iSlogger.team.Team;
-import me.karboom.java.iSlogger.tool.Tool;
+import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
+import me.karboom.java.iSerf.llm.text.OpenAI;
+import me.karboom.java.iSerf.team.Team;
 
 import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 public class Code {
 
@@ -31,7 +30,7 @@ public class Code {
         llmConfig.put("temperature", 0.7);
         llmConfig.put("max_tokens", 1000);
 
-        var llm = new OpenAI("qwen-plus", llmConfig, apiKey, url, 3);
+        var llm = new FixedLlmProvider(new OpenAI("qwen-plus", llmConfig, apiKey, url, 3));
 
         // 创建团队成员
         var leader = new Agent("leader", "你是一个技术负责人，负责整个项目的架构设计和技术决策", llm, null) {};

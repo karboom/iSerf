@@ -1,6 +1,7 @@
-package me.karboom.java.iSerf.agent;
+package me.karboom.java.iSerf.agent.persistence;
 
-import me.karboom.java.iSerf.agent.persistence.NfsPersistence;
+import me.karboom.java.iSerf.agent.Event;
+import me.karboom.java.iSerf.agent.Message;
 import me.karboom.java.iSerf.util.DataUtil;
 import org.junit.jupiter.api.Test;
 

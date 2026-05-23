@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Agent 性能测试类
  */
-class PerformanceTest {
+class AgentPerfTest {
 
     private Map<String, Object> llmConfig;
     private List<Tool<?>> tools;

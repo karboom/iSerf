@@ -89,7 +89,7 @@ public class Agent {
     public List<CallCache> toolCallCaches = new ArrayList<>();
 
     /**
-     * 构造函数
+     * Java代码构造函数
      *
      * @param id    Agent ID
      * @param llm   LLM 实例
@@ -101,7 +101,7 @@ public class Agent {
         this.tools = tools != null ? tools : new ArrayList<>();
         this.queue = new PriorityBlockingQueue<>(100, Comparator.comparing(Event::getPriority));
 
-        this.memory.add(Message.builder().id(id).role(Message.ROLE.SYSTEM).text(this.prompt).type(Message.TYPE.TEXT).isForgotten(0).eventId("0").build());
+        this.memory.add(me.karboom.java.iSerf.agent.Message.builder().id(id).role(me.karboom.java.iSerf.agent.Message.ROLE.SYSTEM).text(this.prompt).type(me.karboom.java.iSerf.agent.Message.TYPE.TEXT).isForgotten(0).eventId("0").build());
 
         this.sink = Sinks.many().multicast().onBackpressureBuffer();
         this.broadcast = sink.asFlux();
@@ -116,26 +116,14 @@ public class Agent {
         this.recovery();
     }
 
-    public Agent(String id, String prompt, IText llm, List<Tool<?>> tools) {
-        this(id, prompt, new FixedLlmProvider(llm), tools);
-    }
-
-    public Agent(String id, ILlmProvider provider, Path path) throws IOException {
-        var tools = new Loader(2000).fromToolDir(path.resolve("tool"), null);
-        this(id, path, provider, tools);
-    }
     /**
-     * 支持自定义文件夹初始化
+     * 文件系统构造函数
      * path/system-prompt.md 系统提示词
      */
-    public Agent(String id, Path path, IText llm, List<Tool<?>> tools) throws IOException {
-        this(id, Files.readString(path.resolve("system-prompt.md"), StandardCharsets.UTF_8), llm, tools);
+    public Agent(String id, ILlmProvider provider, Path path) throws IOException {
+        var tools = new Loader(2000).fromToolDir(path.resolve("tool"), null);
+        this(id, Files.readString(path.resolve("system-prompt.md"), StandardCharsets.UTF_8), provider, tools);
     }
-
-    public Agent(String id, Path path, ILlmProvider llm, List<Tool<?>> tools) throws IOException {
-        this(id, Files.readString(path.resolve("system-prompt.md"), StandardCharsets.UTF_8), llm, tools);
-    }
-
 
 
     public String eventTransId;
@@ -225,9 +213,9 @@ public class Agent {
 //                                        var callResult = invokeToolCalls(calls);
 //
 //                                        // 按结果类型分组处理
-//                                        var directCalls = new ArrayList<Communication.ToolCall>();
-//                                        var errorCalls = new ArrayList<Communication.ToolCall>();
-//                                        var llmCalls = new ArrayList<Communication.ToolCall>();
+//                                        var directCalls = new ArrayList<Message.ToolCall>();
+//                                        var errorCalls = new ArrayList<Message.ToolCall>();
+//                                        var llmCalls = new ArrayList<Message.ToolCall>();
 //
 //                                        for (var call : callResult) {
 //                                            if (call.result.getDirect() != null) {
@@ -243,14 +231,14 @@ public class Agent {
 //
 //                                        // 处理DIRECT类型
 //                                        if (!directCalls.isEmpty()) {
-//                                            for (Communication.ToolCall call : directCalls) {
-//                                                sink.tryEmitNext(Communication.builder().text(JSONUtil.stringify(call.getResult().getDirect())).isSegment(0).build());
+//                                            for (Message.ToolCall call : directCalls) {
+//                                                sink.tryEmitNext(Message.builder().text(JSONUtil.stringify(call.getResult().getDirect())).isSegment(0).build());
 //                                            }
 //                                        }
 //
 //                                        // 处理ERROR类型
 //                                        if (!errorCalls.isEmpty()) {
-//                                            sink.tryEmitNext(Communication.builder().text("我正在更新代码，请您稍后").build());
+//                                            sink.tryEmitNext(Message.builder().text("我正在更新代码，请您稍后").build());
 //                                            // Todo 判断IFunction
 //
 //                                            for (var toolCall : errorCalls) {
@@ -261,13 +249,13 @@ public class Agent {
 //
 //                                        // 处理LLM类型
 //                                        if (!llmCalls.isEmpty()) {
-//                                            var messageInvoke = Communication.builder()
-//                                                    .role(Communication.ROLE.ASSISTANT)
+//                                            var messageInvoke = Message.builder()
+//                                                    .role(Message.ROLE.ASSISTANT)
 //                                                    .toolCalls(llmCalls)
 //                                                    .build();
 //
-//                                            var messageRes = Communication.builder()
-//                                                    .role(Communication.ROLE.TOOL)
+//                                            var messageRes = Message.builder()
+//                                                    .role(Message.ROLE.TOOL)
 //                                                    .toolCalls(llmCalls)
 //                                                    .build();
 //
@@ -286,11 +274,11 @@ public class Agent {
 //                            return other;
 //                        }
 //                    })
-//                    .reduce(Communication.builder().build(), (acc, chunk) -> {
+//                    .reduce(Message.builder().build(), (acc, chunk) -> {
 //
 //                        var text = ((ChatCompletionChunk) chunk).choices().get(0).delta().content().get();
 //                        if (format == null) {
-//                            sink.tryEmitNext(Communication.builder().text(text).isSegment(1).build());
+//                            sink.tryEmitNext(Message.builder().text(text).isSegment(1).build());
 //                        }
 //                        acc.setText(acc.getText() + text);
 //
@@ -301,7 +289,7 @@ public class Agent {
 //                    })
 //                    .map(f -> {
 //                        f.setIsSegment(0);
-//                        f.setRole(Communication.ROLE.ASSISTANT);
+//                        f.setRole(Message.ROLE.ASSISTANT);
 //
 //                        if (format != null) {
 //                            f.setFormatted(JSONUtil.parse(f.getText(), format));
@@ -323,10 +311,10 @@ public class Agent {
     @SneakyThrows
     public void send(String message, Class<?> cls) {
         var eventId = DataUtil.getFlakeId();
-        var item = Message
+        var item = me.karboom.java.iSerf.agent.Message
                 .builder()
-                .type(Message.TYPE.TEXT)
-                .role(Message.ROLE.USER)
+                .type(me.karboom.java.iSerf.agent.Message.TYPE.TEXT)
+                .role(me.karboom.java.iSerf.agent.Message.ROLE.USER)
                 .id("")
                 .isForgotten(0)
                 .text(message).build();
@@ -356,9 +344,9 @@ public class Agent {
         return flux
                 .publishOn(Schedulers.fromExecutor(this.eventPool))
                 .reduce(Tuples.of(
-                        Message.builder().type(Message.TYPE.THINKING).text("").isSegment(0).build(),
+                        me.karboom.java.iSerf.agent.Message.builder().type(me.karboom.java.iSerf.agent.Message.TYPE.THINKING).text("").isSegment(0).build(),
                         new ArrayList<>(),
-                        Message.builder().role(Message.ROLE.ASSISTANT).type(Message.TYPE.TEXT).text("").isSegment(0).eventId(event.getId()).build()
+                        me.karboom.java.iSerf.agent.Message.builder().role(me.karboom.java.iSerf.agent.Message.ROLE.ASSISTANT).type(me.karboom.java.iSerf.agent.Message.TYPE.TEXT).text("").isSegment(0).eventId(event.getId()).build()
                 ), (acc, chunk) -> {
                     var thinkingItem = acc.getT1();
                     var toolCall = acc.getT2();
@@ -378,7 +366,7 @@ public class Agent {
                             thinkingItem.setId(UUID.randomUUID().toString()); // 为thinkingItem设置ID
                             thinkingItem.setText(thinkingItem.getText() + thinking);
 
-                            var thinkingSegment = Message.builder().text(thinking.toString()).isSegment(1).build();
+                            var thinkingSegment = me.karboom.java.iSerf.agent.Message.builder().text(thinking.toString()).isSegment(1).build();
 
                             sink.tryEmitNext(thinkingSegment);
                         } else if (toolCalls != null) {
@@ -404,7 +392,7 @@ public class Agent {
 
 
                             if (format == null) {
-                                var contentItemSegment = Message.builder().id(UUID.randomUUID().toString()).role(contentItem.getRole()).type(Message.TYPE.TEXT).text(contentText).isSegment(1).build();
+                                var contentItemSegment = me.karboom.java.iSerf.agent.Message.builder().id(UUID.randomUUID().toString()).role(contentItem.getRole()).type(me.karboom.java.iSerf.agent.Message.TYPE.TEXT).text(contentText).isSegment(1).build();
                                 sink.tryEmitNext(contentItemSegment);
                             }
                         } else {
@@ -414,7 +402,7 @@ public class Agent {
 
                     } else if (usage != null) {
                         if (contentItem.getId() != null) {
-                            var usageBuilder = Message.Usage.builder()
+                            var usageBuilder = me.karboom.java.iSerf.agent.Message.Usage.builder()
                                     .total((int) usage.getTotalTokens())
                                     .promptTotal((int) usage.getPromptTokens())
                                     .completionTotal((int) usage.getCompletionTokens())
@@ -437,6 +425,12 @@ public class Agent {
                 });
     }
 
+    /**
+     * 直接调用
+     */
+    public void call(Message message, Class<?> format) {
+
+    }
     // endregion
 
 
@@ -480,8 +474,8 @@ public class Agent {
             return;
         }
 
-        var summaryPrompt = Message.builder()
-                .role(Message.ROLE.USER)
+        var summaryPrompt = me.karboom.java.iSerf.agent.Message.builder()
+                .role(me.karboom.java.iSerf.agent.Message.ROLE.USER)
                 .text("请将以上对话历史压缩为简洁的摘要，保留关键信息和上下文，用于后续对话参考。")
                 .build();
 
@@ -493,10 +487,10 @@ public class Agent {
         if (result != null && result.getChoices() != null && !result.getChoices().isEmpty()) {
             var summaryText = result.getChoices().get(0).getText();
             if (summaryText != null && !summaryText.isEmpty()) {
-                var summaryItem = Message.builder()
+                var summaryItem = me.karboom.java.iSerf.agent.Message.builder()
                         .id(UUID.randomUUID().toString())
-                        .role(Message.ROLE.ASSISTANT)
-                        .type(Message.TYPE.TEXT)
+                        .role(me.karboom.java.iSerf.agent.Message.ROLE.ASSISTANT)
+                        .type(me.karboom.java.iSerf.agent.Message.TYPE.TEXT)
                         .text(summaryText)
                         .isForgotten(0)
                         .eventId(event.getId())
@@ -569,13 +563,13 @@ public class Agent {
                                 toolCallCaches.add(cache);
 
                                 // 触发消息
-                                sink.tryEmitNext(Message.builder().toolCalls(List.of(call)).custom(call.getResult().getDirect()).type(Message.TYPE.CUSTOM).isSegment(0).build());
+                                sink.tryEmitNext(me.karboom.java.iSerf.agent.Message.builder().toolCalls(List.of(call)).custom(call.getResult().getDirect()).type(me.karboom.java.iSerf.agent.Message.TYPE.CUSTOM).isSegment(0).build());
                             }
                         }
 
                         // 处理ERROR类型
                         if (!errorCalls.isEmpty()) {
-                            sink.tryEmitNext(Message.builder().type(Message.TYPE.ERROR).text("我正在更新代码，请您稍后").build());
+                            sink.tryEmitNext(me.karboom.java.iSerf.agent.Message.builder().type(me.karboom.java.iSerf.agent.Message.TYPE.ERROR).text("我正在更新代码，请您稍后").build());
                             // Todo 判断IFunction
 
                             for (var toolCall : errorCalls) {
@@ -586,16 +580,16 @@ public class Agent {
 
                         // 处理LLM类型
                         if (!llmCalls.isEmpty()) {
-                            var messageInvoke = Message.builder()
-                                    .role(Message.ROLE.ASSISTANT)
-                                    .type(Message.TYPE.TEXT)
+                            var messageInvoke = me.karboom.java.iSerf.agent.Message.builder()
+                                    .role(me.karboom.java.iSerf.agent.Message.ROLE.ASSISTANT)
+                                    .type(me.karboom.java.iSerf.agent.Message.TYPE.TEXT)
                                     .toolCalls(llmCalls)
                                     .isForgotten(0)
                                     .eventId(event.getId())
                                     .build();
 
-                            var messageRes = Message.builder()
-                                    .role(Message.ROLE.TOOL)
+                            var messageRes = me.karboom.java.iSerf.agent.Message.builder()
+                                    .role(me.karboom.java.iSerf.agent.Message.ROLE.TOOL)
                                     .eventId(event.getId())
                                     .isForgotten(0)
                                     .toolCalls(llmCalls)
@@ -767,7 +761,7 @@ public class Agent {
                         var prompt = "请根据以下错误信息更新代码:\n\n输入参数：\n\n%s\n\n错误信息: %s\n\n当前代码:\n%s\n\n 请修改runner里面的逻辑，仅需要告诉我最终的代码，不要带markdown标记"
                                 .formatted(toolCall.arguments.toString(), toolCall.getResult().toString(), currentCode);
 
-                        var userMessage = Message.builder()
+                        var userMessage = me.karboom.java.iSerf.agent.Message.builder()
                                 .role("user")
                                 .text(prompt)
                                 .build();
@@ -845,8 +839,8 @@ public class Agent {
         var prompt = "请根据以下错误信息更新代码:\n\n输入参数：\n\n%s\n\n错误信息: %s\n\n当前代码:\n%s\n\n 请修改runner里面的逻辑，仅需要告诉我最终的代码，不要带markdown标记"
                 .formatted(toolCall.arguments.toString(), toolCall.getResult().toString(), currentCode);
 
-        var userMessage = Message.builder()
-                .role(Message.ROLE.USER)
+        var userMessage = me.karboom.java.iSerf.agent.Message.builder()
+                .role(me.karboom.java.iSerf.agent.Message.ROLE.USER)
                 .text(prompt)
                 .build();
 
@@ -943,7 +937,7 @@ public class Agent {
             var toolCallsForChoice = new ArrayList<Message.ToolCall>();
             var outputToolCall = entry.getValue();
 
-            var itemToolCall = Message.ToolCall.builder()
+            var itemToolCall = me.karboom.java.iSerf.agent.Message.ToolCall.builder()
                     .id(outputToolCall.getId())
                     .name(outputToolCall.getName())
                     .arguments(JSONUtil.parse(outputToolCall.getArguments(), HashMap.class))
