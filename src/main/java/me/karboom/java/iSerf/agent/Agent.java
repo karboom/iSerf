@@ -10,16 +10,13 @@ import me.karboom.java.iSerf.agent.persistence.NonePersistence;
 import me.karboom.java.iSerf.agent.tool.*;
 import me.karboom.java.iSerf.billing.ILedger;
 import me.karboom.java.iSerf.billing.Cost;
+import me.karboom.java.iSerf.util.*;
 import org.openjdk.jol.info.GraphLayout;
 import me.karboom.java.iSerf.config.Config;
 import me.karboom.java.iSerf.llm.text.IText;
 import me.karboom.java.iSerf.llm.text.Output;
 import me.karboom.java.iSerf.schedule.ISchedule;
 import me.karboom.java.iSerf.schedule.Plan;
-import me.karboom.java.iSerf.util.CodeUtil;
-import me.karboom.java.iSerf.util.DataUtil;
-import me.karboom.java.iSerf.util.HttpUtil;
-import me.karboom.java.iSerf.util.JSONUtil;
 import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -60,6 +57,8 @@ public class Agent {
 
     // endregion
 
+    // region =========== 成员变量 ============
+
 
     public List<Message> memory = new ArrayList<>();
     protected List<Tool<?>> tools;
@@ -81,6 +80,9 @@ public class Agent {
     public List<Plan> plans;
     public ISchedule schedule;
 
+    public String eventTransId;
+    public Disposable eventDisposable;
+
     public ILedger ledger = Config.getInstance().getDefaultLedger();
 
     /**
@@ -88,6 +90,9 @@ public class Agent {
      */
     public List<CallCache> toolCallCaches = new ArrayList<>();
 
+    // endregion
+
+    // region ============ 构造函数 ===============
     /**
      * Java代码构造函数
      *
@@ -125,10 +130,7 @@ public class Agent {
         this(id, Files.readString(path.resolve("system-prompt.md"), StandardCharsets.UTF_8), provider, tools);
     }
 
-
-    public String eventTransId;
-    public Disposable eventDisposable;
-
+    // endregion
 
     // region ========== 外部调用 ==========
     /**
@@ -426,13 +428,48 @@ public class Agent {
     }
 
     /**
-     * 直接调用
+     * 直接调用智能体，执行临时需求
+     * - 拼接系统提示词、message
+     * - 调用llm.query，然后将结果转为Message
      */
-    public void call(Message message, Class<?> format) {
+    @SneakyThrows
+    public Message call(Message message, Class<?> format) {
+        log.debug("call message text: %s".formatted(message.getText()));
 
+        var systemMessage = Message.builder()
+                .role(Message.ROLE.SYSTEM)
+                .text(this.prompt)
+                .build();
+
+        var messages = List.of(systemMessage, message);
+
+        var result = llmProvider.get(null, format, null).query(messages, format);
+        var choices = result.getChoices();
+        if (choices == null || choices.isEmpty()) {
+            throw ErrorUtil.make("call query result choices is empty");
+        }
+
+        var text = choices.get(0).getText();
+        if (text == null || text.isBlank()) {
+            throw ErrorUtil.make("call query result text is empty");
+        }
+
+        log.debug("call result text length: %s".formatted(text.length()));
+
+        var builder = Message.builder()
+                .id(UUID.randomUUID().toString())
+                .role(Message.ROLE.ASSISTANT)
+                .type(Message.TYPE.TEXT)
+                .text(text)
+                .isSegment(0);
+
+        if (format != null) {
+            builder.formatted(JSONUtil.parse(text, format));
+        }
+
+        return builder.build();
     }
     // endregion
-
 
 
     // region ========== 资费相关 ==========

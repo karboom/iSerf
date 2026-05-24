@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import me.karboom.java.iSerf.agent.tool.CallCache;
 import me.karboom.java.iSerf.agent.tool.CallResult;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
+import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 import me.karboom.java.iSerf.agent.tool.Loader;
 import me.karboom.java.iSerf.agent.tool.Tool;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,7 +36,7 @@ class AgentTest {
     private Map<String, Object> llmConfig;
     private List<Tool<?>> tools;
     private OpenAITest llmTest;
-
+    private FixedLlmProvider llmProvider;
 
     static class ToolParam {
         @JsonPropertyDescription("城市名称")
@@ -50,6 +51,7 @@ class AgentTest {
     void setUp() {
         // 初始化 llmTest
         llmTest = new OpenAITest();
+        llmProvider = new FixedLlmProvider(llmTest.getLlm());
 
         // 创建测试工具
         tools = new ArrayList<>();
@@ -71,7 +73,6 @@ class AgentTest {
     public void testToolCall() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
             // 创建 Agent
-            var llm = llmTest.getLlm();
 //            llm.llmConfig.put("thinking", true);
 
             // 定义输入列表
@@ -94,7 +95,7 @@ class AgentTest {
             inputs.forEach(input -> {
                 var i = inputs.indexOf(input);
 
-                var agent = new Agent("test-agent-" + i, "", llm, tools) {};
+                var agent = new Agent("test-agent-" + i, "", llmProvider, tools) {};
 
                 // 订阅 broadcast
                 agent.subscribe(item -> {
@@ -125,7 +126,6 @@ class AgentTest {
     public void testAgentBroadcast() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
             // 创建 Agent
-            var llm = llmTest.getLlm();
 //            llm.llmConfig.put("thinking", true);
 
             // 定义输入列表
@@ -147,7 +147,7 @@ class AgentTest {
             inputs.forEach(input -> {
                 var i = inputs.indexOf(input);
 
-                var agent = new Agent("test-agent-" + i, "", llm, tools) {};
+                var agent = new Agent("test-agent-" + i, "", llmProvider, tools) {};
 
                 // 订阅 broadcast
                 agent.subscribe(item -> {
@@ -175,8 +175,7 @@ class AgentTest {
     @Test
     void testUpdateTool() {
         // 创建 Agent
-        var llm = llmTest.getLlm();
-        var agent = new Agent("test-agent", "", llm, tools) {};
+        var agent = new Agent("test-agent", "", llmProvider, tools) {};
 
         // 测试用例1: 正常情况 - 工具存在且更新成功
         var toolCall = Message.ToolCall.builder()
@@ -216,7 +215,6 @@ class AgentTest {
     void testEvolution() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
             // 创建 Agent
-            var llm = llmTest.getLlm();
 //            llm.llmConfig.put("thinking", true);
             
             var tools = new Loader(2000).fromIFunction("/home/karboom/projects/karboom/iSerf/iSerf/src/main/java/me/karboom/java/iSerf/iFunction", "echarts", null);
@@ -261,7 +259,7 @@ class AgentTest {
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='操作日志表';
                     """;
 
-            var agent = new Agent("test-agent", prompt, llm, tools) {};
+            var agent = new Agent("test-agent", prompt, llmProvider, tools) {};
 
             // 创建一个列表来收集广播的消息
             var receivedMessages = new ArrayList<Message>();
@@ -292,8 +290,7 @@ class AgentTest {
     @Test
     void testErrorHandle() {
         // 创建 Agent
-        var llm = llmTest.getLlm();
-        var agent = new Agent("test-agent", "", llm, tools) {};
+        var agent = new Agent("test-agent", "", llmProvider, tools) {};
 
         agent.send("xxx");
 
@@ -310,8 +307,7 @@ class AgentTest {
     @Test
     void testMessageEvent() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
-            var llm = llmTest.getLlm();
-            var agent = new Agent("test-message-agent", "你是一个有用的助手", llm, tools) {};
+            var agent = new Agent("test-message-agent", "你是一个有用的助手", llmProvider, tools) {};
 
             var receivedItems = new ArrayList<Message>();
             agent.subscribe(item -> receivedItems.add(item));
@@ -334,8 +330,7 @@ class AgentTest {
     @Test
     void testOrganizeMemoryEvent() {
         assertTimeoutPreemptively(Duration.ofSeconds(60), () -> {
-            var llm = llmTest.getLlm();
-            var agent = new Agent("test-organize-memory-agent", "你是一个有用的助手", llm, tools) {};
+            var agent = new Agent("test-organize-memory-agent", "你是一个有用的助手", llmProvider, tools) {};
 
             var messages = List.of(
                     "你好",
@@ -407,8 +402,7 @@ class AgentTest {
     @Test
     void testRecoveryEvent() {
         assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
-            var llm = llmTest.getLlm();
-            var agent = new Agent("test-recovery-agent", "你是一个有用的助手", llm, tools) {};
+            var agent = new Agent("test-recovery-agent", "你是一个有用的助手", llmProvider, tools) {};
 
             agent.recovery();
 
@@ -424,8 +418,7 @@ class AgentTest {
     @Test
     void testInvokeToolCallCache() {
         assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
-            var llm = llmTest.getLlm();
-            var agent = new Agent("test-cache-agent", "你是一个有用的助手", llm, tools) {};
+            var agent = new Agent("test-cache-agent", "你是一个有用的助手", llmProvider, tools) {};
 
             // 准备测试参数
             var testParams = new HashMap<String, Object>() {{
@@ -469,8 +462,7 @@ class AgentTest {
     @Test
     void testCalcMemoryBillings() {
         assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
-            var llm = llmTest.getLlm();
-            var agent = new Agent("test-billing-agent", "你是一个有用的助手", llm, tools) {};
+            var agent = new Agent("test-billing-agent", "你是一个有用的助手", llmProvider, tools) {};
 
             // 添加一些测试记忆
             agent.memory.add(Message.builder()
@@ -503,8 +495,7 @@ class AgentTest {
     @Test
     void testInterrupt() {
         assertTimeoutPreemptively(Duration.ofSeconds(60), () -> {
-            var llm = llmTest.getLlm();
-            var agent = new Agent("test-interrupt-agent", "你是一个有用的助手", llm, tools) {};
+            var agent = new Agent("test-interrupt-agent", "你是一个有用的助手", llmProvider, tools) {};
 
             var receivedItems = new ArrayList<Message>();
             agent.subscribe(item -> {
@@ -557,15 +548,42 @@ class AgentTest {
     @Test
     void testConstructor() {
         assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
-            var llm = llmTest.getLlm();
             var testPath = Paths.get("src/test/resources/agent/path-init-test");
-            var agent = new Agent("test-path-init-agent", testPath, llm, tools) {};
+            var agent = new Agent("test-path-init-agent", llmProvider, testPath) {};
 
             assertEquals("test-path-init-agent", agent.id);
             assertEquals("你是一个基于路径初始化的测试助手。", agent.prompt);
             assertEquals(1, agent.memory.size());
             assertEquals(Message.ROLE.SYSTEM, agent.memory.getFirst().getRole());
             assertEquals("你是一个基于路径初始化的测试助手。", agent.memory.getFirst().getText());
+        });
+    }
+
+    /**
+     * 测试 call 方法 - 直接调用智能体，不新增记忆
+     */
+    @Test
+    void testCall() {
+        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+            var agent = new Agent("test-call-agent", "你是一个有用的助手", llmProvider, tools) {};
+
+            var memorySizeBefore = agent.memory.size();
+
+            var userMessage = Message.builder()
+                    .role(Message.ROLE.USER)
+                    .type(Message.TYPE.TEXT)
+                    .text("你好，请用一句话介绍你自己")
+                    .build();
+
+            var result = agent.call(userMessage, null);
+
+            assertNotNull(result, "call 返回结果不应为空");
+            assertEquals(Message.ROLE.ASSISTANT, result.getRole(), "返回消息的角色应为 ASSISTANT");
+            assertNotNull(result.getText(), "返回消息的文本不应为空");
+            assertTrue(result.getText().length() > 0, "返回消息的文本长度应大于0");
+            assertEquals(memorySizeBefore, agent.memory.size(), "call 不应新增记忆");
+
+            System.out.println("call 返回结果: " + result.getText());
         });
     }
 }
