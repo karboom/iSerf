@@ -117,16 +117,41 @@ public class Loader {
                 }
 
                 FunctionWrapper<Object> function = null;
+                Class<?> parameterClass = null;
                 if (Tool.TYPE.FUNCTION.equals(type) && className != null) {
                     var clazz = Class.forName(className);
                     var instance = clazz.getDeclaredConstructor().newInstance();
                     function = (FunctionWrapper<Object>) instance;
+
+                    // 通过反射获取工具类的 description 静态字段
+                    try {
+                        var descriptionField = instance.getClass().getDeclaredField("description");
+                        var reflectedDesc = (String) descriptionField.get(null);
+                        if (reflectedDesc != null) {
+                            description = reflectedDesc;
+                        }
+                    } catch (Exception e) {
+                        // description 字段可选，没有则使用 YAML/JSON 中的值
+                    }
+
+                    // 通过反射从 toolInstance 获取 Parameter 静态内部类
+                    try {
+                        for (var declaredClass : instance.getClass().getDeclaredClasses()) {
+                            if ("Parameter".equals(declaredClass.getSimpleName())) {
+                                parameterClass = declaredClass;
+                                break;
+                            }
+                        }
+                    } catch (Exception e) {
+                        // Parameter 类可选
+                    }
                 }
 
                 var toolBuilder = Tool.<Object>builder()
                         .name(name)
                         .type(type != null ? type : Tool.TYPE.FUNCTION)
                         .function(function)
+                        .paramType((Class<Object>) parameterClass)
                         .parameters(parameters);
 
                 if (description != null) {
