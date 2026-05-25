@@ -174,6 +174,8 @@ public class Agent {
                     }
 
                 } catch (Exception e) {
+                    // Todo 这里的错误如何抛出
+
                     // 不管发生了啥错误，先回滚
                     if (event != null) {
 
@@ -306,9 +308,29 @@ public class Agent {
     }
 
     public void recovery () {
-        queue.offer(Event.builder().id(DataUtil.getFlakeId()).type(Event.Type.RECOVERY).build());
+        this.trigger(Event.builder().id(DataUtil.getFlakeId()).type(Event.Type.RECOVERY).build());
     }
 
+    /**
+     * 事件统一入口，需要对字段进行校验
+     */
+    public void trigger(Event event) {
+        if (event == null) {
+            throw ErrorUtil.make("trigger event is null");
+        }
+
+        var type = event.getType();
+        var validTypes = Set.of(Event.Type.ORGANIZE_MEMORY, Event.Type.MESSAGE, Event.Type.RECOVERY);
+        if (!validTypes.contains(type)) {
+            throw ErrorUtil.make("trigger invalid event type: %s".formatted(type));
+        }
+
+        if (Event.Type.MESSAGE.equals(type) && event.getMessage() == null) {
+            throw ErrorUtil.make("trigger MESSAGE event missing message field");
+        }
+
+        queue.offer(event);
+    }
 
     @SneakyThrows
     public void send(String message, Class<?> cls) {
@@ -325,7 +347,7 @@ public class Agent {
             item.setFormatted(cls.getConstructors()[0].newInstance());
         }
 
-        queue.offer(Event.builder()
+        this.trigger(Event.builder()
                 .id(eventId)
                 .priority(1)
                 .type(Event.Type.MESSAGE)
@@ -687,7 +709,7 @@ public class Agent {
                 .sum();
 
         if (promptTotal > 150000) {
-            queue.offer(Event.builder().id(DataUtil.getFlakeId()).type(Event.Type.ORGANIZE_MEMORY).build());
+            this.trigger(Event.builder().id(DataUtil.getFlakeId()).type(Event.Type.ORGANIZE_MEMORY).build());
         }
     }
 

@@ -1,5 +1,6 @@
 package me.karboom.java.iSerf.agent;
 
+import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
 import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.agent.tool.CallResult;
@@ -62,6 +63,7 @@ class AgentPerfTest {
         assertTimeoutPreemptively(Duration.ofMinutes(10), () -> {
             // 创建 Agent
             var llm = llmTest.getLlm();
+            var llmProvider = new FixedLlmProvider(llm);
 
             // 统一的提示词
             var prompt = "你是一个有用的助手";
@@ -78,7 +80,7 @@ class AgentPerfTest {
             // 创建所有 agent
             for (var i = 0; i < agentCount; i++) {
                 var agentId = "perf-agent-" + i;
-                var agent = new Agent(agentId, prompt, llm, tools) {};
+                var agent = new Agent(agentId, prompt, llmProvider, tools) {};
 
                 // 订阅 broadcast
                 agent.subscribe(item -> {

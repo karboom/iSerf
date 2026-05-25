@@ -548,7 +548,7 @@ class AgentTest {
     @Test
     void testConstructor() {
         assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
-            var testPath = Paths.get("src/test/resources/agent/path-init-test");
+            var testPath = Paths.get("src/test/resources/agent/constructor");
             var agent = new Agent("test-path-init-agent", llmProvider, testPath) {};
 
             assertEquals("test-path-init-agent", agent.id);
