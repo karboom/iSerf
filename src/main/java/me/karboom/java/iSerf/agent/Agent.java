@@ -368,9 +368,9 @@ public class Agent {
         return flux
                 .publishOn(Schedulers.fromExecutor(this.eventPool))
                 .reduce(Tuples.of(
-                        me.karboom.java.iSerf.agent.Message.builder().type(me.karboom.java.iSerf.agent.Message.TYPE.THINKING).text("").isSegment(0).build(),
+                        Message.builder().type(Message.TYPE.THINKING).text("").isSegment(0).build(),
                         new ArrayList<>(),
-                        me.karboom.java.iSerf.agent.Message.builder().role(me.karboom.java.iSerf.agent.Message.ROLE.ASSISTANT).type(me.karboom.java.iSerf.agent.Message.TYPE.TEXT).text("").isSegment(0).eventId(event.getId()).build()
+                        Message.builder().role(Message.ROLE.ASSISTANT).type(Message.TYPE.TEXT).text("").isSegment(0).isForgotten(0).eventId(event.getId()).build()
                 ), (acc, chunk) -> {
                     var thinkingItem = acc.getT1();
                     var toolCall = acc.getT2();
@@ -390,7 +390,7 @@ public class Agent {
                             thinkingItem.setId(UUID.randomUUID().toString()); // 为thinkingItem设置ID
                             thinkingItem.setText(thinkingItem.getText() + thinking);
 
-                            var thinkingSegment = me.karboom.java.iSerf.agent.Message.builder().text(thinking.toString()).isSegment(1).build();
+                            var thinkingSegment = me.karboom.java.iSerf.agent.Message.builder().role(Message.ROLE.ASSISTANT).type(Message.TYPE.THINKING).text(thinking.toString()).isSegment(1).build();
 
                             sink.tryEmitNext(thinkingSegment);
                         } else if (toolCalls != null) {
@@ -407,6 +407,7 @@ public class Agent {
                             if (thinkingItem.getId() != null) {
                                 // thinking阶段结束，更新thinkingItem为非片段并发送
                                 sink.tryEmitNext(thinkingItem);
+                                thinkingItem.setId(null);
                             }
 
                             var contentText = content;
@@ -591,6 +592,7 @@ public class Agent {
                         var calls = mergeToolCalls(toolCallHolder);
 
                         // 通过cli调用MCP函数
+                        // Todo 普通函数调用报错了，如何传导
                         var callResult = invokeToolCalls(calls.getFirst());
 
                         // 按结果类型分组处理

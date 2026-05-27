@@ -3,6 +3,7 @@ package me.karboom.java.iSerf.server;
 import io.socket.client.IO;
 import io.socket.client.Socket;
 import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 import me.karboom.java.iSerf.llm.text.OpenAI;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
 import me.karboom.java.iSerf.server.messageBus.IMessageBus;
@@ -301,7 +302,9 @@ class WebsocketTest {
     static class TestWebsocketServer extends Websocket {
         @Override
         public Agent createAgent(ObjectNode params) {
-            var agent = new Agent(UUID.randomUUID().toString(), "随便输出点啥，测试一下",  new OpenAI("qwen-plus", new HashMap<>(), System.getenv("OPENAI_API_KEY"), "https://dashscope.aliyuncs.com/compatible-mode/v1", 3), null);
+            var llm = new OpenAI("qwen-plus", new HashMap<>(), System.getenv("OPENAI_API_KEY"), "https://dashscope.aliyuncs.com/compatible-mode/v1", 3);
+            var provider = new FixedLlmProvider(llm);
+            var agent = new Agent(UUID.randomUUID().toString(), "随便输出点啥，测试一下",  provider, null);
 
             return agent;
         }

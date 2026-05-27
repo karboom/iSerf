@@ -2,6 +2,7 @@ package me.karboom.java.iSerf.agent;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyDescription;
+import lombok.SneakyThrows;
 import me.karboom.java.iSerf.agent.tool.CallCache;
 import me.karboom.java.iSerf.agent.tool.CallResult;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
@@ -10,6 +11,7 @@ import me.karboom.java.iSerf.agent.tool.Loader;
 import me.karboom.java.iSerf.agent.tool.Tool;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import tech.tablesaw.api.StringColumn;
 import tech.tablesaw.api.Table;
 
@@ -17,6 +19,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -305,23 +309,44 @@ class AgentTest {
      * 测试 MESSAGE 事件处理
      */
     @Test
+    @Timeout(30)
+    @SneakyThrows
     void testMessageEvent() {
-        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
-            var agent = new Agent("test-message-agent", "你是一个有用的助手", llmProvider, tools) {};
+            var agent = new Agent("test-message-agent", "请你做一个自我介绍", llmProvider, tools) {};
 
             var receivedItems = new ArrayList<Message>();
-            agent.subscribe(item -> receivedItems.add(item));
+            var latch = new CountDownLatch(1);
+
+            agent.subscribe(item -> {
+                System.out.println(item);
+                receivedItems.add(item);
+                if (Integer.valueOf(0).equals(item.getIsSegment())
+                    && Message.TYPE.TEXT.equals(item.getType())) {
+                    latch.countDown();
+                }
+            });
 
             agent.send("你好");
 
-            Thread.sleep(5000);
+            latch.await();
 
-            assertTrue(receivedItems.size() > 0, "应收到响应消息");
+            assertFalse(receivedItems.isEmpty(), "应收到响应消息");
             var textItems = receivedItems.stream()
                     .filter(item -> item.getType().equals(Message.TYPE.TEXT))
                     .toList();
             assertFalse(textItems.isEmpty(), "应包含文本类型的响应");
-        });
+            var thinkingItems = receivedItems.stream()
+                    .filter(item -> item.getType().equals(Message.TYPE.THINKING))
+                    .toList();
+            assertFalse(thinkingItems.isEmpty(), "应包含思考类型的响应");
+            var textSegmentZeroCount = textItems.stream()
+                    .filter(m -> Integer.valueOf(0).equals(m.getIsSegment()))
+                    .count();
+            var thinkingSegmentZeroCount = thinkingItems.stream()
+                    .filter(m -> Integer.valueOf(0).equals(m.getIsSegment()))
+                    .count();
+            assertTrue(textSegmentZeroCount == 1, "TEXT类型isSegment=0应恰好为1");
+            assertTrue(thinkingSegmentZeroCount == 1, "THINKING类型isSegment=0应恰好为1");
     }
 
     /**

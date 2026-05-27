@@ -4,6 +4,7 @@ import io.socket.client.IO;
 import io.socket.client.Socket;
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 import me.karboom.java.iSerf.llm.text.OpenAI;
 import me.karboom.java.iSerf.server.messageBus.IMessageBus;
 import me.karboom.java.iSerf.server.messageBus.Pulsar;
@@ -261,7 +262,8 @@ class WebsocketPerformanceTest {
         @Override
         public Agent createAgent(ObjectNode params) {
             var llm = new OpenAI("qwen-plus", new HashMap<>(), System.getenv("OPENAI_API_KEY"), "https://dashscope.aliyuncs.com/compatible-mode/v1", 3);
-            var agent = new Agent(UUID.randomUUID().toString(), "随便输出点啥，测试一下", llm, null);
+            var llmProvider = new FixedLlmProvider(llm);
+            var agent = new Agent(UUID.randomUUID().toString(), "随便输出点啥，测试一下", llmProvider, null);
 
             loadConversationFromFile(agent);
 

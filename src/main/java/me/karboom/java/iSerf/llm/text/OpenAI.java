@@ -85,7 +85,7 @@ public class OpenAI implements IText {
 
                 @Override
                 public void onEvent(EventSource eventSource, String id, String type, String data) {
-                    System.out.println("source " + data);
+//                    System.out.println("source " + data);
                     if (data != null) {
                         if ("[DONE]".equals(data)) {
                             sink.complete();

@@ -186,7 +186,8 @@ public abstract class Websocket {
             localAgents.put(agentId, agent);
             metaData.setAgentStay(agentId, nodeId);
             log.debug("initUserEventHandler agent/create: local " + dataJson);
-            return "{\"agentId\":\"%s\"}".formatted(agentId);
+            var result = JSONUtil.create().put("agentId", agentId);
+            return JSONUtil.stringify(result);
         });
 
         userEventHandler.put("agent/send", (client, dataJson)-> {
@@ -211,7 +212,11 @@ public abstract class Websocket {
             if (agent != null) {
 
                 agent.subscribe(item -> {
-                    var messageJson = "{\"agentId\":\"%s\",\"message\":%s}".formatted(agentId, JSONUtil.stringify(item));
+                    var messageJson = JSONUtil.stringify(
+                            JSONUtil.create()
+                                    .put("agentId", agentId)
+                                    .set("message", JSONUtil.convert(item))
+                    );
 
                     switch (client) {
                         case SocketIOClient ioClient -> {
