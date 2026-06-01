@@ -83,7 +83,7 @@ public class Agent {
     public String eventTransId;
     public Disposable eventDisposable;
 
-    public ILedger ledger = Config.getInstance().getDefaultLedger();
+    public ILedger ledger;
 
     /**
      * 工具调用缓存
@@ -116,6 +116,7 @@ public class Agent {
 
         this.persistence = new NonePersistence();
         this.llmProvider = llm;
+        this.ledger = Config.getInstance().getDefaultLedger();
 
         run();
         this.recovery();
