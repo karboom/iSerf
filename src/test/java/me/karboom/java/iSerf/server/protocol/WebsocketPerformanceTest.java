@@ -1,4 +1,4 @@
-package me.karboom.java.iSerf.server;
+package me.karboom.java.iSerf.server.protocol;
 
 import io.socket.client.IO;
 import io.socket.client.Socket;

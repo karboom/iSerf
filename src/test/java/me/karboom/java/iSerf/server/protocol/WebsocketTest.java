@@ -1,4 +1,4 @@
-package me.karboom.java.iSerf.server;
+package me.karboom.java.iSerf.server.protocol;
 
 import io.socket.client.IO;
 import io.socket.client.Socket;
@@ -10,7 +10,6 @@ import me.karboom.java.iSerf.server.messageBus.IMessageBus;
 import me.karboom.java.iSerf.server.messageBus.Pulsar;
 import me.karboom.java.iSerf.server.metaData.IMetaData;
 import me.karboom.java.iSerf.server.metaData.RedisSingle;
-import me.karboom.java.iSerf.server.protocol.Websocket;
 import me.karboom.java.iSerf.util.JSONUtil;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.ObjectNode;
