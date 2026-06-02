@@ -3,7 +3,6 @@ package me.karboom.java.iSerf.agent;
 import cn.hutool.core.util.StrUtil;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
 import me.karboom.java.iSerf.agent.persistence.IPersistence;
 import me.karboom.java.iSerf.agent.persistence.NonePersistence;
@@ -13,7 +12,6 @@ import me.karboom.java.iSerf.billing.Cost;
 import me.karboom.java.iSerf.util.*;
 import org.openjdk.jol.info.GraphLayout;
 import me.karboom.java.iSerf.config.Config;
-import me.karboom.java.iSerf.llm.text.IText;
 import me.karboom.java.iSerf.llm.text.Output;
 import me.karboom.java.iSerf.schedule.ISchedule;
 import me.karboom.java.iSerf.schedule.Plan;
@@ -90,6 +88,9 @@ public class Agent {
      */
     public List<CallCache> toolCallCaches = new ArrayList<>();
 
+    public void eventInterceptor(Event event) {
+    }
+
     // endregion
 
     // region ============ 构造函数 ===============
@@ -127,7 +128,7 @@ public class Agent {
      * path/system-prompt.md 系统提示词
      */
     public Agent(String id, ILlmProvider provider, Path path) throws IOException {
-        var tools = new Loader(2000).fromToolDir(path.resolve("tool"), null);
+        var tools = new Loader(2000).fromToolFile(path.resolve("tool"), null);
         this(id, Files.readString(path.resolve("system-prompt.md"), StandardCharsets.UTF_8), provider, tools);
     }
 
@@ -159,6 +160,8 @@ public class Agent {
                 Event event = null;
                 try {
                     event = queue.take();
+
+                    this.eventInterceptor(event);
 
                     switch (event.getType()) {
                         case Event.Type.MESSAGE -> {

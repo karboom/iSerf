@@ -1,8 +1,5 @@
 package me.karboom.java.iSerf.agent.tool;
 
-import me.karboom.java.iSerf.agent.tool.Context;
-import me.karboom.java.iSerf.agent.tool.Tool;
-import me.karboom.java.iSerf.agent.tool.WeatherTool;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -20,12 +17,12 @@ public class LoaderTest {
     }
 
     @Test
-    void testFromToolDir() {
-        var toolDir = Path.of("src/test/resources/agent/tool");
-        var tools = loader.fromToolDir(toolDir, null);
+    void testFromToolFile() {
+        var toolDir = Path.of("src/test/resources/agent/constructor");
+        var tools = loader.fromToolFile(toolDir, null);
 
         assertNotNull(tools, "应该返回非空列表");
-        assertEquals(2, tools.size(), "应该找到2个工具");
+        assertEquals(1, tools.size(), "应该找到1个工具");
 
         var weatherTool = tools.stream()
                 .filter(tool -> "weather".equals(tool.getName()))

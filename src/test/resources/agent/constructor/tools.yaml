@@ -1,0 +1,4 @@
+- name: weather
+  description: 天气查询工具
+  type: FUNCTION
+  class: me.karboom.java.iSerf.agent.tool.WeatherTool

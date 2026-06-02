@@ -8,6 +8,7 @@ import lombok.SneakyThrows;
 import me.karboom.java.iSerf.util.CodeUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import me.karboom.java.iSerf.util.YAMLUtil;
+import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 import okhttp3.*;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -33,136 +34,148 @@ public class Loader {
     }
 
     /**
-     * 遍历目录解析yaml或者json文件为Tool工具类
+     * 解析单个yaml或json文件为Tool工具列表
+     * 文件根对象可以是数组（包含多个工具定义）或单个对象（兼容单文件场景）
      * - 如果input.type==FUNCTION，需要从input.class字段解析出类名，加载之后赋值tool.function字段
-     * @param directory 扫描的目录
-     * @param targetTool 文件名称（不含后缀）不匹配的跳过
+     * @param filePath tools.yaml或tools.json文件路径
+     * @param targetTool 工具名称（匹配name字段）不匹配的跳过
      * @return 工具列表
      */
     @SneakyThrows
-    public List<Tool<?>> fromToolDir(Path directory, String targetTool) {
+    public List<Tool<?>> fromToolFile(Path filePath, String targetTool) {
         var tools = new ArrayList<Tool<?>>();
 
-        if (!Files.exists(directory)) {
+        if (!Files.exists(filePath) || !Files.isRegularFile(filePath)) {
             return tools;
         }
 
-        try (var dirStream = Files.list(directory)) {
-            var files = dirStream.filter(Files::isRegularFile).toList();
+        var fileName = filePath.getFileName().toString();
+        var extension = "";
+        var dotIndex = fileName.lastIndexOf('.');
+        if (dotIndex > 0) {
+            extension = fileName.substring(dotIndex + 1).toLowerCase();
+        }
 
-            for (var file : files) {
-                var fileName = file.getFileName().toString();
-                var extension = "";
-                var dotIndex = fileName.lastIndexOf('.');
-                if (dotIndex > 0) {
-                    extension = fileName.substring(dotIndex + 1).toLowerCase();
-                }
+        if (!"yaml".equals(extension) && !"yml".equals(extension) && !"json".equals(extension)) {
+            return tools;
+        }
 
-                if (!"yaml".equals(extension) && !"yml".equals(extension) && !"json".equals(extension)) {
-                    continue;
-                }
+        var content = Files.readString(filePath);
+        ArrayNode arrayNode;
+        if ("json".equals(extension)) {
+            arrayNode = JSONUtil.parseArray(content);
+        } else {
+            arrayNode = YAMLUtil.parseArray(content.getBytes());
+        }
 
-                var baseName = dotIndex > 0 ? fileName.substring(0, dotIndex) : fileName;
-                if (targetTool != null && !targetTool.isEmpty() && !targetTool.equals(baseName)) {
-                    continue;
-                }
-
-                var content = Files.readString(file);
-                ObjectNode node;
-                if ("json".equals(extension)) {
-                    node = JSONUtil.parse(content);
-                } else {
-                    node = YAMLUtil.parse(content.getBytes());
-                }
-
-                var nameNode = node.path("name");
-                if (nameNode.isMissingNode() || nameNode.isNull()) {
-                    continue;
-                }
-                var name = nameNode.asText(baseName);
-
-                var descriptionNode = node.path("description");
-                var description = descriptionNode.isMissingNode() || descriptionNode.isNull() ? null : descriptionNode.asText();
-
-                var typeNode = node.path("type");
-                var type = typeNode.isMissingNode() || typeNode.isNull() ? null : typeNode.asText();
-
-                var classNode = node.path("class");
-                var className = classNode.isMissingNode() || classNode.isNull() ? null : classNode.asText();
-
-                var parameters = new ArrayList<Tool.Parameter>();
-                var paramsNode = node.path("parameters");
-                if (!paramsNode.isMissingNode() && !paramsNode.isNull() && paramsNode.isArray()) {
-                    paramsNode.forEach(paramNode -> {
-                        var paramName = paramNode.path("name").isMissingNode() ? null : paramNode.path("name").asText();
-                        if (paramName == null) {
-                            return;
-                        }
-                        var paramType = paramNode.path("type").isMissingNode() ? "string" : paramNode.path("type").asText();
-                        var paramDescNode = paramNode.path("description");
-                        var paramDesc = paramDescNode.isMissingNode() || paramDescNode.isNull() ? null : paramDescNode.asText();
-                        var requiredNode = paramNode.path("required");
-                        var required = !requiredNode.isMissingNode() && requiredNode.asBoolean(false);
-
-                        var itemsNode = paramNode.path("items");
-                        List<Tool.Parameter> properties = null;
-                        if (!itemsNode.isMissingNode() && !itemsNode.isNull() && itemsNode.has("type")) {
-                            var itemType = itemsNode.path("type").asText("string");
-                            properties = new ArrayList<>();
-                            properties.add(new Tool.Parameter("item", itemType, null, false, null));
-                        }
-
-                        parameters.add(new Tool.Parameter(paramName, paramType, paramDesc, required, properties));
-                    });
-                }
-
-                FunctionWrapper<Object> function = null;
-                Class<?> parameterClass = null;
-                if (Tool.TYPE.FUNCTION.equals(type) && className != null) {
-                    var clazz = Class.forName(className);
-                    var instance = clazz.getDeclaredConstructor().newInstance();
-                    function = (FunctionWrapper<Object>) instance;
-
-                    // 通过反射获取工具类的 description 静态字段
-                    try {
-                        var descriptionField = instance.getClass().getDeclaredField("description");
-                        var reflectedDesc = (String) descriptionField.get(null);
-                        if (reflectedDesc != null) {
-                            description = reflectedDesc;
-                        }
-                    } catch (Exception e) {
-                        // description 字段可选，没有则使用 YAML/JSON 中的值
-                    }
-
-                    // 通过反射从 toolInstance 获取 Parameter 静态内部类
-                    try {
-                        for (var declaredClass : instance.getClass().getDeclaredClasses()) {
-                            if ("Parameter".equals(declaredClass.getSimpleName())) {
-                                parameterClass = declaredClass;
-                                break;
-                            }
-                        }
-                    } catch (Exception e) {
-                        // Parameter 类可选
+        for (var element : arrayNode) {
+            if (element instanceof ObjectNode objectNode) {
+                var toolNode = processToolNode(objectNode, null);
+                if (toolNode != null) {
+                    if (targetTool == null || targetTool.isEmpty() || targetTool.equals(toolNode.name)) {
+                        tools.add(toolNode);
                     }
                 }
-
-                var toolBuilder = Tool.<Object>builder()
-                        .name(name)
-                        .type(type != null ? type : Tool.TYPE.FUNCTION)
-                        .function(function)
-                        .paramType((Class<Object>) parameterClass)
-                        .parameters(parameters);
-
-                if (description != null) {
-                    toolBuilder.description(description);
-                }
-
-                tools.add(toolBuilder.build());
             }
         }
 
         return tools;
+    }
+
+    /**
+     * 将单个ObjectNode解析为Tool对象
+     * @param node 工具定义的JSON/YAML节点
+     * @param defaultName 默认名称（当name字段缺失时使用）
+     * @return 解析后的Tool对象，name缺失时返回null
+     */
+    @SneakyThrows
+    private Tool<?> processToolNode(ObjectNode node, String defaultName) {
+        var nameNode = node.path("name");
+        if (nameNode.isMissingNode() || nameNode.isNull()) {
+            return null;
+        }
+        var name = nameNode.asText(defaultName);
+
+        var descriptionNode = node.path("description");
+        var description = descriptionNode.isMissingNode() || descriptionNode.isNull() ? null : descriptionNode.asText();
+
+        var typeNode = node.path("type");
+        var type = typeNode.isMissingNode() || typeNode.isNull() ? null : typeNode.asText();
+
+        var classNode = node.path("class");
+        var className = classNode.isMissingNode() || classNode.isNull() ? null : classNode.asText();
+
+        var parameters = new ArrayList<Tool.Parameter>();
+        var paramsNode = node.path("parameters");
+        if (!paramsNode.isMissingNode() && !paramsNode.isNull() && paramsNode.isArray()) {
+            for (var paramJsonNode : paramsNode) {
+                if (paramJsonNode instanceof ObjectNode paramNode) {
+                    var paramName = paramNode.path("name").isMissingNode() ? null : paramNode.path("name").asText();
+                    if (paramName == null) {
+                        continue;
+                    }
+                    var paramType = paramNode.path("type").isMissingNode() ? "string" : paramNode.path("type").asText();
+                    var paramDescNode = paramNode.path("description");
+                    var paramDesc = paramDescNode.isMissingNode() || paramDescNode.isNull() ? null : paramDescNode.asText();
+                    var requiredNode = paramNode.path("required");
+                    var required = !requiredNode.isMissingNode() && requiredNode.asBoolean(false);
+
+                    var itemsNode = paramNode.path("items");
+                    List<Tool.Parameter> properties = null;
+                    if (!itemsNode.isMissingNode() && !itemsNode.isNull() && itemsNode.has("type")) {
+                        var itemType = itemsNode.path("type").asText("string");
+                        properties = new ArrayList<>();
+                        properties.add(new Tool.Parameter("item", itemType, null, false, null));
+                    }
+
+                    parameters.add(new Tool.Parameter(paramName, paramType, paramDesc, required, properties));
+                }
+            }
+        }
+
+        FunctionWrapper<Object> function = null;
+        Class<?> parameterClass = null;
+        if (Tool.TYPE.FUNCTION.equals(type) && className != null) {
+            var clazz = Class.forName(className);
+            var instance = clazz.getDeclaredConstructor().newInstance();
+            function = (FunctionWrapper<Object>) instance;
+
+            // 通过反射获取工具类的 description 静态字段
+            try {
+                var descriptionField = instance.getClass().getDeclaredField("description");
+                var reflectedDesc = (String) descriptionField.get(null);
+                if (reflectedDesc != null) {
+                    description = reflectedDesc;
+                }
+            } catch (Exception e) {
+                // description 字段可选，没有则使用 YAML/JSON 中的值
+            }
+
+            // 通过反射从 toolInstance 获取 Parameter 静态内部类
+            try {
+                for (var declaredClass : instance.getClass().getDeclaredClasses()) {
+                    if ("Parameter".equals(declaredClass.getSimpleName())) {
+                        parameterClass = declaredClass;
+                        break;
+                    }
+                }
+            } catch (Exception e) {
+                // Parameter 类可选
+            }
+        }
+
+        var toolBuilder = Tool.<Object>builder()
+                .name(name)
+                .type(type != null ? type : Tool.TYPE.FUNCTION)
+                .function(function)
+                .paramType((Class<Object>) parameterClass)
+                .parameters(parameters);
+
+        if (description != null) {
+            toolBuilder.description(description);
+        }
+
+        return toolBuilder.build();
     }
     /**
      * 遍历目录，所有的一级子文件夹为工具名称，二级子文件夹为工具的版本
