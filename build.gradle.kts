@@ -7,12 +7,12 @@ plugins {
 }
 
 group = "io.github.karboom"
-version = "0.74.0-alpha"
+version = "0.74.2-alpha"
 
 
 dependencies {
 
-    implementation("io.projectreactor:reactor-core:3.8.0-RC1")
+    api("io.projectreactor:reactor-core:3.8.0-RC1")
 
     api("tools.jackson.core:jackson-databind:3.0.4")
     api("tools.jackson.dataformat:jackson-dataformat-cbor:3.0.4")
@@ -29,43 +29,43 @@ dependencies {
 
 
     api("com.openai:openai-java:4.6.1")
-    implementation("io.modelcontextprotocol.sdk:mcp:0.14.1")
-    implementation("io.modelcontextprotocol.sdk:mcp-spring-webflux:0.14.1")
-    implementation("io.modelcontextprotocol.sdk:mcp-spring-webmvc:0.14.1")
+    api("io.modelcontextprotocol.sdk:mcp:0.14.1")
+    api("io.modelcontextprotocol.sdk:mcp-spring-webflux:0.14.1")
+    api("io.modelcontextprotocol.sdk:mcp-spring-webmvc:0.14.1")
 
-    implementation("com.corundumstudio.socketio:netty-socketio:2.0.13")
-    implementation("io.socket:socket.io-client:2.1.1")
+    api("com.corundumstudio.socketio:netty-socketio:2.0.13")
+    api("io.socket:socket.io-client:2.1.1")
 
-    implementation("com.hivemq:hivemq-mqtt-client:1.3.3")
-    implementation("com.hivemq:hivemq-community-edition-embedded:2025.5")
+    api("com.hivemq:hivemq-mqtt-client:1.3.3")
+    api("com.hivemq:hivemq-community-edition-embedded:2025.5")
 
-    implementation("io.vertx:vertx-core:5.0.4")
-    implementation("io.vertx:vertx-web:5.0.4")
+    api("io.vertx:vertx-core:5.0.4")
+    api("io.vertx:vertx-web:5.0.4")
 
-    implementation("com.cronutils:cron-utils:9.2.1")
+    api("com.cronutils:cron-utils:9.2.1")
 
-    implementation("com.knuddels:jtokkit:1.1.0")
+    api("com.knuddels:jtokkit:1.1.0")
 
     // Apache PDFBox for PDF processing
-    implementation("org.apache.pdfbox:pdfbox:3.0.4")
+    api("org.apache.pdfbox:pdfbox:3.0.4")
 
-    implementation("io.lettuce:lettuce-core:7.4.0.RELEASE")
+    api("io.lettuce:lettuce-core:7.4.0.RELEASE")
 
-    implementation("org.apache.pulsar:pulsar-client:4.1.3")
+    api("org.apache.pulsar:pulsar-client:4.1.3")
 
-    implementation("cn.hutool:hutool-all:5.8.43")
+    api("cn.hutool:hutool-all:5.8.43")
 
 
-    implementation("io.milvus:milvus-sdk-java:2.6.6")
+    api("io.milvus:milvus-sdk-java:2.6.6")
 
-    implementation("org.apache.commons:commons-math3:3.6.1")
+    api("org.apache.commons:commons-math3:3.6.1")
 
-    implementation("net.bramp.ffmpeg:ffmpeg:0.8.0")
+    api("net.bramp.ffmpeg:ffmpeg:0.8.0")
 
-    implementation("org.jooq:jooq:3.20.0")
-    implementation("org.postgresql:postgresql:42.7.5")
+    api("org.jooq:jooq:3.20.0")
+    api("org.postgresql:postgresql:42.7.5")
 
-    implementation("org.openjdk.jol:jol-core:0.17")
+    api("org.openjdk.jol:jol-core:0.17")
 
 
 //    implementation("org.projectlombok:lombok:1.18.42")

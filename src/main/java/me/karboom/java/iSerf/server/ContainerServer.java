@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.Event;
 import me.karboom.java.iSerf.server.messageBus.IMessageBus;
 import me.karboom.java.iSerf.server.metaData.IMetaData;
 import me.karboom.java.iSerf.server.metaData.Node;
@@ -133,7 +134,7 @@ public abstract class ContainerServer {
 
 
     /**
-     * 挂载一个传输协议实例，并分配 transportId
+     * 挂载一个传输协议实例
      *
      * @param transport 传输协议实例
      */
@@ -221,10 +222,10 @@ public abstract class ContainerServer {
     public String handleAgentSend(Context context, String dataJson) {
         var data = JSONUtil.parse(dataJson);
         var agentId = data.path("agentId").asText();
-        var eventJson = data.path("event").toString();
+        var eventObj = JSONUtil.convert(data.path("event"), Event.class);
         var agent = localAgents.get(agentId);
         if (agent != null) {
-            agent.send(eventJson);
+            agent.trigger(eventObj);
         } else {
             var targetNodeId = metaData.getAgentStay(agentId);
             sendToOtherNode("agent/send", dataJson, targetNodeId);

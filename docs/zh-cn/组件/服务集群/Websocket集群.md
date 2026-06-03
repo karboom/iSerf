@@ -6,7 +6,7 @@
 
 - 每个节点既是服务端，也是其他节点的代理
 - 使用 Redis 存储元数据（节点列表、Agent 路由信息）
-- 使用 Pulsar 作为消息总线进行节点间通信
+- 使用 MessageBus 作为消息总线进行节点间通信（如 Pulsar）
 - 支持 Agent 跨节点路由和消息转发
 
 ## 代码示例
@@ -47,8 +47,8 @@ public class MyWebsocketServer extends Websocket {
         ) {};
     }
 
-    public MyWebsocketServer(String ip, Integer port, IMessageBus messageBus, IMetaData metaData) {
-        super(ip, port, messageBus, metaData);
+    public MyWebsocketServer(String clusterIp, Integer port, IMessageBus messageBus, IMetaData metaData) {
+        super(clusterIp, port, messageBus, metaData);
     }
 
     public static void main(String[] args) {
@@ -63,157 +63,66 @@ public class MyWebsocketServer extends Websocket {
 }
 ```
 
-### 客户端（socket.io.js）
-
-```html
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <title>Websocket 集群客户端示例</title>
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-</head>
-<body>
-    <h1>Websocket 集群客户端</h1>
-    <div id="log"></div>
-
-    <script>
-        // 连接 /user 命名空间
-        const socket = io('http://192.168.1.10:9092/user', {
-            transports: ['websocket']
-        });
-
-        const log = (msg) => {
-            document.getElementById('log').innerHTML += `<p>${msg}</p>`;
-            console.log(msg);
-        };
-
-        // 监听连接
-        socket.on('connect', () => {
-            log('已连接服务器');
-        });
-
-        // 监听错误
-        socket.on('connect_error', (err) => {
-            log(`连接错误：${err.message}`);
-        });
-
-        // 监听消息推送
-        socket.on('message', (data) => {
-            log(`收到消息：${JSON.stringify(data)}`);
-        });
-
-        // 创建 Agent
-        function createAgent(prompt) {
-            return new Promise((resolve) => {
-                socket.emit('agent/create', JSON.stringify({ prompt }), (response) => {
-                    const res = JSON.parse(response);
-                    log(`Agent 已创建：${res.agentId}`);
-                    resolve(res.agentId);
-                });
-            });
-        }
-
-        // 订阅 Agent
-        function activeAgent(agentId) {
-            return new Promise((resolve) => {
-                socket.emit('agent/active', JSON.stringify({ agentId }), (response) => {
-                    const res = JSON.parse(response);
-                    log(`Agent 已激活：${res.success}`);
-                    resolve(res.success);
-                });
-            });
-        }
-
-        // 发送消息
-        function sendMessage(agentId, event) {
-            socket.emit('agent/send', JSON.stringify({ agentId, event }), () => {
-                log('消息已发送');
-            });
-        }
-
-        // 取消订阅
-        function leaveAgent(agentId) {
-            socket.emit('agent/leave', JSON.stringify({ agentId }), (response) => {
-                const res = JSON.parse(response);
-                log(`已取消订阅：${res.success}`);
-            });
-        }
-
-        // 使用示例
-        (async () => {
-            const agentId = await createAgent('你是一个助手');
-            await activeAgent(agentId);
-            sendMessage(agentId, { type: 'message', content: '你好' });
-        })();
-    </script>
-</body>
-</html>
-```
+客户端使用示例和事件协议详见：[Socket.IO 客户端](SocketIO客户端.md)
 
 
 ## 通信协议
 
-### 命名空间
-
-协议使用 Socket.IO，分为两个命名空间：
-
-- `/user` - 用户侧协议，客户端连接至此命名空间进行 Agent 相关操作
-- `/sys` - 服务侧协议，集群节点间通信使用
-
 ### 用户侧协议（/user）
 
-#### 客户端发送事件
+客户端通过 Socket.IO 连接至 `/user` 命名空间进行 Agent 操作，详见：[Socket.IO 客户端](SocketIO客户端.md)
 
-| 事件 | 请求格式 | 响应格式 | 说明 |
-|------|----------|----------|------|
-| `agent/create` | `{"prompt":"xxx"}` | `{"agentId":"xxx"}` | 创建 Agent，随机路由到节点 |
-| `agent/send` | `{"agentId":"xxx","event":{}}` | - | 向 Agent 发送消息 |
-| `agent/active` | `{"agentId":"xxx"}` | `{"success":true}` | 订阅 Agent，接收其消息推送 |
-| `agent/leave` | `{"agentId":"xxx"}` | `{"success":true}` | 取消订阅 Agent |
-| `agent/toolCall` | `{"agentId":"xxx","toolCallId":"xxx"}` | `{"result":{}}` | 调用 Agent 工具缓存 |
+### 节点间通信（MessageBus）
 
-#### 服务端推送事件
+节点通过 MessageBus 的 publish/subscribe 进行通信。每个节点订阅主题 `{nodeId}-message`，向其他节点发送消息时 publish 到对应节点的主题。
 
-| 事件 | 数据格式 | 说明 |
-|------|----------|------|
-| `agent/message` | `{"agentId":"xxx","item":{}}` | 推送 Agent 产生的消息 |
+#### 消息格式
 
-### 服务侧协议（/sys）
+消息体为管道符 `|` 分隔的 4 段字符串：
 
-#### 节点间事件
+```
+{sourceNodeId}|{type}|{event}|{body}
+```
 
-| 事件 | 数据格式 | 说明 |
-|------|----------|------|
-| `alive` | `{"ip":"xxx","port":9092}` | 节点心跳广播，每 5 秒发送一次 |
-| `proxy` | `{"event":"xxx","body":{}}` | 请求代理转发到其他节点 |
-| `reverse` | `{"event":"xxx","body":{}}` | 反向推送消息给客户端 |
+- `sourceNodeId`: 消息来源节点 ID
+- `type`: 消息类型，可选值 `proxy`（请求转发）或 `reverse`（反向推送）
+- `event`: 事件名称
+- `body`: 事件数据 JSON 字符串
+
+#### 消息类型
+
+| type | 说明 | 流转方向 |
+|------|------|----------|
+| `proxy` | 将用户事件代理转发到目标节点 | 源节点 → 目标节点 |
+| `reverse` | 将处理结果反向推回源节点 | 目标节点 → 源节点 |
+
+#### 处理流程
+
+**proxy 流程：**
+
+1. 源节点 publish 消息到 `{targetNodeId}-message` 主题
+2. 目标节点收到后，根据 `event` 查找对应的 `userEventHandler` 处理
+3. 如果处理结果非 null，目标节点 publish `reverse` 消息回源节点
+
+**reverse 流程：**
+
+1. 源节点收到 `reverse` 消息后，从 `body` 中提取 `agentId`
+2. 通过 `agentClient` 缓存查找对应的客户端 Socket.IO session
+3. 将 `body` 通过 `/user` 命名空间直接推送给客户端
 
 ### 消息路由规则
-
-事件名称格式：`namespace/name`
 
 | 事件 | 路由规则 |
 |------|----------|
 | `agent/create` | 直接在本节点创建 Agent，记录到元数据 |
-| `agent/send` | 先查 `otherAgentNode` 缓存，命中则发往对应节点；未命中则广播给所有非本节点，首个响应的节点会被缓存 |
-| `agent/active` | 先查本地 `agents` 缓存，存在则直接订阅；否则转发请求 |
-| `agent/leave` | 先查本地 `agents` 缓存，存在则直接取消订阅；否则转发请求 |
-| `agent/toolCall` | 先查本地 `agents` 缓存，存在则直接返回结果；否则转发请求 |
-
-### 消息封装格式
-
-- 跨节点转发的消息封装为：`{"event":"xxx","body":{}}`
-- body 中会自动添加 `source` 字段标识来源节点：`"source": "ip:port"`
-
-### 节点发现与维护
-
-- 节点列表通过 `getNodes()` 抽象方法获取（由子类实现，可从 K8S Headless Service 或 ECS IP 池获取）
-- 每 5 秒定时调用 `getNodes()` 更新节点列表
-- 每 5 秒向其他节点广播 `alive` 心跳消息
-- 节点间建立 WebSocket 连接保持通信
+| `agent/send` | 先查本地 `localAgents` 缓存，存在则直接发送；否则通过 `metaData.getAgentStay()` 获取驻留节点，精确路由到目标节点 |
+| `agent/active` | 先查本地 `localAgents` 缓存，存在则直接订阅；否则通过 MessageBus 转发到 Agent 驻留节点 |
+| `agent/leave` | 先查本地 `localAgents` 缓存，存在则直接取消订阅；否则通过 MessageBus 转发到 Agent 驻留节点 |
+| `agent/toolCall` | 先查本地 `localAgents` 缓存，存在则直接返回缓存结果；否则通过 MessageBus 转发到 Agent 驻留节点 |
 
 ## Redis 数据结构
+
+元数据存储结构由 `IMetaData` 接口的具体实现决定（如 `RedisSingle`），典型结构如下：
 
 | Key 前缀 | 类型 | 说明 |
 |----------|------|------|
@@ -221,13 +130,34 @@ public class MyWebsocketServer extends Websocket {
 | `AS:{agentId}` | String | Agent 驻留节点 ID |
 | `AN:{agentId}` | List | 订阅该 Agent 的节点列表 |
 
+## 优雅停机
+
+### 停机流程
+
+1. JVM 收到 SIGTERM/SIGINT 信号时，ShutdownHook 将 `isShuttingDown` 置为 `true`
+2. 新到达的 `/user` 命名空间连接和事件请求被拦截，返回 `{"error":"server is shutting down"}`
+3. 通过 MessageBus 到达的 `proxy` 请求同样被拦截，反向推送错误信息
+4. 调用 `stop()` 方法时会同时从元数据中移除本节点
+
+### Nginx 配合
+
+停机时，授权阶段会阻塞 70 秒（大于 Nginx 的 `proxy_connect_timeout` 默认值 60 秒），使得 Nginx 连接超时后自动切换到下一个 upstream 节点，实现无中断滚动更新。
+
+```nginx
+upstream iserf_backend {
+    server 192.168.1.10:9092 max_fails=3 fail_timeout=30s;
+    server 192.168.1.11:9092 max_fails=3 fail_timeout=30s;
+    server 192.168.1.12:9092 max_fails=3 fail_timeout=30s;
+}
+```
+
 ## 性能测试
 
 ### 测试环境
 
 - 节点数：3
 - Redis：单机版
-- Pulsar：单机版
+- MessageBus：单机版（Pulsar）
 
 ### 测试指标
 
@@ -236,7 +166,6 @@ public class MyWebsocketServer extends Websocket {
 | 单节点连接数 | 10,000 | - |
 | 消息延迟 (P99) | < 100ms | - |
 | 跨节点转发延迟 | < 200ms | - |
-| 心跳间隔 | 5s | - |
 
 ### 测试脚本
 
@@ -327,9 +256,8 @@ CMD ["java", "-jar", "isserf.jar"]
 
 ### 节点故障
 
-1. 心跳检测超时（30 秒无心跳）
-2. 自动从 Redis Nodes 中移除故障节点
-3. 重新路由受影响的 Agent
+1. 调用 `stop()` 或 JVM ShutdownHook 触发时，自动从元数据中移除节点
+2. 受影响的 Agent 通过 `metaData.getAgentStay()` 重新路由
 
 ### 数据一致性
 

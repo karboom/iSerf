@@ -13,6 +13,7 @@
       - [千问](zh-cn/组件/大模型/向量/千问.md)
   - [服务集群](zh-cn/组件/服务集群/说明.md)
     - [Websocket集群](zh-cn/组件/服务集群/Websocket集群.md)
+    - [Socket.IO客户端](zh-cn/组件/服务集群/SocketIO客户端.md)
   - [团队](zh-cn/组件/团队/说明.md)
   - [智能体](zh-cn/组件/智能体/说明.md)
     - [工具调用](zh-cn/组件/智能体/工具调用.md)

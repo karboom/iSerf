@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -105,8 +106,19 @@ class ContainerServerTest {
         assertTrue(createResult.contains("agentId"), "agent/create 结果应包含 agentId");
 
         // agent/send 对不存在的 agent 返回 null（直接跨节点转发无本地响应）
-        var sendResult = server.handleUserEvent("agent/send", ctx,
-                JSONUtil.stringify(java.util.Map.of("agentId", "nonexistent")));
+        var sendEvent = java.util.Map.of(
+                "agentId", "nonexistent",
+                "event", java.util.Map.of(
+                        "type", "MESSAGE",
+                        "priority", 1,
+                        "message", java.util.Map.of(
+                                "type", "TEXT",
+                                "text", "test",
+                                "files", List.of("1", 2)
+                        )
+                )
+        );
+        var sendResult = server.handleUserEvent("agent/send", ctx, JSONUtil.stringify(sendEvent));
         assertNull(sendResult, "agent/send 对不存在 agent 应返回 null");
 
         // agent/leave 对不存在的 agent 返回 null
