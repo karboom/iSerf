@@ -5,8 +5,6 @@ import me.karboom.java.iSerf.agent.tool.Tool;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import tools.jackson.databind.node.ArrayNode;
-
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -218,7 +216,7 @@ public class OpenAIResponseTest {
             messages.add(Message.builder()
                     .role(Message.ROLE.USER)
                     .type(Message.TYPE.IMAGE)
-                    .images(List.of(
+                    .files(List.of(
                             "https://karboom-blog.oss-cn-hangzhou.aliyuncs.com/iSlogger/file_example_PNG_500kB.png"
                     ))
                     .text("这张图片是什么颜色的？")

@@ -73,7 +73,7 @@ public class Message {
     /**
      * 图片列表，支持 文件、base64、http连接
      */
-    public List<String> images;
+    public List<String> files;
 
     /**
      * 视频地址

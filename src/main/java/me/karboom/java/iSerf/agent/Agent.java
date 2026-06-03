@@ -312,7 +312,7 @@ public class Agent {
     }
 
     public void recovery () {
-        this.trigger(Event.builder().id(DataUtil.getFlakeId()).type(Event.Type.RECOVERY).build());
+        this.trigger(Event.builder().type(Event.Type.RECOVERY).build());
     }
 
     /**
@@ -329,34 +329,44 @@ public class Agent {
             throw ErrorUtil.make("trigger invalid event type: %s".formatted(type));
         }
 
-        if (Event.Type.MESSAGE.equals(type) && event.getMessage() == null) {
-            throw ErrorUtil.make("trigger MESSAGE event missing message field");
+        if (Event.Type.MESSAGE.equals(type) ) {
+            if (event.getMessage() == null) {
+                throw ErrorUtil.make("trigger MESSAGE event missing message field");
+            }
+
+            var message = event.getMessage();
+
+            message.setRole(Message.ROLE.USER);
+            message.setId(DataUtil.getFlakeId());
+            message.setIsForgotten(0);
         }
+
+        event.setId(DataUtil.getFlakeId());
 
         queue.offer(event);
     }
 
     @SneakyThrows
-    public void send(String message, Class<?> cls) {
-        var eventId = DataUtil.getFlakeId();
-        var item = me.karboom.java.iSerf.agent.Message
-                .builder()
-                .type(me.karboom.java.iSerf.agent.Message.TYPE.TEXT)
-                .role(me.karboom.java.iSerf.agent.Message.ROLE.USER)
-                .id("")
-                .isForgotten(0)
-                .text(message).build();
-
+    public void send(Message message, Class<?> cls) {
         if (cls != null) {
-            item.setFormatted(cls.getConstructors()[0].newInstance());
+            message.setFormatted(cls.getConstructors()[0].newInstance());
         }
 
         this.trigger(Event.builder()
-                .id(eventId)
                 .priority(1)
                 .type(Event.Type.MESSAGE)
-                .message(item)
+                .message(message)
                 .build());
+    }
+
+    @SneakyThrows
+    public void send(String message, Class<?> cls) {
+        var item = Message
+                .builder()
+                .type(me.karboom.java.iSerf.agent.Message.TYPE.TEXT)
+                .text(message).build();
+
+        this.send(item, cls);
     }
 
     public void send(String message) {

@@ -426,8 +426,8 @@ public class OpenAIResponse implements IText {
                 break;
             case Message.TYPE.IMAGE:
                 var content = JSONUtil.createArray();
-                if (item.images != null) {
-                    for (var image : item.images) {
+                if (item.files != null) {
+                    for (var image : item.files) {
                         content.add(JSONUtil.create()
                                 .put("type", "image_url")
                                 .set("image_url", JSONUtil.create().put("url", image)));
