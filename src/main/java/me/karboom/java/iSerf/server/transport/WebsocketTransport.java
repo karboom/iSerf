@@ -173,6 +173,7 @@ public abstract class WebsocketTransport implements ITransport {
             var ctx = ContainerServer.Context.builder()
                     .transport(WebsocketTransport.this)
                     .client(client)
+                    .serverId(container.id)
                     .build();
             var result = container.handleUserEvent(ContainerServer.EVENT_AGENT_CREATE, ctx, dataJson);
             if (result != null) {
@@ -184,6 +185,7 @@ public abstract class WebsocketTransport implements ITransport {
             var ctx = ContainerServer.Context.builder()
                     .transport(WebsocketTransport.this)
                     .client(client)
+                    .serverId(container.id)
                     .build();
             var result = container.handleUserEvent(ContainerServer.EVENT_AGENT_SEND, ctx, dataJson);
             if (result != null) {
@@ -194,6 +196,7 @@ public abstract class WebsocketTransport implements ITransport {
             var ctx = ContainerServer.Context.builder()
                     .transport(WebsocketTransport.this)
                     .client(client)
+                    .serverId(container.id)
                     .build();
             var result = container.handleUserEvent(ContainerServer.EVENT_AGENT_SUBSCRIBE, ctx, dataJson);
             if (result != null) {
@@ -204,6 +207,7 @@ public abstract class WebsocketTransport implements ITransport {
             var ctx = ContainerServer.Context.builder()
                     .transport(WebsocketTransport.this)
                     .client(client)
+                    .serverId(container.id)
                     .build();
             var result = container.handleUserEvent(ContainerServer.EVENT_AGENT_UNSUBSCRIBE, ctx, dataJson);
             if (result != null) {
@@ -214,6 +218,7 @@ public abstract class WebsocketTransport implements ITransport {
             var ctx = ContainerServer.Context.builder()
                     .transport(WebsocketTransport.this)
                     .client(client)
+                    .serverId(container.id)
                     .build();
             var result = container.handleUserEvent(ContainerServer.EVENT_AGENT_TOOL_CALL, ctx, dataJson);
             if (result != null) {

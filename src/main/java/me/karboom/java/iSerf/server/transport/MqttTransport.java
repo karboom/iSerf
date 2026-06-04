@@ -219,6 +219,7 @@ public class MqttTransport implements ITransport {
         var ctx = ContainerServer.Context.builder()
                 .transport(this)
                 .client(clientId)
+                .serverId(container.id)
                 .build();
 
         try {

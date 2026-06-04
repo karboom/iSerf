@@ -309,6 +309,7 @@ public class DingtalkTransport implements ITransport {
             var ctx = ContainerServer.Context.builder()
                     .transport(this)
                     .client(senderStaffId)
+                    .serverId(container.id)
                     .build();
 
             var eventData = JSONUtil.stringify(JSONUtil.create()

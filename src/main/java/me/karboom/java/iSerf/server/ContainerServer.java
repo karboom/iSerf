@@ -66,6 +66,10 @@ public abstract class ContainerServer {
         public ITransport transport;
         public Object client;
         public Object user;
+        /**
+         * 消息来源服务器标识
+         */
+        public String serverId;
     }
 
     /**
@@ -263,18 +267,15 @@ public abstract class ContainerServer {
                                 .set("message", JSONUtil.convert(item))
                 );
 
-                    switch (context.client) {
-                        case String sourceNodeId -> {
-                            var reverseJson = "%s|%s|%s|%s".formatted(this.id, "reverse", EVENT_AGENT_MESSAGE, messageJson);
-                            messageBus.publish("%s-message".formatted(sourceNodeId), reverseJson);
+                    if (this.id.equals(context.serverId)) {
+                        if (context.transport != null) {
+                            context.transport.sendToClient(context.client, EVENT_AGENT_MESSAGE, messageJson);
+                        } else {
+                            log.warn("handleAgentSubscribe no transport for client: %s".formatted(context.client));
                         }
-                        default -> {
-                            if (context.transport != null) {
-                                context.transport.sendToClient(context.client, EVENT_AGENT_MESSAGE, messageJson);
-                            } else {
-                                log.warn("handleAgentSubscribe no transport for client: %s".formatted(context.client));
-                            }
-                        }
+                    } else {
+                        var reverseJson = "%s|%s|%s|%s".formatted(this.id, "reverse", EVENT_AGENT_MESSAGE, messageJson);
+                        messageBus.publish("%s-message".formatted(context.serverId), reverseJson);
                     }
             });
             return "{\"success\":true}";
@@ -409,7 +410,7 @@ public abstract class ContainerServer {
                         messageBus.publish("%s-message".formatted(sourceNode), msg);
                         return;
                     }
-                    var proxyCtx = Context.builder().client(sourceNode).build();
+                    var proxyCtx = Context.builder().client(sourceNode).serverId(sourceNode).build();
                     var result = handleUserEvent(event, proxyCtx, bodyJson);
                     log.debug("listenMessage proxy event: " + event + ", result: " + result);
 
