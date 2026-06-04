@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.nio.file.Path;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 @Data
@@ -19,12 +21,31 @@ public class Task {
         final static public String DONE = "DONE";
     }
 
+    @Data
+    @AllArgsConstructor
+    @Builder
+    @NoArgsConstructor
+    static public class Comment {
+        public String agentId;
+        public String userId;
+        public String content;
+        public OffsetDateTime createTime;
+    }
+
     public String id;
     public String desc;
 
     public String status;
     public String agentId;
 
+    /**
+     * 输出目录
+     */
+    public Path directory;
+
     // 上游任务 ID
     public List<String> upstreamIds;
+
+    // 评论
+    public List<Comment> comments;
 }

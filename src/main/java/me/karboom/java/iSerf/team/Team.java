@@ -4,13 +4,16 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.util.DataUtil;
+import me.karboom.java.iSerf.util.ErrorUtil;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.function.Consumer;
 
@@ -18,16 +21,23 @@ public class Team {
 
     @NoArgsConstructor
     @Data
-    public static class Plan {
+    public static class SplitResult {
         public List<Task> tasks;
     }
 
+    /**
+     * 工作目录
+     */
+    public Path workDir;
     /**
      * 任务列表
      */
     public List<Task> tasks;
 
 
+    /**
+     * 智能体成员
+     */
     public Agent leader;
     public List<Agent> member;
 
@@ -44,7 +54,7 @@ public class Team {
     /**
      * 消息总线订阅
      */
-    public Flux<Communication> broadcast;
+    public Flux<Message> broadcast;
 
     public Team(Agent leader, List<Agent> members) {
         this.leader = leader;
@@ -52,9 +62,9 @@ public class Team {
 
 
         // Todo 这一段是否有必要和watch合并
-        var leaderBroadcast = leader.broadcast.map(item -> Communication.builder().agentId(leader.id).mentions(null).message(item).build());
+        var leaderBroadcast = leader.broadcast.map(item -> Message.builder().agentId(leader.id).mentions(null).message(item).build());
         var membersBroadcast = Flux.fromIterable(this.member)
-                .flatMap(m -> m.broadcast.map(item -> Communication.builder().agentId(m.id).message(item).build()));
+                .flatMap(m -> m.broadcast.map(item -> Message.builder().agentId(m.id).message(item).build()));
         this.broadcast = Flux.merge(leaderBroadcast, membersBroadcast).share();
 
         this.eventQueue = new PriorityBlockingQueue<>(100, Comparator.comparing(Event::getId));
@@ -78,7 +88,7 @@ public class Team {
         this.leader.subscribe(item -> {
             System.out.println(item.getText());
 
-            if (item.formatted instanceof Plan plan) {
+            if (item.formatted instanceof SplitResult plan) {
                 // Todo 检查task逻辑漏洞（依赖关系异常、有member未分配到任务）
                 this.tasks = plan.getTasks();
 
@@ -117,7 +127,7 @@ public class Team {
                             .reduce("", (acc, info) -> acc + "\n" + info);
 
                     var enhancedMessage = event.getDesc() + "\n团队成员信息:" + memberInfo;
-                    this.leader.send(enhancedMessage, Plan.class);
+                    this.leader.send(enhancedMessage, SplitResult.class);
                 }
                 case Event.TYPE.TASK_CHANGE -> {
 
@@ -156,6 +166,7 @@ public class Team {
                                 }
                             }
                             case Task.STATUS.DOING -> {
+                                // Todo Agent 在这里直接并发
                                 // 如果任务状态为进行中，找出对应的agent
                                 var targetAgent = this.member.stream()
                                         .filter(agent -> agent.id.equals(task.getAgentId()))
@@ -170,6 +181,12 @@ public class Team {
                         }
                     }
                 }
+                case Event.TYPE.MESSAGE -> {
+
+                }
+                case Event.TYPE.COMMENT -> {
+
+                }
                 default -> {
                 }
             }
@@ -178,12 +195,37 @@ public class Team {
 
 
 
+    /**
+     * 事件统一入口，需要对字段进行校验
+     */
+    public void trigger(Event event) {
+        if (event == null) {
+            throw ErrorUtil.make("trigger event is null");
+        }
+
+        var type = event.getType();
+        var validTypes = Set.of(
+                Event.TYPE.TARGET,
+                Event.TYPE.TASK_CHANGE,
+                Event.TYPE.COMPLETE,
+                Event.TYPE.MESSAGE,
+                Event.TYPE.COMMENT
+        );
+        if (!validTypes.contains(type)) {
+            throw ErrorUtil.make("trigger invalid event type: %s".formatted(type));
+        }
+
+        event.setId(DataUtil.getFlakeId());
+
+        eventQueue.offer(event);
+    }
+
     public void send(String message) {
-        eventQueue.offer(Event.builder().id(DataUtil.getFlakeId()).type(Event.TYPE.TARGET).desc(message).build());
+        trigger(Event.builder().type(Event.TYPE.TARGET).desc(message).build());
     }
 
 
-    public Disposable subscribe(Consumer<Communication> consumer) {
+    public Disposable subscribe(Consumer<Message> consumer) {
         return broadcast.subscribe(consumer);
     }
 
@@ -191,7 +233,7 @@ public class Team {
      * 修改任务状态
      */
     public void taskChangeStatus(String id, String status) {
-        eventQueue.offer(Event.builder().id(DataUtil.getFlakeId()).desc("%s-%s".formatted(id, status)).build());
+        trigger(Event.builder().type(Event.TYPE.TASK_CHANGE).desc("%s-%s".formatted(id, status)).build());
     }
 
 

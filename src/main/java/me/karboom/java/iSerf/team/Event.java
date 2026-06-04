@@ -21,9 +21,19 @@ public class Event {
          */
         final static public String TASK_CHANGE = "TASK_CHANGE";
         /**
-         * 任务完成
+         * 任务完成 Todo 这个应该可以去掉
          */
         final static public String COMPLETE = "COMPLETE";
+
+        /**
+         * 新消息
+         */
+        final static public String MESSAGE = "MESSAGE";
+
+        /**
+         * 任务评论
+         */
+        final static public String COMMENT = "COMMENT";
     }
 
 
