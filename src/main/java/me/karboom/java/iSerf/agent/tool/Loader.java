@@ -24,6 +24,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * 将一切形式的函数定义转化为Tool类
+ */
 public class Loader {
     public Integer timeout;
     private static final ObjectMapper objectMapper = new ObjectMapper();
@@ -133,42 +136,13 @@ public class Loader {
             }
         }
 
-        FunctionWrapper<Object> function = null;
-        Class<?> parameterClass = null;
         if (Tool.TYPE.FUNCTION.equals(type) && className != null) {
-            var clazz = Class.forName(className);
-            var instance = clazz.getDeclaredConstructor().newInstance();
-            function = (FunctionWrapper<Object>) instance;
-
-            // 通过反射获取工具类的 description 静态字段
-            try {
-                var descriptionField = instance.getClass().getDeclaredField("description");
-                var reflectedDesc = (String) descriptionField.get(null);
-                if (reflectedDesc != null) {
-                    description = reflectedDesc;
-                }
-            } catch (Exception e) {
-                // description 字段可选，没有则使用 YAML/JSON 中的值
-            }
-
-            // 通过反射从 toolInstance 获取 Parameter 静态内部类
-            try {
-                for (var declaredClass : instance.getClass().getDeclaredClasses()) {
-                    if ("Parameter".equals(declaredClass.getSimpleName())) {
-                        parameterClass = declaredClass;
-                        break;
-                    }
-                }
-            } catch (Exception e) {
-                // Parameter 类可选
-            }
+            return fromFunction(className);
         }
 
         var toolBuilder = Tool.<Object>builder()
                 .name(name)
                 .type(type != null ? type : Tool.TYPE.FUNCTION)
-                .function(function)
-                .paramType((Class<Object>) parameterClass)
                 .parameters(parameters);
 
         if (description != null) {
@@ -177,6 +151,67 @@ public class Loader {
 
         return toolBuilder.build();
     }
+
+    /**
+     * 根据类名字符串加载FUNCTION类型的工具
+     * 委托到 fromFunction(Class) 执行反射与构建
+     * @param className 工具类的全限定名
+     * @return 构建好的Tool对象
+     */
+    @SneakyThrows
+    public Tool<?> fromFunction(String className) {
+        var clazz = Class.forName(className);
+        return fromFunction(clazz);
+    }
+
+    /**
+     * 根据Class对象加载FUNCTION类型的工具
+     * 通过反射获取FunctionWrapper实例，并反射获取description静态字段和Parameter静态内部类
+     * @param clazz 工具类的Class对象
+     * @return 构建好的Tool对象
+     */
+    @SneakyThrows
+    public Tool<?> fromFunction(Class<?> clazz) {
+        var instance = clazz.getDeclaredConstructor().newInstance();
+        var function = (FunctionWrapper<Object>) instance;
+
+        var name = clazz.getSimpleName();
+
+        // 通过反射获取工具类的 description 静态字段
+        String description = null;
+        try {
+            var descriptionField = clazz.getDeclaredField("description");
+            description = (String) descriptionField.get(null);
+        } catch (Exception e) {
+            // description 字段可选
+        }
+
+        // 通过反射获取 Parameter 静态内部类
+        Class<?> parameterClass = null;
+        try {
+            for (var declaredClass : clazz.getDeclaredClasses()) {
+                if ("Parameter".equals(declaredClass.getSimpleName())) {
+                    parameterClass = declaredClass;
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            // Parameter 类可选
+        }
+
+        var toolBuilder = Tool.<Object>builder()
+                .name(name)
+                .type(Tool.TYPE.FUNCTION)
+                .function(function)
+                .paramType((Class<Object>) parameterClass);
+
+        if (description != null) {
+            toolBuilder.description(description);
+        }
+
+        return toolBuilder.build();
+    }
+
     /**
      * 遍历目录，所有的一级子文件夹为工具名称，二级子文件夹为工具的版本
      * 工具文件夹下的 info.json 记录了当前引用的版本
