@@ -128,12 +128,12 @@ public abstract class ContainerServer {
     /**
      * 本地 Agent 缓存
      */
-    public Map<String, Agent> localAgents = new HashMap<>();
+    public Map<String, Agent> localAgents = new ConcurrentHashMap<>();
 
     /**
      * client 缓存：AgentId 对应 TransportClientRecord（多协议互通）
      */
-    public Map<String, TransportClientRecord> agentClient = new HashMap<>();
+    public Map<String, TransportClientRecord> agentClient = new ConcurrentHashMap<>();
 
     /**
      * Agent 列表查询聚合收集器缓存：requestId 对应 ListQueryCollector
@@ -293,11 +293,13 @@ public abstract class ContainerServer {
 
         if (agent != null) {
             agent.subscribe(item -> {
-                var messageJson = JSONUtil.stringify(
-                        JSONUtil.create()
-                                .put("agentId", agentId)
-                                .set("message", JSONUtil.convert(item))
-                );
+                var payload = JSONUtil.create()
+                        .put("agentId", agentId)
+                        .set("message", JSONUtil.convert(item));
+                var wrapped = JSONUtil.create()
+                        .put("requestId", context.requestId)
+                        .set("data", payload);
+                var messageJson = JSONUtil.stringify(wrapped);
 
                     if (this.id.equals(context.serverId)) {
                         if (context.transport != null) {
@@ -306,8 +308,9 @@ public abstract class ContainerServer {
                             log.warn("handleAgentSubscribe no transport for client: %s".formatted(context.client));
                         }
                     } else {
-                        var reverseJson = "%s|%s|%s|%s".formatted(this.id, "reverse", EVENT_AGENT_MESSAGE, messageJson);
-                        messageBus.publish("%s-message".formatted(context.serverId), reverseJson);
+                        var array = JSONUtil.createArray();
+                        array.add(this.id).add("reverse").add(EVENT_AGENT_MESSAGE).add(messageJson);
+                        messageBus.publish("%s-message".formatted(context.serverId), JSONUtil.stringify(array));
                     }
             });
             return null;
@@ -375,8 +378,45 @@ public abstract class ContainerServer {
      * @return null
      */
     public ObjectNode handleAgentList(Context context, ObjectNode data) {
+        var agents = listAgent(context, data);
 
+        // region 代理调用：其他节点查询本节点Agent，直接返回结果
+        if (!this.id.equals(context.serverId)) {
+            var resultArray = JSONUtil.createArray();
+            agents.forEach(agent -> resultArray.add(JSONUtil.convert(agent)));
+            return JSONUtil.create().set("agents", resultArray);
+        }
+        // endregion
+
+        var allNodes = metaData.getNodes();
+        var otherNodes = allNodes.stream()
+                .filter(node -> !this.id.equals(node.id))
+                .toList();
+
+        // region 本节点调用 + 无其他节点：直接同步返回
+        if (otherNodes.isEmpty()) {
+            var resultArray = JSONUtil.createArray();
+            agents.forEach(agent -> resultArray.add(JSONUtil.convert(agent)));
+            return JSONUtil.create().set("agents", resultArray);
+        }
+        // endregion
+
+        // region 本节点调用 + 有其他节点：广播查询，异步聚合
+        var requestId = context.requestId;
+        var localResults = new ArrayList<ObjectNode>();
+        agents.forEach(agent -> localResults.add((ObjectNode) JSONUtil.convert(agent)));
+
+        var collector = ListQueryCollector.builder()
+                .requestId(requestId)
+                .expectedCount(otherNodes.size())
+                .results(localResults)
+                .originalContext(context)
+                .build();
+        listQueryCollectors.put(requestId, collector);
+
+        otherNodes.forEach(node -> sendToOtherNode(EVENT_AGENT_LIST, JSONUtil.stringify(data), node.id));
         return null;
+        // endregion
     }
 
     /**
@@ -410,7 +450,7 @@ public abstract class ContainerServer {
             default -> null;
         };
         var wrapped = JSONUtil.create().set("data", result).put("requestId", requestId);
-        
+
         if (result != null && this.id.equals(context.serverId)) {
             context.transport.sendToClient(context.client, event, JSONUtil.stringify(wrapped));
         }
@@ -430,32 +470,34 @@ public abstract class ContainerServer {
 
     /**
      * 通过MessageBus发布消息给其他节点
-     * 消息主题为 nodeId-message，消息数据结构为|分隔（只有4段）： sourceNodeId|type|event|body
+     * 消息主题为 nodeId-message，消息数据结构为 JSON 数组：[sourceNodeId, type, event, body]
      */
     private void sendToOtherNode(String event, String data, String nodeId) {
-        var body = "%s|proxy|%s|%s".formatted(this.id, event, data);
-        this.messageBus.publish("%s-message".formatted(nodeId), body);
+        var array = JSONUtil.createArray();
+        array.add(this.id).add("proxy").add(event).add(data);
+        this.messageBus.publish("%s-message".formatted(nodeId), JSONUtil.stringify(array));
     }
 
     /**
      * 订阅需要本节点处理的消息
-     * 消息主题为 nodeId-message，消息数据结构为 | 分隔（只有 4 段）：sourceNodeId|type|event|body
+     * 消息主题为 nodeId-message，消息数据结构为 JSON 数组：[sourceNodeId, type, event, body]
      */
     public void listenMessage() {
         messageBus.subscribe("%s-message".formatted(this.id), (message) -> {
             log.debug("listenMessage message: " + message);
-            var parts = message.split("\\|", 4);
+            var parts = JSONUtil.parseArray(message);
 
-            var sourceNode = parts[0];
-            var type = parts[1];
-            var event = parts[2];
-            var bodyJson = parts[3];
+            var sourceNode = parts.get(0).asText();
+            var type = parts.get(1).asText();
+            var event = parts.get(2).asText();
+            var bodyJson = parts.get(3).asText();
 
             switch (type) {
                 case "proxy" -> {
                     if (isShuttingDown) {
-                        var msg = "%s|%s|%s|%s".formatted(this.id, "reverse", "ack", SHUTTING_DOWN_ERROR);
-                        messageBus.publish("%s-message".formatted(sourceNode), msg);
+                        var array = JSONUtil.createArray();
+                        array.add(this.id).add("reverse").add(event).add(SHUTTING_DOWN_ERROR);
+                        messageBus.publish("%s-message".formatted(sourceNode), JSONUtil.stringify(array));
                         return;
                     }
                     var proxyCtx = Context.builder().client(sourceNode).serverId(sourceNode).build();
@@ -463,24 +505,53 @@ public abstract class ContainerServer {
                     log.debug("listenMessage proxy event: " + event + ", result: " + result);
 
                     if (result != null) {
-                        var msg = "%s|%s|%s|%s".formatted(this.id, "reverse", "ack", result);
-                        messageBus.publish("%s-message".formatted(sourceNode), msg);
+                        var array = JSONUtil.createArray();
+                        array.add(this.id).add("reverse").add(event).add(result);
+                        messageBus.publish("%s-message".formatted(sourceNode), JSONUtil.stringify(array));
                     }
                 }
                 case "reverse" -> {
-                    var data = JSONUtil.parse(bodyJson);
-                    var agentId = data.path("agentId").asText();
-
-                    var record = agentClient.get(agentId);
-
-                    if (record != null && !"ack".equals(event)) {
-                        // 通过 transportId 找到对应 transport，委托其发送事件给客户端
-                        for (var transport : transports) {
-                            if (record.getTransportId().equals(transport.getTransportId())) {
-                                transport.sendToClient(record.getClientHandle(), event, bodyJson);
-                                break;
+                    if (EVENT_AGENT_LIST.equals(event)) {
+                        // region 聚合 agent.list 各节点查询结果
+                        var ackData = JSONUtil.parse(bodyJson);
+                        var wrappedData = ackData.path("data");
+                        if (!wrappedData.isMissingNode() && wrappedData.has("agents")) {
+                            var ackRequestId = ackData.path("requestId").asText();
+                            var collector = listQueryCollectors.get(ackRequestId);
+                            if (collector != null) {
+                                var agentsArray = wrappedData.path("agents");
+                                if (agentsArray.isArray()) {
+                                    agentsArray.forEach(item ->
+                                            collector.results.add((ObjectNode) item));
+                                }
+                                collector.expectedCount--;
+                                if (collector.expectedCount <= 0) {
+                                    var mergedArray = JSONUtil.createArray();
+                                    collector.results.forEach(mergedArray::add);
+                                    var combined = JSONUtil.create()
+                                            .put("requestId", ackRequestId)
+                                            .set("data", mergedArray);
+                                    var ctx = collector.originalContext;
+                                    ctx.transport.sendToClient(ctx.client, event, JSONUtil.stringify(combined));
+                                    listQueryCollectors.remove(ackRequestId);
+                                }
                             }
                         }
+                        // endregion
+                    } else {
+                        // region 处理 agent 消息推送：通过 transport 发送给订阅客户端
+                        var data = JSONUtil.parse(bodyJson);
+                        var agentId = data.path("data").path("agentId").asText();
+                        var record = agentClient.get(agentId);
+                        if (record != null) {
+                            for (var transport : transports) {
+                                if (record.getTransportId().equals(transport.getTransportId())) {
+                                    transport.sendToClient(record.getClientHandle(), event, bodyJson);
+                                    break;
+                                }
+                            }
+                        }
+                        // endregion
                     }
                 }
             }
