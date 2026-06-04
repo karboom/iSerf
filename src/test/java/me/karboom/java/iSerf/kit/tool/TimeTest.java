@@ -2,8 +2,13 @@ package me.karboom.java.iSerf.kit.tool;
 
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
+import me.karboom.java.iSerf.agent.tool.Loader;
 import me.karboom.java.iSerf.agent.tool.Tool;
+import me.karboom.java.iSerf.kit.tool.time.AddPeriodicPlan;
+import me.karboom.java.iSerf.kit.tool.time.AddAbsolutePlan;
+import me.karboom.java.iSerf.kit.tool.time.AddRelativePlan;
 import me.karboom.java.iSerf.util.JSONUtil;
 import org.junit.jupiter.api.Test;
 
@@ -45,11 +50,11 @@ public class TimeTest {
             var successContainer = new AtomicBoolean(false);
 
             assertTimeoutPreemptively(Duration.ofSeconds(60), () -> {
-                // 创建 Time 工具
-                var time = new Time();
-                var addPeriodicPlanTool = time.addPeriodicPlan();
-                var addAbsolutePlanTool = time.addAbsolutePlan();
-                var addRelativePlanTool = time.addRelativePlan();
+                // 通过 Loader 从类名加载工具
+                var loader = new Loader(30);
+                var addPeriodicPlanTool = loader.fromFunction(AddPeriodicPlan.class);
+                var addAbsolutePlanTool = loader.fromFunction(AddAbsolutePlan.class);
+                var addRelativePlanTool = loader.fromFunction(AddRelativePlan.class);
 
                 var tools = new ArrayList<Tool<?>>();
                 tools.add(addPeriodicPlanTool);
@@ -61,7 +66,8 @@ public class TimeTest {
                         """;
 
                 var llm = llmTest.getLlm();
-                var agent = new Agent("time-agent-" + System.currentTimeMillis(), "", llm, tools) {};
+                var llmProvider = new FixedLlmProvider(llm);
+                var agent = new Agent("time-agent-" + System.currentTimeMillis(), "", llmProvider, tools) {};
 
                 var result = new StringBuilder();
                 var finished = new AtomicBoolean(false);
