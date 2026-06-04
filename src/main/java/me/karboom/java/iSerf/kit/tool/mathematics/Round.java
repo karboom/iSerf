@@ -22,6 +22,6 @@ public class Round implements FunctionWrapper<Round.Parameter> {
     @Override
     public CallResult run(Context ctx, Parameter params) {
         var result = Math.round(params.number);
-        return MathUtil.formatResult(result);
+        return MathUtil.formatResult((double) result);
     }
 }
