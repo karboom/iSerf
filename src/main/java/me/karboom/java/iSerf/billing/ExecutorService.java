@@ -65,13 +65,12 @@ public class ExecutorService implements Executor {
                 .start(() -> {
                     try {
                         command.run();
-                        var cpu = (int) ((System.nanoTime() - startTime) / 1000);
                         ledger.record(Cost.builder()
                                 .id(DataUtil.getFlakeId())
                                 .targetType(type)
                                 .targetId(id)
                                 .usage(usage)
-                                .cpu(cpu)
+                                .cpu(System.nanoTime() - startTime)
                                 .build());
                     } finally {
                         semaphore.release();

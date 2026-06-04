@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 
 @Data
@@ -18,13 +19,12 @@ public class Cost {
     public String targetId;
     public String usage;
 
-    public LocalDateTime startTime;
-    public LocalDateTime endTime;
+    public Instant captureTime;
 
     /**
-     * CPU运行时间us
+     * CPU运行时间ns
      */
-    public Integer cpu;
+    public Long cpu;
     /**
      * 内存占用byte
      */
