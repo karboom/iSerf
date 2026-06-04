@@ -430,31 +430,39 @@ public abstract class ContainerServer {
      * @return 响应 JSON 字符串，可为 null
      */
     public String handleUserEvent(Context context, String event, String dataJson) {
-        if (isShuttingDown) {
-            return SHUTTING_DOWN_ERROR;
-        }
-        var data = JSONUtil.parse(dataJson);
-        if (data.has("requestId")) {
-            return "need requestId";
-        }
-        var requestId = data.get("requestId").asString();
-        context.setRequestId(requestId);
+        try {
+            if (isShuttingDown) {
+                throw new RuntimeException("server is shutting down");
+            }
+            var data = JSONUtil.parse(dataJson);
+            if (!data.has("requestId")) {
+                throw new RuntimeException("need requestId");
+            }
 
-        var result = switch (event) {
-            case EVENT_AGENT_CREATE -> handleAgentCreate(context, data);
-            case EVENT_AGENT_SEND -> handleAgentSend(context, data);
-            case EVENT_AGENT_SUBSCRIBE -> handleAgentSubscribe(context, data);
-            case EVENT_AGENT_UNSUBSCRIBE -> handleAgentUnsubscribe(context, data);
-            case EVENT_AGENT_TOOL_CALL -> handleAgentToolCall(context, data);
-            case EVENT_AGENT_LIST -> handleAgentList(context, data);
-            default -> null;
-        };
-        var wrapped = JSONUtil.create().set("data", result).put("requestId", requestId);
+            var requestId = data.get("requestId").asString();
+            context.setRequestId(requestId);
 
-        if (result != null && this.id.equals(context.serverId)) {
-            context.transport.sendToClient(context.client, event, JSONUtil.stringify(wrapped));
+            var result = switch (event) {
+                case EVENT_AGENT_CREATE -> handleAgentCreate(context, data);
+                case EVENT_AGENT_SEND -> handleAgentSend(context, data);
+                case EVENT_AGENT_SUBSCRIBE -> handleAgentSubscribe(context, data);
+                case EVENT_AGENT_UNSUBSCRIBE -> handleAgentUnsubscribe(context, data);
+                case EVENT_AGENT_TOOL_CALL -> handleAgentToolCall(context, data);
+                case EVENT_AGENT_LIST -> handleAgentList(context, data);
+                default -> null;
+            };
+            var wrapped = JSONUtil.create().set("data", result).put("requestId", requestId);
+
+            if (result != null && this.id.equals(context.serverId)) {
+                context.transport.sendToClient(context.client, event, JSONUtil.stringify(wrapped));
+            }
+            return result != null ? JSONUtil.stringify(wrapped) : null;
+        } catch (Exception e) {
+            var result = JSONUtil.create().put("error", e.getMessage().toString());
+
+            return JSONUtil.stringify(result);
         }
-        return result != null ? JSONUtil.stringify(wrapped) : null;
+
     }
 
     /**
@@ -484,76 +492,77 @@ public abstract class ContainerServer {
      */
     public void listenMessage() {
         messageBus.subscribe("%s-message".formatted(this.id), (message) -> {
-            log.debug("listenMessage message: " + message);
-            var parts = JSONUtil.parseArray(message);
+            try {
+                log.debug("listenMessage message: " + message);
+                var parts = JSONUtil.parseArray(message);
 
-            var sourceNode = parts.get(0).asText();
-            var type = parts.get(1).asText();
-            var event = parts.get(2).asText();
-            var bodyJson = parts.get(3).asText();
+                var sourceNode = parts.get(0).asText();
+                var type = parts.get(1).asText();
+                var event = parts.get(2).asText();
+                var bodyJson = parts.get(3).asText();
 
-            switch (type) {
-                case "proxy" -> {
-                    if (isShuttingDown) {
-                        var array = JSONUtil.createArray();
-                        array.add(this.id).add("reverse").add(event).add(SHUTTING_DOWN_ERROR);
-                        messageBus.publish("%s-message".formatted(sourceNode), JSONUtil.stringify(array));
-                        return;
+
+                switch (type) {
+                    case "proxy" -> {
+
+                        var proxyCtx = Context.builder().client(sourceNode).serverId(sourceNode).build();
+                        var result = handleUserEvent(proxyCtx, event, bodyJson);
+                        log.debug("listenMessage proxy event: " + event + ", result: " + result);
+
+                        if (result != null) {
+                            var array = JSONUtil.createArray();
+                            array.add(this.id).add("reverse").add(event).add(result);
+                            messageBus.publish("%s-message".formatted(sourceNode), JSONUtil.stringify(array));
+                        }
                     }
-                    var proxyCtx = Context.builder().client(sourceNode).serverId(sourceNode).build();
-                    var result = handleUserEvent(proxyCtx, event, bodyJson);
-                    log.debug("listenMessage proxy event: " + event + ", result: " + result);
+                    case "reverse" -> {
 
-                    if (result != null) {
-                        var array = JSONUtil.createArray();
-                        array.add(this.id).add("reverse").add(event).add(result);
-                        messageBus.publish("%s-message".formatted(sourceNode), JSONUtil.stringify(array));
-                    }
-                }
-                case "reverse" -> {
-                    if (EVENT_AGENT_LIST.equals(event)) {
-                        // region 聚合 agent.list 各节点查询结果
-                        var ackData = JSONUtil.parse(bodyJson);
-                        var wrappedData = ackData.path("data");
-                        if (!wrappedData.isMissingNode() && wrappedData.has("agents")) {
-                            var ackRequestId = ackData.path("requestId").asText();
-                            var collector = listQueryCollectors.get(ackRequestId);
-                            if (collector != null) {
-                                var agentsArray = wrappedData.path("agents");
-                                if (agentsArray.isArray()) {
-                                    agentsArray.forEach(item ->
-                                            collector.results.add((ObjectNode) item));
-                                }
-                                collector.expectedCount--;
-                                if (collector.expectedCount <= 0) {
-                                    var mergedArray = JSONUtil.createArray();
-                                    collector.results.forEach(mergedArray::add);
-                                    var combined = JSONUtil.create()
-                                            .put("requestId", ackRequestId)
-                                            .set("data", mergedArray);
-                                    var ctx = collector.originalContext;
-                                    ctx.transport.sendToClient(ctx.client, event, JSONUtil.stringify(combined));
-                                    listQueryCollectors.remove(ackRequestId);
+                        if (EVENT_AGENT_LIST.equals(event)) {
+                            // region 聚合 agent.list 各节点查询结果
+                            var ackData = JSONUtil.parse(bodyJson);
+                            var wrappedData = ackData.path("data");
+                            if (!wrappedData.isMissingNode() && wrappedData.has("agents")) {
+                                var ackRequestId = ackData.path("requestId").asText();
+                                var collector = listQueryCollectors.get(ackRequestId);
+                                if (collector != null) {
+                                    var agentsArray = wrappedData.path("agents");
+                                    if (agentsArray.isArray()) {
+                                        agentsArray.forEach(item ->
+                                                collector.results.add((ObjectNode) item));
+                                    }
+                                    collector.expectedCount--;
+                                    if (collector.expectedCount <= 0) {
+                                        var mergedArray = JSONUtil.createArray();
+                                        collector.results.forEach(mergedArray::add);
+                                        var combined = JSONUtil.create()
+                                                .put("requestId", ackRequestId)
+                                                .set("data", mergedArray);
+                                        var ctx = collector.originalContext;
+                                        ctx.transport.sendToClient(ctx.client, event, JSONUtil.stringify(combined));
+                                        listQueryCollectors.remove(ackRequestId);
+                                    }
                                 }
                             }
-                        }
-                        // endregion
-                    } else {
-                        // region 处理 agent 消息推送：通过 transport 发送给订阅客户端
-                        var data = JSONUtil.parse(bodyJson);
-                        var agentId = data.path("data").path("agentId").asText();
-                        var record = agentClient.get(agentId);
-                        if (record != null) {
-                            for (var transport : transports) {
-                                if (record.getTransportId().equals(transport.getTransportId())) {
-                                    transport.sendToClient(record.getClientHandle(), event, bodyJson);
-                                    break;
+                            // endregion
+                        } else {
+                            // region 处理 agent 消息推送：通过 transport 发送给订阅客户端
+                            var data = JSONUtil.parse(bodyJson);
+                            var agentId = data.path("data").path("agentId").asText();
+                            var record = agentClient.get(agentId);
+                            if (record != null) {
+                                for (var transport : transports) {
+                                    if (record.getTransportId().equals(transport.getTransportId())) {
+                                        transport.sendToClient(record.getClientHandle(), event, bodyJson);
+                                        break;
+                                    }
                                 }
                             }
+                            // endregion
                         }
-                        // endregion
                     }
                 }
+            } catch (Exception e) {
+               log.error("<listenMessage>", e);
             }
         });
     }
