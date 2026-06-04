@@ -88,6 +88,11 @@ public class Agent {
      */
     public List<CallCache> toolCallCaches = new ArrayList<>();
 
+    /**
+     * 工作目录，文件系统工具以此目录为根目录进行读写
+     */
+    public Path workDir;
+
     public void eventInterceptor(Event event) {
     }
 
@@ -791,7 +796,7 @@ public class Agent {
 
         // 加载类
         var cls = (FunctionWrapper) CodeUtil.load(versionDir, functionPath.get(2));
-        result = (cls.run(new Context(this), cache.params));
+        result = (cls.run(new Context(this, null), cache.params));
 
         return result.direct;
     }
@@ -941,7 +946,7 @@ public class Agent {
                         CodeUtil.compile(updatedCode, targetDir);
                         var obj = CodeUtil.load(targetDir, StrUtil.upperFirst(StrUtil.toCamelCase(toolCall.getName())));
                         if (obj instanceof FunctionWrapper wrapper) {
-                            wrapper.run(new Context(this), toolCall.arguments);
+                            wrapper.run(new Context(this, null), toolCall.arguments);
                         } else {
                             throw new RuntimeException();
                         }
@@ -1056,7 +1061,7 @@ public class Agent {
                     case Tool.TYPE.FUNCTION:
                         // 调用本地函数
 
-                        result = matchedTool.getFunction().run(new Context(this), JSONUtil.convert(call.arguments, matchedTool.paramType));
+                        result = matchedTool.getFunction().run(new Context(this, null), JSONUtil.convert(call.arguments, matchedTool.paramType));
 
                         break;
 
@@ -1076,7 +1081,7 @@ public class Agent {
 
                             // 加载类
                             var cls = (FunctionWrapper) CodeUtil.load(versionDir, functionPath.get(2));
-                            result = (cls.run(new Context(this), JSONUtil.convert(call.arguments, matchedTool.paramType)));
+                            result = (cls.run(new Context(this, null), JSONUtil.convert(call.arguments, matchedTool.paramType)));
                         } catch (Exception e) {
                             result.setError((RuntimeException) e);
                         }
