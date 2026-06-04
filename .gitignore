@@ -10,6 +10,8 @@ scripts/
 **/node_modules/
 logs/
 src/main/java/me/karboom/java/iSerf/iFunction/**
+.aider-desk/tasks/*
+.aider.input.history
 
 .run/
 

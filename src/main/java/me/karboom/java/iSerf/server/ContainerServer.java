@@ -15,6 +15,7 @@ import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import tools.jackson.databind.node.ObjectNode;
 
+import javax.smartcardio.CardTerminal;
 import java.util.*;
 
 /**
@@ -29,6 +30,15 @@ public abstract class ContainerServer {
      * 关闭状态下的拒绝消息
      */
     private static final String SHUTTING_DOWN_ERROR = "{\"error\":\"server is shutting down\"}";
+
+    // ======================== 事件名常量 ========================
+    public static final String EVENT_AGENT_CREATE = "agent.create";
+    public static final String EVENT_AGENT_SEND = "agent.send";
+    public static final String EVENT_AGENT_SUBSCRIBE = "agent.subscribe";
+    public static final String EVENT_AGENT_UNSUBSCRIBE = "agent.unsubscribe";
+    public static final String EVENT_AGENT_TOOL_CALL = "agent.toolCall";
+    public static final String EVENT_AGENT_LIST = "agent.list";
+    public static final String EVENT_AGENT_MESSAGE = "agent.message";
 
     /**
      * 客户端记录：存储 transport 标识和客户端句柄，支持多协议互通
@@ -195,7 +205,7 @@ public abstract class ContainerServer {
     // ======================== Agent 事件处理 ========================
 
     /**
-     * 处理 agent/create 事件：创建 Agent
+     * 处理 agent.create 事件：创建 Agent
      *
      * @param context  上下文（含 transport、client、user）
      * @param dataJson 请求数据 JSON 字符串
@@ -207,13 +217,13 @@ public abstract class ContainerServer {
         var agentId = agent.id;
         localAgents.put(agentId, agent);
         metaData.setAgentStay(agentId, this.id);
-        log.debug("handleAgentCreate agent/create: local " + dataJson);
+        log.debug("handleAgentCreate agent.create: local " + dataJson);
         var result = JSONUtil.create().put("agentId", agentId);
         return JSONUtil.stringify(result);
     }
 
     /**
-     * 处理 agent/send 事件：发送消息给 Agent
+     * 处理 agent.send 事件：发送消息给 Agent
      *
      * @param context  上下文（含 transport、client、user）
      * @param dataJson 请求数据 JSON 字符串
@@ -228,19 +238,19 @@ public abstract class ContainerServer {
             agent.trigger(eventObj);
         } else {
             var targetNodeId = metaData.getAgentStay(agentId);
-            sendToOtherNode("agent/send", dataJson, targetNodeId);
+            sendToOtherNode(EVENT_AGENT_SEND, dataJson, targetNodeId);
         }
         return null;
     }
 
     /**
-     * 处理 agent/active 事件：订阅 Agent 消息流
+     * 处理 agent.subscribe 事件：订阅 Agent 消息流
      *
      * @param context  上下文（含 transport、client、user）
      * @param dataJson 请求数据 JSON 字符串
      * @return 响应 JSON 字符串，可为 null
      */
-    public String handleAgentActive(Context context, String dataJson) {
+    public String handleAgentSubscribe(Context context, String dataJson) {
         var data = JSONUtil.parse(dataJson);
         var agentId = data.path("agentId").asText();
         var agent = localAgents.get(agentId);
@@ -255,14 +265,14 @@ public abstract class ContainerServer {
 
                     switch (context.client) {
                         case String sourceNodeId -> {
-                            var reverseJson = "%s|%s|%s|%s".formatted(this.id, "reverse", "agent/message", messageJson);
+                            var reverseJson = "%s|%s|%s|%s".formatted(this.id, "reverse", EVENT_AGENT_MESSAGE, messageJson);
                             messageBus.publish("%s-message".formatted(sourceNodeId), reverseJson);
                         }
                         default -> {
                             if (context.transport != null) {
-                                context.transport.sendToClient(context.client, "agent/message", messageJson);
+                                context.transport.sendToClient(context.client, EVENT_AGENT_MESSAGE, messageJson);
                             } else {
-                                log.warn("handleAgentActive no transport for client: %s".formatted(context.client));
+                                log.warn("handleAgentSubscribe no transport for client: %s".formatted(context.client));
                             }
                         }
                     }
@@ -275,19 +285,19 @@ public abstract class ContainerServer {
                             .clientHandle(context.client)
                             .build();
                     agentClient.put(agentId, transportRecord);
-            sendToOtherNode("agent/active", dataJson, targetNodeId);
+            sendToOtherNode(EVENT_AGENT_SUBSCRIBE, dataJson, targetNodeId);
             return null;
         }
     }
 
     /**
-     * 处理 agent/leave 事件：取消订阅 Agent
+     * 处理 agent.unsubscribe 事件：取消订阅 Agent
      *
      * @param context  上下文（含 transport、client、user）
      * @param dataJson 请求数据 JSON 字符串
      * @return 响应 JSON 字符串，可为 null
      */
-    public String handleAgentLeave(Context context, String dataJson) {
+    public String handleAgentUnsubscribe(Context context, String dataJson) {
         var data = JSONUtil.parse(dataJson);
         var agentId = data.path("agentId").asText();
         var agent = localAgents.get(agentId);
@@ -296,13 +306,13 @@ public abstract class ContainerServer {
             return "{\"success\":true}";
         } else {
             var targetNodeId = metaData.getAgentStay(agentId);
-            sendToOtherNode("agent/leave", dataJson, targetNodeId);
+            sendToOtherNode(EVENT_AGENT_UNSUBSCRIBE, dataJson, targetNodeId);
             return null;
         }
     }
 
     /**
-     * 处理 agent/toolCall 事件：执行工具调用
+     * 处理 agent.toolCall 事件：执行工具调用
      *
      * @param context  上下文（含 transport、client、user）
      * @param dataJson 请求数据 JSON 字符串
@@ -319,9 +329,20 @@ public abstract class ContainerServer {
             return JSONUtil.stringify(result);
         } else {
             var targetNodeId = metaData.getAgentStay(agentId);
-            sendToOtherNode("agent/toolCall", dataJson, targetNodeId);
+            sendToOtherNode(EVENT_AGENT_TOOL_CALL, dataJson, targetNodeId);
             return null;
         }
+    }
+
+    /**
+     * 按照条件查找智能体，同时从自身和其他节点查询，然后合并
+     * @param context
+     * @param queryJson
+     * @return
+     */
+    public String handleAgentList(Context context, String queryJson) {
+
+        return "";
     }
 
     /**
@@ -336,14 +357,15 @@ public abstract class ContainerServer {
         if (isShuttingDown) {
             return SHUTTING_DOWN_ERROR;
         }
-        return switch (event) {
-            case "agent/create" -> handleAgentCreate(context, dataJson);
-            case "agent/send" -> handleAgentSend(context, dataJson);
-            case "agent/active" -> handleAgentActive(context, dataJson);
-            case "agent/leave" -> handleAgentLeave(context, dataJson);
-            case "agent/toolCall" -> handleAgentToolCall(context, dataJson);
+        return String.valueOf(switch (event) {
+            case EVENT_AGENT_CREATE -> handleAgentCreate(context, dataJson);
+            case EVENT_AGENT_SEND -> handleAgentSend(context, dataJson);
+            case EVENT_AGENT_SUBSCRIBE -> handleAgentSubscribe(context, dataJson);
+            case EVENT_AGENT_UNSUBSCRIBE -> handleAgentUnsubscribe(context, dataJson);
+            case EVENT_AGENT_TOOL_CALL -> handleAgentToolCall(context, dataJson);
+            case EVENT_AGENT_LIST -> handleAgentList(context, dataJson);
             default -> null;
-        };
+        });
     }
 
     /**

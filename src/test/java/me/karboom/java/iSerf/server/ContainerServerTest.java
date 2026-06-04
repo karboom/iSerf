@@ -79,12 +79,12 @@ class ContainerServerTest {
 
         // 正常状态下应处理事件
         server.isShuttingDown = false;
-        var normalResult = server.handleUserEvent("agent/create", ctx, "{}");
+        var normalResult = server.handleUserEvent(ContainerServer.EVENT_AGENT_CREATE, ctx, "{}");
         assertNotNull(normalResult, "正常状态下应有响应");
 
         // 关闭状态下应返回错误
         server.isShuttingDown = true;
-        var shutdownResult = server.handleUserEvent("agent/create", ctx, "{}");
+        var shutdownResult = server.handleUserEvent(ContainerServer.EVENT_AGENT_CREATE, ctx, "{}");
         assertNotNull(shutdownResult, "关闭状态下应有响应");
         assertTrue(shutdownResult.contains("shutting down"), "关闭状态下应返回 shutting down 错误");
     }
@@ -100,12 +100,12 @@ class ContainerServerTest {
                 .client("test-client")
                 .build();
 
-        // agent/create 应返回含 agentId 的 JSON
-        var createResult = server.handleUserEvent("agent/create", ctx, "{}");
-        assertNotNull(createResult, "agent/create 应返回结果");
-        assertTrue(createResult.contains("agentId"), "agent/create 结果应包含 agentId");
+        // agent.create 应返回含 agentId 的 JSON
+        var createResult = server.handleUserEvent(ContainerServer.EVENT_AGENT_CREATE, ctx, "{}");
+        assertNotNull(createResult, "agent.create 应返回结果");
+        assertTrue(createResult.contains("agentId"), "agent.create 结果应包含 agentId");
 
-        // agent/send 对不存在的 agent 返回 null（直接跨节点转发无本地响应）
+        // agent.send 对不存在的 agent 返回 null（直接跨节点转发无本地响应）
         var sendEvent = java.util.Map.of(
                 "agentId", "nonexistent",
                 "event", java.util.Map.of(
@@ -118,18 +118,18 @@ class ContainerServerTest {
                         )
                 )
         );
-        var sendResult = server.handleUserEvent("agent/send", ctx, JSONUtil.stringify(sendEvent));
-        assertNull(sendResult, "agent/send 对不存在 agent 应返回 null");
+        var sendResult = server.handleUserEvent(ContainerServer.EVENT_AGENT_SEND, ctx, JSONUtil.stringify(sendEvent));
+        assertNull(sendResult, "agent.send 对不存在 agent 应返回 null");
 
-        // agent/leave 对不存在的 agent 返回 null
-        var leaveResult = server.handleUserEvent("agent/leave", ctx,
+        // agent.leave 对不存在的 agent 返回 null
+        var unsubscribeResult = server.handleUserEvent(ContainerServer.EVENT_AGENT_UNSUBSCRIBE, ctx,
                 JSONUtil.stringify(java.util.Map.of("agentId", "nonexistent")));
-        assertNull(leaveResult, "agent/leave 对不存在 agent 应返回 null");
+        assertNull(unsubscribeResult, "agent.unsubscribe 对不存在 agent 应返回 null");
 
-        // agent/toolCall 对不存在的 agent 返回 null
-        var toolCallResult = server.handleUserEvent("agent/toolCall", ctx,
+        // agent.toolCall 对不存在的 agent 返回 null
+        var toolCallResult = server.handleUserEvent(ContainerServer.EVENT_AGENT_TOOL_CALL, ctx,
                 JSONUtil.stringify(java.util.Map.of("agentId", "nonexistent", "toolCallId", "test")));
-        assertNull(toolCallResult, "agent/toolCall 对不存在 agent 应返回 null");
+        assertNull(toolCallResult, "agent.toolCall 对不存在 agent 应返回 null");
 
         // 未定义的 event 返回 null
         var unknownResult = server.handleUserEvent("unknown/event", ctx, "{}");
@@ -137,7 +137,7 @@ class ContainerServerTest {
     }
 
     /**
-     * 验证 agent/create 处理流程
+     * 验证 agent.create 处理流程
      */
     @Test
     @Timeout(value = 10, unit = TimeUnit.SECONDS)
@@ -150,7 +150,7 @@ class ContainerServerTest {
         // 创建前 localAgents 为空
         assertTrue(server.localAgents.isEmpty(), "创建前 localAgents 应为空");
 
-        var result = server.handleUserEvent("agent/create", ctx, "{}");
+        var result = server.handleUserEvent(ContainerServer.EVENT_AGENT_CREATE, ctx, "{}");
         var resultNode = JSONUtil.parse(result);
         var agentId = resultNode.path("agentId").asText();
 
@@ -174,11 +174,11 @@ class ContainerServerTest {
 //                .build();
 //
 //        // 先创建 agent
-//        var createResult = server.handleUserEvent("agent/create", ctx, "{}");
+//        var createResult = server.handleUserEvent("agent.create", ctx, "{}");
 //        var agentId = JSONUtil.parse(createResult).path("agentId").asText();
 //
 //        // 对已存在的 agent 调用 toolCall
-//        var toolCallResult = server.handleUserEvent("agent/toolCall", ctx,
+//        var toolCallResult = server.handleUserEvent("agent.toolCall", ctx,
 //                JSONUtil.stringify(java.util.Map.of("agentId", agentId, "toolCallId", "test-tool-call")));
 //        // toolCall 应返回非空结果
 //        assertNotNull(toolCallResult, "本地 agent toolCall 应返回结果");

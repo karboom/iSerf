@@ -165,32 +165,32 @@ public abstract class Websocket {
      *  初始化用户侧协议
      *
      *  服务端监听客户端事件
-     *  agent/create: {"prompt":"xxx"}。直接创建 Agent。响应 {"agentId":"xxx"}
-     *  agent/send: {"agentId":"xxx","event":{}}。
-     *  agent/active: {"agentId":"xxx"}。订阅 agent
-     *  agent/leave: {"agentId":"xxx"}。取消订阅 agent
-     *  agent/toolCall: {agentId, toolCallId}。
+     *  agent.create: {"prompt":"xxx"}。直接创建 Agent。响应 {"agentId":"xxx"}
+     *  agent.send: {"agentId":"xxx","event":{}}。
+     *  agent.subscribe: {"agentId":"xxx"}。订阅 agent
+     *  agent.unsubscribe: {"agentId":"xxx"}。取消订阅 agent
+     *  agent.toolCall: {agentId, toolCallId}。
      *
      *  客户端监听服务端事件
-     *  agent/message: {"agentId":"xxx","message":{}}
+     *  agent.message: {"agentId":"xxx","message":{}}
      *
      *
      */
     private void initUserEventHandler() {
         var nodeId = this.id;
         
-        userEventHandler.put("agent/create", (client, dataJson)-> {
+        userEventHandler.put(ContainerServer.EVENT_AGENT_CREATE, (client, dataJson)-> {
             var data = JSONUtil.parse(dataJson);
             var agent = createAgent(data);
             var agentId = agent.id;
             localAgents.put(agentId, agent);
             metaData.setAgentStay(agentId, nodeId);
-            log.debug("initUserEventHandler agent/create: local " + dataJson);
+            log.debug("initUserEventHandler agent.create: local " + dataJson);
             var result = JSONUtil.create().put("agentId", agentId);
             return JSONUtil.stringify(result);
         });
 
-        userEventHandler.put("agent/send", (client, dataJson)-> {
+        userEventHandler.put(ContainerServer.EVENT_AGENT_SEND, (client, dataJson)-> {
             var data = JSONUtil.parse(dataJson);
             var agentId = data.path("agentId").asText();
             var eventJson = data.path("event").toString();
@@ -199,12 +199,12 @@ public abstract class Websocket {
                 agent.send(eventJson);
             } else {
                 var targetNodeId = metaData.getAgentStay(agentId);
-                sendToOtherNode("agent/send", dataJson, targetNodeId);
+                sendToOtherNode(ContainerServer.EVENT_AGENT_SEND, dataJson, targetNodeId);
             }
             return null;
         });
 
-        userEventHandler.put("agent/active", (client, dataJson)-> {
+        userEventHandler.put(ContainerServer.EVENT_AGENT_SUBSCRIBE, (client, dataJson)-> {
             var data = JSONUtil.parse(dataJson);
             var agentId = data.path("agentId").asText();
             var agent = localAgents.get(agentId);
@@ -220,11 +220,11 @@ public abstract class Websocket {
 
                     switch (client) {
                         case SocketIOClient ioClient -> {
-                            ioClient.sendEvent("agent/message", messageJson);
+                            ioClient.sendEvent(ContainerServer.EVENT_AGENT_MESSAGE, messageJson);
                         }
 
                         case String sourceNodeId -> {
-                            var reverseJson = "%s|%s|%s|%s".formatted(this.id, "reverse", "agent/message", messageJson);
+                            var reverseJson = "%s|%s|%s|%s".formatted(this.id, "reverse", ContainerServer.EVENT_AGENT_MESSAGE, messageJson);
 
                             messageBus.publish("%s-message".formatted(sourceNodeId), reverseJson);
                         }
@@ -236,12 +236,12 @@ public abstract class Websocket {
             } else {
                 var targetNodeId = metaData.getAgentStay(agentId);
                 agentClient.put(agentId, ((SocketIOClient) client).getSessionId());
-                sendToOtherNode("agent/active", dataJson, targetNodeId);
+                sendToOtherNode(ContainerServer.EVENT_AGENT_SUBSCRIBE, dataJson, targetNodeId);
                 return null;
             }
         });
 
-        userEventHandler.put("agent/leave", (client, dataJson)-> {
+        userEventHandler.put(ContainerServer.EVENT_AGENT_UNSUBSCRIBE, (client, dataJson)-> {
             var data = JSONUtil.parse(dataJson);
             var agentId = data.path("agentId").asText();
             var agent = localAgents.get(agentId);
@@ -250,23 +250,23 @@ public abstract class Websocket {
                 return "{\"success\":true}";
             } else {
                 var targetNodeId = metaData.getAgentStay(agentId);
-                sendToOtherNode("agent/leave", dataJson, targetNodeId);
+                sendToOtherNode(ContainerServer.EVENT_AGENT_UNSUBSCRIBE, dataJson, targetNodeId);
                 return null;
             }
         });
 
-        userEventHandler.put("agent/toolCall", (client, dataJson)-> {
+        userEventHandler.put(ContainerServer.EVENT_AGENT_TOOL_CALL, (client, dataJson)-> {
             var data = JSONUtil.parse(dataJson);
             var agentId = data.path("agentId").asText();
             var toolCallId = data.path("toolCallId").asText();
             var agent = localAgents.get(agentId);
-            log.debug("initUserEventHandler agent/toolCall agentId: " + agentId + ", toolCallId: " + toolCallId);
+            log.debug("initUserEventHandler agent.toolCall agentId: " + agentId + ", toolCallId: " + toolCallId);
             if (agent != null) {
                 var result = agent.invokeToolCallCache(toolCallId);
                 return JSONUtil.stringify(result);
             } else {
                 var targetNodeId = metaData.getAgentStay(agentId);
-                sendToOtherNode("agent/toolCall", dataJson, targetNodeId);
+                sendToOtherNode(ContainerServer.EVENT_AGENT_TOOL_CALL, dataJson, targetNodeId);
                 return null;
             }
         });
@@ -353,7 +353,7 @@ public abstract class Websocket {
                 if (sessionId != null) {
                     var targetClient = server.getNamespace("/user").getClient(sessionId);
                     if (targetClient != null) {
-                        targetClient.sendEvent("agent/message", bodyJson);
+                        targetClient.sendEvent(ContainerServer.EVENT_AGENT_MESSAGE, bodyJson);
 //                        ackSender.sendAckData("{\"success\":true}");
                     } else {
 //                        ackSender.sendAckData("{\"success\":false,\"reason\":\"client not found\"}");

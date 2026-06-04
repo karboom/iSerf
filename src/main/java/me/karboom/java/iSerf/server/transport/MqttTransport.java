@@ -22,7 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 将 MQTT 客户端消息委托给 ContainerServer 统一处理，支持双向通信。
  * <p>
  * 通信模型：
- * - 客户端向 iserf/request/{event} 发布消息（event 如 agent/create, agent/send 等）
+ * - 客户端向 iserf/request/{event} 发布消息（event 如 agent.create, agent.send 等）
  * - 服务端向 iserf/response/{clientId} 发布消息作为下行通道
  */
 @Slf4j

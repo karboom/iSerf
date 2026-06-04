@@ -6,6 +6,7 @@ import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 import me.karboom.java.iSerf.llm.text.OpenAI;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
+import me.karboom.java.iSerf.server.ContainerServer;
 import me.karboom.java.iSerf.server.messageBus.IMessageBus;
 import me.karboom.java.iSerf.server.messageBus.Pulsar;
 import me.karboom.java.iSerf.server.metaData.IMetaData;
@@ -71,7 +72,7 @@ class WebsocketTest {
     }
 
     /**
-     * 创建两个 server，其中一个 agent/create，另一个 agent/active，然后 agent/send
+     * 创建两个 server，其中一个 agent.create，另一个 agent.subscribe，然后 agent.send
      */
     @Test
     void testMessageBus() {
@@ -118,7 +119,7 @@ class WebsocketTest {
                 });
 
                 // socket2 监听 message 事件
-                socket2.on("agent/message", args -> {
+                socket2.on(ContainerServer.EVENT_AGENT_MESSAGE, args -> {
                     if (args.length > 0 && args[0] instanceof String) {
                         var message = JSONUtil.parse((String) args[0]);
                         System.out.println("on Communication " + message.toString());
@@ -134,10 +135,10 @@ class WebsocketTest {
                 assertTrue(connectLatch2.await(5, TimeUnit.SECONDS), "socket2 应成功连接到 server2");
 
                 // 在 server1 上创建 agent
-                socket1.emit("agent/create", JSONUtil.stringify(Map.of("prompt", "测试 EventProxy Agent")), new io.socket.client.Ack() {
+                socket1.emit(ContainerServer.EVENT_AGENT_CREATE, JSONUtil.stringify(Map.of("prompt", "测试 EventProxy Agent")), new io.socket.client.Ack() {
                     @Override
                     public void call(Object... args) {
-                        System.out.println("agent/create 回调：" + args.length);
+                        System.out.println("agent.create 回调：" + args.length);
                         if (args.length > 0 && args[0] instanceof String) {
                             var response = JSONUtil.parse((String) args[0]);
                             agentIdRef.set(0, response.path("agentId").asText());
@@ -151,11 +152,11 @@ class WebsocketTest {
                 assertNotNull(agentId, "agentId 不应为空");
                 System.out.println("创建的 agentId: " + agentId);
 
-                // 在 server2 上激活 agent
-                socket2.emit("agent/active", JSONUtil.stringify(Map.of("agentId", agentId)), new io.socket.client.Ack() {
+                // 在 server2 上订阅 agent
+                socket2.emit(ContainerServer.EVENT_AGENT_SUBSCRIBE, JSONUtil.stringify(Map.of("agentId", agentId)), new io.socket.client.Ack() {
                     @Override
                     public void call(Object... args) {
-                        System.out.println("agent/active 回调：" + args.length);
+                        System.out.println("agent.subscribe 回调：" + args.length);
                         if (args.length > 0 && args[0] instanceof String) {
                             var response = JSONUtil.parse((String) args[0]);
                             activeSuccessRef.set(0, response.path("success").asBoolean());
@@ -164,19 +165,19 @@ class WebsocketTest {
                     }
                 });
 
-//                assertTrue(activeLatch.await(10, TimeUnit.SECONDS), "agent 应成功激活");
-//                assertTrue(activeSuccessRef.get(0), "agent/active 应返回 success=true");
+//                assertTrue(activeLatch.await(10, TimeUnit.SECONDS), "agent 应成功订阅");
+//                assertTrue(activeSuccessRef.get(0), "agent.subscribe 应返回 success=true");
 
                 // 在 server2 上发送事件
-                socket2.emit("agent/send", JSONUtil.stringify(Map.of("agentId", agentId, "event", Map.of("type", "test"))), new io.socket.client.Ack() {
+                socket2.emit(ContainerServer.EVENT_AGENT_SEND, JSONUtil.stringify(Map.of("agentId", agentId, "event", Map.of("type", "test"))), new io.socket.client.Ack() {
                     @Override
                     public void call(Object... args) {
-                        System.out.println("agent/send 回调：" + args.length);
+                        System.out.println("agent.send 回调：" + args.length);
                         sendLatch.countDown();
                     }
                 });
 
-                assertTrue(sendLatch.await(5, TimeUnit.SECONDS), "agent/send 应成功发送");
+                assertTrue(sendLatch.await(5, TimeUnit.SECONDS), "agent.send 应成功发送");
 
                 // 验证收到 message 事件
                 assertTrue(messageLatch.await(30, TimeUnit.SECONDS), "应收到 message 事件");
@@ -242,7 +243,7 @@ class WebsocketTest {
 
             for (int i = 0; i < n; i++) {
                 final int index = i;
-                socket.emit("agent/create", JSONUtil.stringify(Map.of("prompt", "测试 Agent " + i)), new io.socket.client.Ack() {
+                socket.emit(ContainerServer.EVENT_AGENT_CREATE, JSONUtil.stringify(Map.of("prompt", "测试 Agent " + i)), new io.socket.client.Ack() {
                     @Override
                     public void call(Object... args) {
                         System.out.println(index + ": " + args.length);
@@ -262,7 +263,7 @@ class WebsocketTest {
 
             for (int i = 0; i < n; i++) {
                 final int index = i;
-                socket.emit("agent/active", JSONUtil.stringify(Map.of("agentId", agentIds.get(i))), new io.socket.client.Ack() {
+                socket.emit(ContainerServer.EVENT_AGENT_SUBSCRIBE, JSONUtil.stringify(Map.of("agentId", agentIds.get(i))), new io.socket.client.Ack() {
                     @Override
                     public void call(Object... args) {
                         if (args.length > 0 && args[0] instanceof String) {
@@ -280,7 +281,7 @@ class WebsocketTest {
             var sendLatch = new CountDownLatch(n);
             for (int i = 0; i < n; i++) {
                 final int index = i;
-                socket.emit("agent/send", JSONUtil.stringify(Map.of("agentId", agentIds.get(i), "event", Map.of("type", "test"))), new io.socket.client.Ack() {
+                socket.emit(ContainerServer.EVENT_AGENT_SEND, JSONUtil.stringify(Map.of("agentId", agentIds.get(i), "event", Map.of("type", "test"))), new io.socket.client.Ack() {
                     @Override
                     public void call(Object... args) {
                         System.out.println("send done");

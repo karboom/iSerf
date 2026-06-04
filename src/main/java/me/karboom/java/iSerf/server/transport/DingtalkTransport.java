@@ -305,7 +305,7 @@ public class DingtalkTransport implements ITransport {
                 clientConversations.put(senderStaffId, conversationId);
             }
 
-            // 将钉钉消息作为 agent/send 事件转发到 ContainerServer
+            // 将钉钉消息作为 agent.send 事件转发到 ContainerServer
             var ctx = ContainerServer.Context.builder()
                     .transport(this)
                     .client(senderStaffId)
@@ -317,7 +317,7 @@ public class DingtalkTransport implements ITransport {
                     .put("messageId", messageId)
                     .set("rawData", data));
 
-            container.handleUserEvent("agent/send", ctx, eventData);
+            container.handleUserEvent(ContainerServer.EVENT_AGENT_SEND, ctx, eventData);
         } catch (Exception e) {
             log.warn("handleDingtalkMessage error: %s".formatted(e.getMessage()));
         }

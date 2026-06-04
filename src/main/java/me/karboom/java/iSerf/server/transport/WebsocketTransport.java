@@ -169,53 +169,53 @@ public abstract class WebsocketTransport implements ITransport {
         });
 
         // 注册用户侧事件，委托给 ContainerServer 处理
-        userNS.addEventListener("agent/create", String.class, (client, dataJson, ackSender) -> {
+        userNS.addEventListener(ContainerServer.EVENT_AGENT_CREATE, String.class, (client, dataJson, ackSender) -> {
             var ctx = ContainerServer.Context.builder()
                     .transport(WebsocketTransport.this)
                     .client(client)
                     .build();
-            var result = container.handleUserEvent("agent/create", ctx, dataJson);
+            var result = container.handleUserEvent(ContainerServer.EVENT_AGENT_CREATE, ctx, dataJson);
             if (result != null) {
                 ackSender.sendAckData(result);
             }
         });
 
-        userNS.addEventListener("agent/send", String.class, (client, dataJson, ackSender) -> {
+        userNS.addEventListener(ContainerServer.EVENT_AGENT_SEND, String.class, (client, dataJson, ackSender) -> {
             var ctx = ContainerServer.Context.builder()
                     .transport(WebsocketTransport.this)
                     .client(client)
                     .build();
-            var result = container.handleUserEvent("agent/send", ctx, dataJson);
+            var result = container.handleUserEvent(ContainerServer.EVENT_AGENT_SEND, ctx, dataJson);
             if (result != null) {
                 ackSender.sendAckData(result);
             }
         });
-        userNS.addEventListener("agent/active", String.class, (client, dataJson, ackSender) -> {
+        userNS.addEventListener(ContainerServer.EVENT_AGENT_SUBSCRIBE, String.class, (client, dataJson, ackSender) -> {
             var ctx = ContainerServer.Context.builder()
                     .transport(WebsocketTransport.this)
                     .client(client)
                     .build();
-            var result = container.handleUserEvent("agent/active", ctx, dataJson);
+            var result = container.handleUserEvent(ContainerServer.EVENT_AGENT_SUBSCRIBE, ctx, dataJson);
             if (result != null) {
                 ackSender.sendAckData(result);
             }
         });
-        userNS.addEventListener("agent/leave", String.class, (client, dataJson, ackSender) -> {
+        userNS.addEventListener(ContainerServer.EVENT_AGENT_UNSUBSCRIBE, String.class, (client, dataJson, ackSender) -> {
             var ctx = ContainerServer.Context.builder()
                     .transport(WebsocketTransport.this)
                     .client(client)
                     .build();
-            var result = container.handleUserEvent("agent/leave", ctx, dataJson);
+            var result = container.handleUserEvent(ContainerServer.EVENT_AGENT_UNSUBSCRIBE, ctx, dataJson);
             if (result != null) {
                 ackSender.sendAckData(result);
             }
         });
-        userNS.addEventListener("agent/toolCall", String.class, (client, dataJson, ackSender) -> {
+        userNS.addEventListener(ContainerServer.EVENT_AGENT_TOOL_CALL, String.class, (client, dataJson, ackSender) -> {
             var ctx = ContainerServer.Context.builder()
                     .transport(WebsocketTransport.this)
                     .client(client)
                     .build();
-            var result = container.handleUserEvent("agent/toolCall", ctx, dataJson);
+            var result = container.handleUserEvent(ContainerServer.EVENT_AGENT_TOOL_CALL, ctx, dataJson);
             if (result != null) {
                 ackSender.sendAckData(result);
             }

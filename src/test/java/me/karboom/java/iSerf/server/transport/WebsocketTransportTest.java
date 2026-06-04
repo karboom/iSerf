@@ -64,7 +64,7 @@ class WebsocketTransportTest {
     }
 
     /**
-     * 验证 agent/create 事件通过 Socket.IO 正确分发到 ContainerServer 并返回 agentId
+     * 验证 agent.create 事件通过 Socket.IO 正确分发到 ContainerServer 并返回 agentId
      */
     @SneakyThrows
     @Test
@@ -85,7 +85,7 @@ class WebsocketTransportTest {
         socket.connect();
         assertTrue(connectLatch.await(5, TimeUnit.SECONDS), "客户端应能连接");
 
-        socket.emit("agent/create", "{}", new io.socket.client.Ack() {
+        socket.emit(ContainerServer.EVENT_AGENT_CREATE, "{}", new io.socket.client.Ack() {
             @Override
             public void call(Object... args) {
                 if (args.length > 0 && args[0] instanceof String) {
@@ -96,7 +96,7 @@ class WebsocketTransportTest {
             }
         });
 
-        assertTrue(createLatch.await(10, TimeUnit.SECONDS), "应收到 agent/create 的 ack 响应");
+        assertTrue(createLatch.await(10, TimeUnit.SECONDS), "应收到 agent.create 的 ack 响应");
         var agentId = agentIdRef.get(0);
         assertNotNull(agentId, "agentId 不应为空");
         assertFalse(agentId.isEmpty(), "agentId 不应为空字符串");
@@ -167,7 +167,7 @@ class WebsocketTransportTest {
         var ackLatch = new CountDownLatch(1);
         var ackRef = new AtomicReferenceArray<String>(1);
 
-        socket.emit("agent/create", "{}", new io.socket.client.Ack() {
+        socket.emit(ContainerServer.EVENT_AGENT_CREATE, "{}", new io.socket.client.Ack() {
             @Override
             public void call(Object... args) {
                 if (args.length > 0 && args[0] instanceof String) {

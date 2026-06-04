@@ -196,7 +196,7 @@ class WebsocketPerformanceTest {
                         connectedCount.incrementAndGet();
                         connectLatch.countDown();
 
-//                        sockets[index].emit("agent/create", JSONUtil.stringify(Map.of("prompt", "测试 Agent " + index)), new io.socket.client.Ack() {
+//                        sockets[index].emit("agent.create", JSONUtil.stringify(Map.of("prompt", "测试 Agent " + index)), new io.socket.client.Ack() {
 //                            @Override
 //                            public void call(Object... args) {
 //                                if (args.length > 0 && args[0] instanceof String) {
