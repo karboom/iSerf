@@ -8,7 +8,9 @@ import me.karboom.java.iSerf.server.messageBus.Pulsar;
 import me.karboom.java.iSerf.server.metaData.RedisSingle;
 import tools.jackson.databind.node.ObjectNode;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -29,8 +31,8 @@ public class TestContainer extends ContainerServer {
     }
 
     @Override
-    protected Agent listAgent(Context ctx, ObjectNode params) {
-        return null;
+    protected List<Agent> listAgent(Context ctx, ObjectNode params) {
+        return new ArrayList<>();
     }
 
     @Override

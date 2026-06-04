@@ -158,72 +158,31 @@ public abstract class WebsocketTransport implements ITransport {
      * @param userNS 用户命名空间
      */
     protected void setupUserNS(SocketIONamespace userNS) {
-        // 添加事件拦截器，关闭状态下统一拒绝
-        userNS.addEventInterceptor(new EventInterceptor() {
-            @Override
-            public void onEvent(com.corundumstudio.socketio.transport.NamespaceClient client, String eventName, java.util.List<Object> args, AckRequest ackRequest) {
-                if (container.isShuttingDown()) {
-                    ackRequest.sendAckData(SHUTTING_DOWN_ERROR);
-                }
-            }
-        });
-
         // 注册用户侧事件，委托给 ContainerServer 处理
-        userNS.addEventListener(ContainerServer.EVENT_AGENT_CREATE, String.class, (client, dataJson, ackSender) -> {
-            var ctx = ContainerServer.Context.builder()
-                    .transport(WebsocketTransport.this)
-                    .client(client)
-                    .serverId(container.id)
-                    .build();
-            var result = container.handleUserEvent(ContainerServer.EVENT_AGENT_CREATE, ctx, dataJson);
-            if (result != null) {
-                ackSender.sendAckData(result);
-            }
-        });
+        var events = List.of(
+                ContainerServer.EVENT_AGENT_CREATE,
+                ContainerServer.EVENT_AGENT_SEND,
+                ContainerServer.EVENT_AGENT_SUBSCRIBE,
+                ContainerServer.EVENT_AGENT_UNSUBSCRIBE,
+                ContainerServer.EVENT_AGENT_TOOL_CALL
+        );
+        events.forEach(e -> registerUserEvent(userNS, e));
+    }
 
-        userNS.addEventListener(ContainerServer.EVENT_AGENT_SEND, String.class, (client, dataJson, ackSender) -> {
+    /**
+     * 将指定事件注册到命名空间并委托给 ContainerServer 处理
+     *
+     * @param ns    目标 Socket.IO 命名空间
+     * @param event 事件名称
+     */
+    private void registerUserEvent(SocketIONamespace ns, String event) {
+        ns.addEventListener(event, String.class, (client, dataJson, ackSender) -> {
             var ctx = ContainerServer.Context.builder()
-                    .transport(WebsocketTransport.this)
+                    .transport(this)
                     .client(client)
                     .serverId(container.id)
                     .build();
-            var result = container.handleUserEvent(ContainerServer.EVENT_AGENT_SEND, ctx, dataJson);
-            if (result != null) {
-                ackSender.sendAckData(result);
-            }
-        });
-        userNS.addEventListener(ContainerServer.EVENT_AGENT_SUBSCRIBE, String.class, (client, dataJson, ackSender) -> {
-            var ctx = ContainerServer.Context.builder()
-                    .transport(WebsocketTransport.this)
-                    .client(client)
-                    .serverId(container.id)
-                    .build();
-            var result = container.handleUserEvent(ContainerServer.EVENT_AGENT_SUBSCRIBE, ctx, dataJson);
-            if (result != null) {
-                ackSender.sendAckData(result);
-            }
-        });
-        userNS.addEventListener(ContainerServer.EVENT_AGENT_UNSUBSCRIBE, String.class, (client, dataJson, ackSender) -> {
-            var ctx = ContainerServer.Context.builder()
-                    .transport(WebsocketTransport.this)
-                    .client(client)
-                    .serverId(container.id)
-                    .build();
-            var result = container.handleUserEvent(ContainerServer.EVENT_AGENT_UNSUBSCRIBE, ctx, dataJson);
-            if (result != null) {
-                ackSender.sendAckData(result);
-            }
-        });
-        userNS.addEventListener(ContainerServer.EVENT_AGENT_TOOL_CALL, String.class, (client, dataJson, ackSender) -> {
-            var ctx = ContainerServer.Context.builder()
-                    .transport(WebsocketTransport.this)
-                    .client(client)
-                    .serverId(container.id)
-                    .build();
-            var result = container.handleUserEvent(ContainerServer.EVENT_AGENT_TOOL_CALL, ctx, dataJson);
-            if (result != null) {
-                ackSender.sendAckData(result);
-            }
+            container.handleUserEvent(ctx, event, dataJson);
         });
     }
 }

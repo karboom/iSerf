@@ -223,19 +223,7 @@ public class MqttTransport implements ITransport {
                 .build();
 
         try {
-            var result = container.handleUserEvent(event, ctx, payload);
-            if (result != null) {
-                // 将结果作为 ack 发送回客户端
-                var ackPayload = JSONUtil.stringify(JSONUtil.create()
-                        .put("event", "ack")
-                        .put("requestEvent", event)
-                        .set("data", JSONUtil.parse(result)));
-                mqttClient.publishWith()
-                        .topic(RESPONSE_TOPIC_PREFIX + clientId)
-                        .qos(MqttQos.AT_LEAST_ONCE)
-                        .payload(ackPayload.getBytes(StandardCharsets.UTF_8))
-                        .send();
-            }
+            container.handleUserEvent(ctx, event, payload);
         } catch (Exception e) {
             log.warn("handleRequest error processing event=%s: %s".formatted(event, e.getMessage()));
         }

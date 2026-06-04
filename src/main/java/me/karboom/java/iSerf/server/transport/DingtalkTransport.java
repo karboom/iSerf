@@ -318,7 +318,7 @@ public class DingtalkTransport implements ITransport {
                     .put("messageId", messageId)
                     .set("rawData", data));
 
-            container.handleUserEvent(ContainerServer.EVENT_AGENT_SEND, ctx, eventData);
+            container.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_SEND, eventData);
         } catch (Exception e) {
             log.warn("handleDingtalkMessage error: %s".formatted(e.getMessage()));
         }

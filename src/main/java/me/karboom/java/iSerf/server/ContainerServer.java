@@ -15,8 +15,8 @@ import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import tools.jackson.databind.node.ObjectNode;
 
-import javax.smartcardio.CardTerminal;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 通用传输容器，承载协议无关的元数据管理和消息总线逻辑。
@@ -24,7 +24,6 @@ import java.util.*;
  */
 @Slf4j
 public abstract class ContainerServer {
-
 
     /**
      * 关闭状态下的拒绝消息
@@ -58,13 +57,45 @@ public abstract class ContainerServer {
         public Object clientHandle;
     }
 
+    /**
+     * Agent 列表查询的聚合收集器，用于异步收集多节点查询结果
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    static class ListQueryCollector {
+        /**
+         * 请求唯一标识
+         */
+        public String requestId;
+        /**
+         * 期望响应的节点数
+         */
+        public Integer expectedCount;
+        /**
+         * 已收集的结果列表
+         */
+        public List<ObjectNode> results;
+        /**
+         * 发起查询的原始上下文（用于回传结果给客户端）
+         */
+        public Context originalContext;
+    }
+
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     public static class Context {
         public ITransport transport;
+        /**
+         * 请求ID,用于异步回复的匹配
+         */
+        public String requestId;
+
         public Object client;
+
         public Object user;
         /**
          * 消息来源服务器标识
@@ -105,6 +136,11 @@ public abstract class ContainerServer {
     public Map<String, TransportClientRecord> agentClient = new HashMap<>();
 
     /**
+     * Agent 列表查询聚合收集器缓存：requestId 对应 ListQueryCollector
+     */
+    public Map<String, ListQueryCollector> listQueryCollectors = new ConcurrentHashMap<>();
+
+    /**
      * 关闭状态标志
      */
     public volatile boolean isShuttingDown = false;
@@ -131,12 +167,12 @@ public abstract class ContainerServer {
     protected abstract Agent createAgent(Context ctx, ObjectNode params);
 
     /**
-     * 获取所有agent
+     * 按照条件查找智能体列表
      * @param ctx
      * @param params
-     * @return
+     * @return 匹配的Agent列表
      */
-    protected abstract Agent listAgent(Context ctx, ObjectNode params);
+    protected abstract List<Agent> listAgent(Context ctx, ObjectNode params);
 
     /**
      * 删除Agent
@@ -211,30 +247,27 @@ public abstract class ContainerServer {
     /**
      * 处理 agent.create 事件：创建 Agent
      *
-     * @param context  上下文（含 transport、client、user）
-     * @param dataJson 请求数据 JSON 字符串
-     * @return 响应 JSON 字符串
+     * @param context 上下文（含 transport、client、user）
+     * @param data    请求数据
+     * @return 响应 ObjectNode，可为 null
      */
-    public String handleAgentCreate(Context context, String dataJson) {
-        var data = JSONUtil.parse(dataJson);
+    public ObjectNode handleAgentCreate(Context context, ObjectNode data) {
         var agent = createAgent(context, data);
         var agentId = agent.id;
         localAgents.put(agentId, agent);
         metaData.setAgentStay(agentId, this.id);
-        log.debug("handleAgentCreate agent.create: local " + dataJson);
-        var result = JSONUtil.create().put("agentId", agentId);
-        return JSONUtil.stringify(result);
+        log.debug("handleAgentCreate agent.create: local " + JSONUtil.stringify(data));
+        return JSONUtil.create().put("agentId", agentId);
     }
 
     /**
      * 处理 agent.send 事件：发送消息给 Agent
      *
-     * @param context  上下文（含 transport、client、user）
-     * @param dataJson 请求数据 JSON 字符串
-     * @return 响应 JSON 字符串，可为 null
+     * @param context 上下文（含 transport、client、user）
+     * @param data    请求数据
+     * @return 响应 ObjectNode，可为 null
      */
-    public String handleAgentSend(Context context, String dataJson) {
-        var data = JSONUtil.parse(dataJson);
+    public ObjectNode handleAgentSend(Context context, ObjectNode data) {
         var agentId = data.path("agentId").asText();
         var eventObj = JSONUtil.convert(data.path("event"), Event.class);
         var agent = localAgents.get(agentId);
@@ -242,7 +275,7 @@ public abstract class ContainerServer {
             agent.trigger(eventObj);
         } else {
             var targetNodeId = metaData.getAgentStay(agentId);
-            sendToOtherNode(EVENT_AGENT_SEND, dataJson, targetNodeId);
+            sendToOtherNode(EVENT_AGENT_SEND, JSONUtil.stringify(data), targetNodeId);
         }
         return null;
     }
@@ -250,12 +283,11 @@ public abstract class ContainerServer {
     /**
      * 处理 agent.subscribe 事件：订阅 Agent 消息流
      *
-     * @param context  上下文（含 transport、client、user）
-     * @param dataJson 请求数据 JSON 字符串
-     * @return 响应 JSON 字符串，可为 null
+     * @param context 上下文（含 transport、client、user）
+     * @param data    请求数据
+     * @return 响应 ObjectNode，可为 null
      */
-    public String handleAgentSubscribe(Context context, String dataJson) {
-        var data = JSONUtil.parse(dataJson);
+    public ObjectNode handleAgentSubscribe(Context context, ObjectNode data) {
         var agentId = data.path("agentId").asText();
         var agent = localAgents.get(agentId);
 
@@ -278,7 +310,7 @@ public abstract class ContainerServer {
                         messageBus.publish("%s-message".formatted(context.serverId), reverseJson);
                     }
             });
-            return "{\"success\":true}";
+            return null;
         } else {
             var targetNodeId = metaData.getAgentStay(agentId);
                     var transportRecord = TransportClientRecord.builder()
@@ -286,7 +318,7 @@ public abstract class ContainerServer {
                             .clientHandle(context.client)
                             .build();
                     agentClient.put(agentId, transportRecord);
-            sendToOtherNode(EVENT_AGENT_SUBSCRIBE, dataJson, targetNodeId);
+            sendToOtherNode(EVENT_AGENT_SUBSCRIBE, JSONUtil.stringify(data), targetNodeId);
             return null;
         }
     }
@@ -294,20 +326,19 @@ public abstract class ContainerServer {
     /**
      * 处理 agent.unsubscribe 事件：取消订阅 Agent
      *
-     * @param context  上下文（含 transport、client、user）
-     * @param dataJson 请求数据 JSON 字符串
-     * @return 响应 JSON 字符串，可为 null
+     * @param context 上下文（含 transport、client、user）
+     * @param data    请求数据
+     * @return 响应 ObjectNode，可为 null
      */
-    public String handleAgentUnsubscribe(Context context, String dataJson) {
-        var data = JSONUtil.parse(dataJson);
+    public ObjectNode handleAgentUnsubscribe(Context context, ObjectNode data) {
         var agentId = data.path("agentId").asText();
         var agent = localAgents.get(agentId);
         if (agent != null) {
             agentClient.remove(agentId);
-            return "{\"success\":true}";
+            return null;
         } else {
             var targetNodeId = metaData.getAgentStay(agentId);
-            sendToOtherNode(EVENT_AGENT_UNSUBSCRIBE, dataJson, targetNodeId);
+            sendToOtherNode(EVENT_AGENT_UNSUBSCRIBE, JSONUtil.stringify(data), targetNodeId);
             return null;
         }
     }
@@ -315,58 +346,75 @@ public abstract class ContainerServer {
     /**
      * 处理 agent.toolCall 事件：执行工具调用
      *
-     * @param context  上下文（含 transport、client、user）
-     * @param dataJson 请求数据 JSON 字符串
-     * @return 响应 JSON 字符串，可为 null
+     * @param context 上下文（含 transport、client、user）
+     * @param data    请求数据
+     * @return 响应 ObjectNode，可为 null
      */
-    public String handleAgentToolCall(Context context, String dataJson) {
-        var data = JSONUtil.parse(dataJson);
+    public ObjectNode handleAgentToolCall(Context context, ObjectNode data) {
         var agentId = data.path("agentId").asText();
         var toolCallId = data.path("toolCallId").asText();
         var agent = localAgents.get(agentId);
         log.debug("handleAgentToolCall agentId: " + agentId + ", toolCallId: " + toolCallId);
         if (agent != null) {
             var result = agent.invokeToolCallCache(toolCallId);
-            return JSONUtil.stringify(result);
+            return (ObjectNode) JSONUtil.convert(result);
         } else {
             var targetNodeId = metaData.getAgentStay(agentId);
-            sendToOtherNode(EVENT_AGENT_TOOL_CALL, dataJson, targetNodeId);
+            sendToOtherNode(EVENT_AGENT_TOOL_CALL, JSONUtil.stringify(data), targetNodeId);
             return null;
         }
     }
 
     /**
      * 按照条件查找智能体，同时从自身和其他节点查询，然后合并
+     * 具体的匹配逻辑委托抽象方法listAgent
+     * 最终通过同名事件响应
+     *
      * @param context
-     * @param queryJson
-     * @return
+     * @param data
+     * @return null
      */
-    public String handleAgentList(Context context, String queryJson) {
+    public ObjectNode handleAgentList(Context context, ObjectNode data) {
 
-        return "";
+        return null;
     }
 
     /**
      * 处理用户事件
+     * 非本节点（serverId != this.id）的 proxy 请求直接返回对应值；
+     * 本节点请求若有返回值，通过 transport 派发同名事件
      *
-     * @param event    事件名
      * @param context  上下文（含 transport、client、user）
+     * @param event    事件名
      * @param dataJson 请求数据 JSON 字符串
      * @return 响应 JSON 字符串，可为 null
      */
-    public String handleUserEvent(String event, Context context, String dataJson) {
+    public String handleUserEvent(Context context, String event, String dataJson) {
         if (isShuttingDown) {
             return SHUTTING_DOWN_ERROR;
         }
-        return String.valueOf(switch (event) {
-            case EVENT_AGENT_CREATE -> handleAgentCreate(context, dataJson);
-            case EVENT_AGENT_SEND -> handleAgentSend(context, dataJson);
-            case EVENT_AGENT_SUBSCRIBE -> handleAgentSubscribe(context, dataJson);
-            case EVENT_AGENT_UNSUBSCRIBE -> handleAgentUnsubscribe(context, dataJson);
-            case EVENT_AGENT_TOOL_CALL -> handleAgentToolCall(context, dataJson);
-            case EVENT_AGENT_LIST -> handleAgentList(context, dataJson);
+        var data = JSONUtil.parse(dataJson);
+        if (data.has("requestId")) {
+            return "need requestId";
+        }
+        var requestId = data.get("requestId").asString();
+        context.setRequestId(requestId);
+
+        var result = switch (event) {
+            case EVENT_AGENT_CREATE -> handleAgentCreate(context, data);
+            case EVENT_AGENT_SEND -> handleAgentSend(context, data);
+            case EVENT_AGENT_SUBSCRIBE -> handleAgentSubscribe(context, data);
+            case EVENT_AGENT_UNSUBSCRIBE -> handleAgentUnsubscribe(context, data);
+            case EVENT_AGENT_TOOL_CALL -> handleAgentToolCall(context, data);
+            case EVENT_AGENT_LIST -> handleAgentList(context, data);
             default -> null;
-        });
+        };
+        var wrapped = JSONUtil.create().set("data", result).put("requestId", requestId);
+        
+        if (result != null && this.id.equals(context.serverId)) {
+            context.transport.sendToClient(context.client, event, JSONUtil.stringify(wrapped));
+        }
+        return result != null ? JSONUtil.stringify(wrapped) : null;
     }
 
     /**
@@ -411,7 +459,7 @@ public abstract class ContainerServer {
                         return;
                     }
                     var proxyCtx = Context.builder().client(sourceNode).serverId(sourceNode).build();
-                    var result = handleUserEvent(event, proxyCtx, bodyJson);
+                    var result = handleUserEvent(proxyCtx, event, bodyJson);
                     log.debug("listenMessage proxy event: " + event + ", result: " + result);
 
                     if (result != null) {
