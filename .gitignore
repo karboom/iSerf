@@ -6,7 +6,10 @@ build/
 !**/src/test/**/build/
 .kotlin
 
-**/iFunction/**
+scripts/
+**/node_modules/
+logs/
+src/main/java/me/karboom/java/iSerf/iFunction/**
 
 .run/
 
