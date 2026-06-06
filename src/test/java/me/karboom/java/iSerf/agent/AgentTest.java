@@ -456,7 +456,7 @@ class AgentTest {
                     .toolName("getWeather")
                     .params(testParams)
                     .build();
-            agent.toolCallCaches.add(cache);
+            agent.toolHandler.addCache(cache);
 
             // 测试正常调用缓存
             var result = agent.invokeToolCallCache("test-call-001");
@@ -473,7 +473,7 @@ class AgentTest {
                     .toolName("non-existent-tool")
                     .params(testParams)
                     .build();
-            agent.toolCallCaches.add(cacheWithNonExistentTool);
+            agent.toolHandler.addCache(cacheWithNonExistentTool);
 
             assertThrows(RuntimeException.class, () -> {
                 agent.invokeToolCallCache("test-call-002");

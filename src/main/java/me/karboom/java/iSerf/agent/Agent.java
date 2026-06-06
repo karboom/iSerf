@@ -1,6 +1,5 @@
 package me.karboom.java.iSerf.agent;
 
-import cn.hutool.core.util.StrUtil;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
@@ -16,9 +15,6 @@ import me.karboom.java.iSerf.config.Config;
 import me.karboom.java.iSerf.llm.text.Output;
 import me.karboom.java.iSerf.schedule.ISchedule;
 import me.karboom.java.iSerf.schedule.Plan;
-import okhttp3.MediaType;
-import okhttp3.Request;
-import okhttp3.RequestBody;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -29,7 +25,6 @@ import reactor.util.function.Tuple3;
 import reactor.util.function.Tuples;
 import tools.jackson.databind.node.ObjectNode;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -61,7 +56,6 @@ public class Agent {
 
     private MemoryManager memoryManager;
     public IPersistence persistence;
-    protected List<Tool<?>> tools;
     protected ILlmProvider llmProvider;
     public String prompt;
     protected PriorityBlockingQueue<Event> queue;
@@ -69,8 +63,6 @@ public class Agent {
 
     protected Sinks.Many<Message> sink;
     public Flux<Message> broadcast;
-
-    public Integer maxEvoRetry = 5;
 
     private ExecutorService eventPool;
     private ExecutorService broadcastPool;
@@ -84,9 +76,9 @@ public class Agent {
     public ILedger ledger;
 
     /**
-     * 工具调用缓存
+     * 工具调用处理器
      */
-    public List<CallCache> toolCallCaches = new ArrayList<>();
+    protected ToolHandler toolHandler;
 
     /**
      * 工作目录，文件系统工具以此目录为根目录进行读写
@@ -109,7 +101,6 @@ public class Agent {
     public Agent(String id, String prompt, ILlmProvider llm, List<Tool<?>> tools) {
         this.id = id;
         this.prompt = prompt;
-        this.tools = tools != null ? tools : new ArrayList<>();
         this.queue = new PriorityBlockingQueue<>(100, Comparator.comparing(Event::getPriority));
 
         this.llmProvider = llm;
@@ -123,6 +114,7 @@ public class Agent {
         this.broadcastPool =  Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Broadcast-", 0).factory());
         this.ledger = Config.getInstance().getDefaultLedger();
 
+        this.toolHandler = new ToolHandler(tools, 5, llm);
     }
 
     /**
@@ -209,7 +201,7 @@ public class Agent {
         });
 
         this.recovery();
-        
+
         return this;
     }
 
@@ -454,18 +446,18 @@ public class Agent {
 
         var format = event.getMessage().getFormatted() == null ? null : event.getMessage().getFormatted().getClass();
 
-        var flux = llmProvider.get(tools, format, null).send(memoryManager.getMessagesForLLM(), format, tools);
+        var flux = llmProvider.get(toolHandler.getTools(), format, null).send(memoryManager.getMessagesForLLM(), format, toolHandler.getTools());
 
         fluxHandle(flux, format, event)
                 .flatMapMany(holder -> {
                     var toolCallHolder = holder.getT2();
 
                     if (!toolCallHolder.isEmpty()) {
-                        var calls = mergeToolCalls(toolCallHolder);
+                        var calls = toolHandler.merge(toolCallHolder);
 
                         // 通过cli调用MCP函数
                         // Todo 普通函数调用报错了，如何传导
-                        var callResult = invokeToolCalls(calls.getFirst());
+                        var callResult = toolHandler.invoke(this, calls.getFirst());
 
                         // 按结果类型分组处理
                         var directCalls = new ArrayList<Message.ToolCall>();
@@ -493,7 +485,7 @@ public class Agent {
                                         .toolName(call.getName())
                                         .params(call.getArguments())
                                         .build();
-                                toolCallCaches.add(cache);
+                                toolHandler.addCache(cache);
 
                                 // 触发消息
                                 sink.tryEmitNext(me.karboom.java.iSerf.agent.Message.builder().toolCalls(List.of(call)).custom(call.getResult().getDirect()).type(me.karboom.java.iSerf.agent.Message.TYPE.CUSTOM).isSegment(0).build());
@@ -506,8 +498,8 @@ public class Agent {
                             // Todo 判断IFunction
 
                             for (var toolCall : errorCalls) {
-                                updateToolWithRetry(toolCall, 1).subscribe();
-                                invokeToolCalls(List.of(toolCall));
+                                toolHandler.updateWithRetry(this, toolCall, 1).subscribe();
+                                toolHandler.invoke(this, List.of(toolCall));
                             }
                         }
 
@@ -532,7 +524,7 @@ public class Agent {
                             memoryManager.add(messageRes);
 
                             // Todo 这里的 tools 参数是否可以去掉，节省 token
-                            var newFlux = llmProvider.get(tools, null, null).send(memoryManager.getMessagesForLLM(), null, tools);
+                            var newFlux = llmProvider.get(toolHandler.getTools(), null, null).send(memoryManager.getMessagesForLLM(), null, toolHandler.getTools());
 
                             return fluxHandle(newFlux, format, event).thenMany(Flux.empty());
                         } else {
@@ -593,395 +585,19 @@ public class Agent {
     // region ========== 工具相关 ==========
     /**
      * 直接从缓存的参数调用工具
-     * 1. 找出匹配的toolCallCache
-     * 2. 调用函数，获取result.direct并且返回
-     *
-     * Todo 跑在哪个线程池里面
+     * @see ToolHandler#invokeByCache
      */
-    @SneakyThrows
     public ObjectNode invokeToolCallCache(String toolCallId) {
-        log.debug("invokeToolCallCache toolCallId: " + toolCallId);
-
-        // 根据 toolCallId 查找缓存
-        var cache = toolCallCaches.stream()
-                .filter(c -> c.callId.equals(toolCallId))
-                .findFirst()
-                .orElseThrow(() -> new RuntimeException("Tool call cache not found: " + toolCallId));
-
-        // 根据 toolName 匹配对应的 Tool
-        var matchedTool = tools.stream()
-                .filter(tool -> tool.getName().equals(cache.toolName))
-                .findFirst()
-                .orElseThrow(() -> new RuntimeException("Tool not found: " + cache.toolName));
-
-        var result = CallResult.builder().build();
-
-        // Todo 这里可以封装一个函数专门调用iFunction
-        var functionPath = getIFunctionPath(matchedTool);
-
-        var classPath = "%s/%s/%s".formatted(functionPath.get(0), functionPath.get(1), functionPath.get(2));
-        var versionDir = "%s/%s".formatted(functionPath.get(0), functionPath.get(1));
-
-        // 判断 versionDir 下面是否有.class 文件，否则先编译
-        if (!new File("%s.class".formatted(classPath)).exists()) {
-            var javaFile = new File("%s.java".formatted(classPath));
-            CodeUtil.compile(Files.readString(javaFile.toPath()), versionDir);
-        }
-
-        // 加载类
-        var cls = (FunctionWrapper) CodeUtil.load(versionDir, functionPath.get(2));
-        result = (cls.run(new Context(this, null), cache.params));
-
-        return result.direct;
+        return toolHandler.invokeByCache(this, toolCallId);
     }
 
     /**
      * 根据错误反馈更新工具内容
      * @deprecated
+     * @see ToolHandler#update
      */
     public Mono<Void> updateTool(Message.ToolCall toolCall) {
-        // 1. 根据ToolCall 匹配tool
-        var matchedTool = tools.stream()
-                .filter(tool -> tool.getName().equals(toolCall.getName()))
-                .findFirst()
-                .orElse(null);
-
-        if (matchedTool == null) {
-            return Mono.error(new RuntimeException("Tool not found: " + toolCall.getName()));
-        }
-
-        // 2. 通过API获取代码
-        var apiUrl = "http://localhost:3000/query";
-        var toolName = matchedTool.getName();
-
-        // 创建请求
-        var request = new Request.Builder()
-                .url(apiUrl + "?name=" + toolName)
-                .get()
-                .build();
-
-        // 异步执行 HTTP 请求并处理响应
-        return Mono.fromCallable(() -> HttpUtil.getClient().newCall(request).execute())
-                .flatMap(response -> {
-                    if (!response.isSuccessful()) {
-                        return Mono.error(new RuntimeException("Failed to query tool code: " + response.code()));
-                    }
-
-                    try {
-                        var responseBody = response.body().string();
-                        var currentCode = JSONUtil.parse(responseBody).get("tool").get("content").asText();
-
-                        // 3. 调用LLM更新代码
-                        var prompt = "请根据以下错误信息更新代码:\n\n输入参数：\n\n%s\n\n错误信息: %s\n\n当前代码:\n%s\n\n 请修改runner里面的逻辑，仅需要告诉我最终的代码，不要带markdown标记"
-                                .formatted(toolCall.arguments.toString(), toolCall.getResult().toString(), currentCode);
-
-                        var userMessage = me.karboom.java.iSerf.agent.Message.builder()
-                                .role("user")
-                                .text(prompt)
-                                .build();
-
-                        var messages = new ArrayList<Message>();
-                        messages.add(userMessage);
-
-                        // 调用LLM生成更新后的代码
-                        return llmProvider.get(null, null, null).send(messages, null, null)
-                                .map(chunk -> {
-                                    if (chunk.getChoices() != null && !chunk.getChoices().isEmpty()) {
-                                        var delta = chunk.getChoices().get(0).getText();
-                                        if (delta != null) {
-                                            return delta;
-                                        }
-                                    }
-                                    return "";
-                                })
-                                .reduce(new StringBuilder(), (sb, content) -> sb.append(content))
-                                .map(StringBuilder::toString)
-                                .flatMap(updatedCode -> {
-                                    // 4. 通过API上传更新后的代码
-                                    var updateApiUrl = "http://localhost:3000/update";
-                                    var encodedCode = Base64.getEncoder().encodeToString(updatedCode.getBytes(StandardCharsets.UTF_8));
-                                    var payload = "{\"name\": \"%s\", \"content\": \"%s\"}"
-                                            .formatted(toolName, encodedCode);
-
-                                    var updateRequestBody = RequestBody.create(
-                                            payload,
-                                            MediaType.get("application/json; charset=utf-8")
-                                    );
-
-                                    var updateRequest = new Request.Builder()
-                                            .url(updateApiUrl)
-                                            .post(updateRequestBody)
-                                            .build();
-
-                                    return Mono.fromCallable(() -> HttpUtil.getClient().newCall(updateRequest).execute())
-                                            .flatMap(updateResponse -> {
-                                                if (!updateResponse.isSuccessful()) {
-                                                    return Mono.error(new RuntimeException("Failed to upload updated code: " + updateResponse.code()));
-                                                } else {
-                                                    return Mono.empty();
-                                                }
-                                            });
-                                })
-                                .onErrorResume(e -> Mono.error(e));
-                    } catch (Exception e) {
-                        return Mono.error(e);
-                    }
-                })
-                .then(); // 转换为Mono<Void>
-    }
-
-    @SneakyThrows
-    private Mono<Void> updateToolWithRetry(Message.ToolCall toolCall, Integer attempt) {
-        var matchedTool = tools.stream()
-                .filter(tool -> tool.getName().equals(toolCall.getName()))
-                .findFirst()
-                .orElse(null);
-        if (matchedTool == null) {
-            throw (new RuntimeException("Tool not found: %s".formatted(toolCall.getName())));
-        }
-
-        var functionPath = getIFunctionPath(matchedTool);
-        var javaFilePath = "%s/%s/%s.java".formatted(functionPath.get(0), functionPath.get(1), functionPath.get(2));
-        var javaFile = new File(javaFilePath);
-
-        if (!javaFile.exists()) {
-            throw new RuntimeException("Java file not found: %s".formatted(javaFilePath));
-        }
-
-        var currentCode = Files.readString(javaFile.toPath(), StandardCharsets.UTF_8);
-
-        var prompt = "请根据以下错误信息更新代码:\n\n输入参数：\n\n%s\n\n错误信息: %s\n\n当前代码:\n%s\n\n 请修改runner里面的逻辑，仅需要告诉我最终的代码，不要带markdown标记"
-                .formatted(toolCall.arguments.toString(), toolCall.getResult().toString(), currentCode);
-
-        var userMessage = me.karboom.java.iSerf.agent.Message.builder()
-                .role(me.karboom.java.iSerf.agent.Message.ROLE.USER)
-                .text(prompt)
-                .build();
-
-        // Todo 这里直接给format
-        return llmProvider.get(null, null, null).send(List.of(userMessage), null, null)
-                .reduce("", (acc, chunk) -> {
-                    var text = "";
-                    if (chunk.getChoices() != null && !chunk.getChoices().isEmpty()) {
-                        var delta = chunk.getChoices().get(0).getText();
-                        if (delta != null) {
-                            text = delta;
-                        }
-                    }
-                    return acc + text;
-                })
-
-                .flatMap(updatedCode -> {
-                    // 尝试编译、加载和运行代码
-                    try {
-                        var timestamp = System.currentTimeMillis();
-                        var targetDir = "%s/%s".formatted(functionPath.get(0), timestamp);
-
-                        CodeUtil.compile(updatedCode, targetDir);
-                        var obj = CodeUtil.load(targetDir, StrUtil.upperFirst(StrUtil.toCamelCase(toolCall.getName())));
-                        if (obj instanceof FunctionWrapper wrapper) {
-                            wrapper.run(new Context(this, null), toolCall.arguments);
-                        } else {
-                            throw new RuntimeException();
-                        }
-                        return Mono.empty();
-                    } catch (Exception e) {
-                        if (attempt >= this.maxEvoRetry) {
-                            throw (new RuntimeException("Max attempts reached for updating tool: %s".formatted(toolCall.getName())));
-                        }
-                        // 如果编译、加载或运行失败，递归调用重试
-                        return updateToolWithRetry(toolCall, attempt + 1);
-                    }
-                });
-    }
-
-    /**
-     * 合并函数调用片段
-     *
-     * 1.根据首个chunk确定choice总数
-     * 2.每个choice最终积累一个完整的Output.ToolCall
-     * 3.将Output.Toolcall body属性解析json，转为Item.ToolCall
-     *
-     * @param chunks 流式响应块列表
-     * @return 合并后的工具调用列表，每个choice对应一组ToolCall
-     */
-    private List<List<Message.ToolCall>> mergeToolCalls(List<Output> chunks) {
-        if (chunks.isEmpty()) {
-            return new ArrayList<>();
-        }
-
-        var result = new ArrayList<List<Message.ToolCall>>();
-
-        var mergedToolCalls = new HashMap<Integer, Output.ToolCall>();
-
-        for (var chunk : chunks) {
-            var choices = chunk.getChoices();
-            if (choices == null || choices.isEmpty()) {
-                continue;
-            }
-
-            var toolCalls = choices.get(0).getToolCall();
-            if (toolCalls == null) {
-                continue;
-            }
-
-            for (var toolCall : toolCalls) {
-                var index = toolCall.getIndex();
-                if (index == null) {
-                    continue;
-                }
-
-                mergedToolCalls.merge(index, toolCall, (existing, newCall) -> {
-                    if (newCall.getId() != null && newCall.getId() != "") {
-                        existing.setId(newCall.getId());
-                    }
-                    if (newCall.getName() != null && newCall.getName() != "") {
-                        existing.setName(newCall.getName());
-                    }
-                    if (newCall.getArguments() != null) {
-                        var existingArgs = existing.getArguments() == null ? "" : existing.getArguments();
-                        existing.setArguments(existingArgs + newCall.getArguments());
-                    }
-                    return existing;
-                });
-            }
-        }
-
-        for (var entry : mergedToolCalls.entrySet()) {
-            var toolCallsForChoice = new ArrayList<Message.ToolCall>();
-            var outputToolCall = entry.getValue();
-
-            var itemToolCall = me.karboom.java.iSerf.agent.Message.ToolCall.builder()
-                    .id(outputToolCall.getId())
-                    .name(outputToolCall.getName())
-                    .arguments(JSONUtil.parse(outputToolCall.getArguments(), HashMap.class))
-                    .build();
-
-            toolCallsForChoice.add(itemToolCall);
-            result.add(toolCallsForChoice);
-        }
-
-        return result;
-    }
-
-    /**
-     * 调用函数
-     * Todo 工具串行调用，和并行调用
-     *
-     * @param calls 工具调用列表
-     * @return 带有调用结果的工具调用列表
-     */
-    private List<Message.ToolCall> invokeToolCalls(List<Message.ToolCall> calls) {
-
-        for (var call : calls) {
-            // 根据 name 匹配对应的 Tool
-            Tool matchedTool = null;
-            for (Tool tool : tools) {
-                if (tool.getName().equals(call.name)) {
-                    matchedTool = tool;
-                    break;
-                }
-            }
-
-            var result = CallResult.builder().build();
-
-            if (matchedTool == null) {
-                result.setLlm("Tool not found: " + call.name);
-                continue;
-            }
-
-            try {
-                switch (matchedTool.getType()) {
-                    case Tool.TYPE.FUNCTION:
-                        // 调用本地函数
-
-                        result = matchedTool.getFunction().run(new Context(this, null), JSONUtil.convert(call.arguments, matchedTool.paramType));
-
-                        break;
-
-                    case Tool.TYPE.IFUNCTION:
-                    {
-                        try {
-                            var functionPath = getIFunctionPath(matchedTool);
-
-                            var classPath = "%s/%s/%s".formatted(functionPath.get(0), functionPath.get(1), functionPath.get(2));
-                            var versionDir = "%s/%s".formatted(functionPath.get(0), functionPath.get(1));
-
-                            // 判断 versionDir下面是否有.class文件，否则先编译
-                            if (!new File("%s.class".formatted(classPath)).exists()) {
-                                var javaFile = new File("%s.java".formatted(classPath));
-                                CodeUtil.compile(Files.readString(javaFile.toPath()), versionDir);
-                            }
-
-                            // 加载类
-                            var cls = (FunctionWrapper) CodeUtil.load(versionDir, functionPath.get(2));
-                            result = (cls.run(new Context(this, null), JSONUtil.convert(call.arguments, matchedTool.paramType)));
-                        } catch (Exception e) {
-                            result.setError((RuntimeException) e);
-                        }
-                    }
-                    break;
-
-                    case Tool.TYPE.MCP_HTTP:
-                        // 调用 HTTP 工具
-                    {
-                        result.setLlm ("{\"content\":\"HTTP tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
-
-                    }
-                    break;
-
-                    case Tool.TYPE.MCP_CLI:
-                        // 调用 CLI 工具
-                    {
-
-                        result.setLlm("{\"content\":\"CLI tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
-
-                    }
-                    break;
-                    default:
-                        throw new RuntimeException("函数类型不存在");
-                }
-            } catch (Exception e) {
-                result.setLlm("工具调用错误" + e.getMessage());
-            }
-
-            call.result = result;
-        }
-
-        return calls;
-    }
-
-    /**
-     * 构建类名路径，不带后缀名，格式为 IDirectory/驼峰toolName/从info.json解析current字段/首字母大写驼峰toolName
-     *
-     * @return List.of(工具目录, 版本号, 类名)
-     */
-    @SneakyThrows
-    private List<String> getIFunctionPath(Tool tool) {
-        // 获取工具的目录
-        var directory = tool.getIDirectory();
-        // 获取工具名的驼峰形式
-        var camelCaseName = StrUtil.toCamelCase(tool.getName());
-
-        // 构建 info.json 文件路径
-        var infoFilePath = "%s/%s/info.json".formatted(directory, camelCaseName);
-        var infoFile = new File(infoFilePath);
-
-
-        // 读取 info.json 中的 current 字段值，默认为 "current"
-        var info = JSONUtil.parse("""
-                {"current":"fallback"}
-                """);
-        if (infoFile.exists()) {
-            info = JSONUtil.parse(Files.readString(infoFile.toPath()));
-        }
-        var currentVersion = info.get("current").asText();
-
-        // 获取首字母大写的驼峰工具名
-        var upperFirstCamelCaseName = StrUtil.upperFirst(camelCaseName);
-
-        // 构建最终路径
-        return List.of("%s/%s".formatted(directory, camelCaseName), currentVersion, upperFirstCamelCaseName);
+        return toolHandler.update(toolCall);
     }
 
     // endregion
