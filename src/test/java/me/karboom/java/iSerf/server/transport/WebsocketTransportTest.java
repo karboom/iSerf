@@ -206,5 +206,10 @@ class WebsocketTransportTest {
         public TestWebsocketTransport(ContainerServer container, Integer port) {
             super(container, port);
         }
+
+        @Override
+        public Object getUser(Object clientHandle) {
+            return null;
+        }
     }
 }

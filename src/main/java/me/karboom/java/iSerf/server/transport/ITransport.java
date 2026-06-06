@@ -30,4 +30,16 @@ public interface ITransport {
      * @param bodyJson     事件数据 JSON 字符串
      */
     void sendToClient(Object clientHandle, String event, String bodyJson);
+
+    /**
+     * 根据客户端句柄获取当前用户信息
+     * @param clientHandle
+     * @return
+     */
+    Object getUser(Object clientHandle);
+
+    /**
+     * 断开连接
+     */
+    void closeClient(Object clientHandle);
 }

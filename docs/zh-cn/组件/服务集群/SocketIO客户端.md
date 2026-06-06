@@ -2,6 +2,16 @@
 
 Websocket 集群协议使用 Socket.IO，客户端连接至 `/user` 命名空间进行 Agent 相关操作。
 
+## 通信协议
+
+客户端与服务端通信采用 `{msgId, body}` 结构包裹请求和响应数据：
+
+- **请求**: `{"msgId":"<唯一请求ID>","body":{...具体参数}}`
+- **成功响应**: `{"msgId":"<对应请求ID>","body":{"data":{...}}}`
+- **错误响应**: `{"msgId":"","body":{"error":"错误信息"}}`
+
+响应通过同名事件回传（非 ack 回调），客户端需通过 `socket.on(eventName, callback)` 监听响应。
+
 ## 代码示例（socket.io.js）
 
 ```html
@@ -27,6 +37,11 @@ Websocket 集群协议使用 Socket.IO，客户端连接至 `/user` 命名空间
             console.log(msg);
         };
 
+        // 生成唯一请求ID
+        function generateMsgId() {
+            return 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        }
+
         // 监听连接
         socket.on('connect', () => {
             log('已连接服务器');
@@ -38,63 +53,76 @@ Websocket 集群协议使用 Socket.IO，客户端连接至 `/user` 命名空间
         });
 
         // 监听消息推送
-        socket.on('agent/message', (data) => {
-            log(`收到消息：${JSON.stringify(data)}`);
+        socket.on('agent.message', (data) => {
+            const msg = JSON.parse(data);
+            log(`收到消息：${JSON.stringify(msg)}`);
         });
 
-        // 创建 Agent
-        function createAgent(prompt) {
-            return new Promise((resolve) => {
-                socket.emit('agent/create', JSON.stringify({ prompt }), (response) => {
-                    const res = JSON.parse(response);
-                    log(`Agent 已创建：${res.agentId}`);
-                    resolve(res.agentId);
-                });
+        // 通用请求方法
+        function request(event, body) {
+            return new Promise((resolve, reject) => {
+                const msgId = generateMsgId();
+                const wrapped = JSON.stringify({ msgId, body });
+
+                // 监听同名事件响应
+                const handler = (data) => {
+                    const response = JSON.parse(data);
+                    if (response.msgId === msgId) {
+                        socket.off(event, handler);
+                        if (response.body && response.body.error) {
+                            reject(new Error(response.body.error));
+                        } else {
+                            resolve(response.body && response.body.data);
+                        }
+                    }
+                };
+                socket.on(event, handler);
+
+                socket.emit(event, wrapped);
             });
         }
 
+        // 创建 Agent
+        function createAgent(prompt) {
+            return request('agent.create', { prompt }).then(data => data.agentId);
+        }
+
         // 订阅 Agent
-        function activeAgent(agentId) {
-            return new Promise((resolve) => {
-                socket.emit('agent/active', JSON.stringify({ agentId }), (response) => {
-                    const res = JSON.parse(response);
-                    log(`Agent 已激活：${res.success}`);
-                    resolve(res.success);
-                });
-            });
+        function subscribeAgent(agentId) {
+            return request('agent.subscribe', { agentId });
         }
 
         // 发送消息
         function sendMessage(agentId, event) {
-            socket.emit('agent/send', JSON.stringify({ agentId, event }), () => {
-                log('消息已发送');
-            });
+            return request('agent.send', { agentId, event });
         }
 
         // 取消订阅
-        function leaveAgent(agentId) {
-            socket.emit('agent/leave', JSON.stringify({ agentId }), (response) => {
-                const res = JSON.parse(response);
-                log(`已取消订阅：${res.success}`);
-            });
+        function unsubscribeAgent(agentId) {
+            return request('agent.unsubscribe', { agentId });
+        }
+
+        // 查询 Agent 列表
+        function listAgents(filter) {
+            return request('agent.list', filter || {}).then(data => data.agents || []);
         }
 
         // 调用工具缓存
         function toolCall(agentId, toolCallId) {
-            return new Promise((resolve) => {
-                socket.emit('agent/toolCall', JSON.stringify({ agentId, toolCallId }), (response) => {
-                    const res = JSON.parse(response);
-                    log(`工具调用结果：${JSON.stringify(res)}`);
-                    resolve(res);
-                });
-            });
+            return request('agent.toolCall', { agentId, toolCallId });
         }
 
         // 使用示例
         (async () => {
-            const agentId = await createAgent('你是一个助手');
-            await activeAgent(agentId);
-            sendMessage(agentId, { type: 'message', content: '你好' });
+            try {
+                const agentId = await createAgent('你是一个助手');
+                log(`Agent 已创建：${agentId}`);
+                await subscribeAgent(agentId);
+                log('已订阅 Agent');
+                sendMessage(agentId, { type: 'MESSAGE', priority: 1, message: { type: 'TEXT', text: '你好' } });
+            } catch (err) {
+                log(`错误：${err.message}`);
+            }
         })();
     </script>
 </body>
@@ -105,15 +133,16 @@ Websocket 集群协议使用 Socket.IO，客户端连接至 `/user` 命名空间
 
 ### 发送事件
 
-| 事件 | 请求格式 | 响应格式 | 说明 |
+| 事件 | 请求 body | 响应 data | 说明 |
 |------|----------|----------|------|
-| `agent/create` | `{"prompt":"xxx"}` | `{"agentId":"xxx"}` | 创建 Agent，在本节点直接创建 |
-| `agent/send` | `{"agentId":"xxx","event":{...}}` | - | 向 Agent 发送消息，event 结构见下方说明 |
-| `agent/active` | `{"agentId":"xxx"}` | `{"success":true}` | 订阅 Agent，接收其消息推送 |
-| `agent/leave` | `{"agentId":"xxx"}` | `{"success":true}` | 取消订阅 Agent |
-| `agent/toolCall` | `{"agentId":"xxx","toolCallId":"xxx"}` | `{...}` | 调用 Agent 工具缓存，返回工具调用结果的 ObjectNode |
+| `agent.create` | `{"prompt":"xxx"}` | `{"agentId":"xxx"}` | 创建 Agent，在本节点直接创建 |
+| `agent.send` | `{"agentId":"xxx","event":{...}}` | - | 向 Agent 发送消息，event 结构见下方说明 |
+| `agent.subscribe` | `{"agentId":"xxx"}` | - | 订阅 Agent，接收其消息推送 |
+| `agent.unsubscribe` | `{"agentId":"xxx"}` | - | 取消订阅 Agent |
+| `agent.toolCall` | `{"agentId":"xxx","toolCallId":"xxx"}` | `{...}` | 调用 Agent 工具缓存，返回工具调用结果的 ObjectNode |
+| `agent.list` | `{...查询条件}` | `{"agents":[...]}` | 查询 Agent 列表 |
 
-#### `agent/send` event 结构
+#### `agent.send` event 结构
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
@@ -134,39 +163,56 @@ Websocket 集群协议使用 Socket.IO，客户端连接至 `/user` 命名空间
 #### 示例
 
 ```json
+// 创建 Agent
+{
+  "msgId": "msg_001",
+  "body": {
+    "prompt": "你是一个助手"
+  }
+}
+
 // 发送文本消息
 {
-  "agentId": "xxx",
-  "event": {
-    "type": "MESSAGE",
-    "priority": 1,
-    "message": {
-      "type": "TEXT",
-      "text": "你好"
+  "msgId": "msg_002",
+  "body": {
+    "agentId": "xxx",
+    "event": {
+      "type": "MESSAGE",
+      "priority": 1,
+      "message": {
+        "type": "TEXT",
+        "text": "你好"
+      }
     }
   }
 }
 
 // 发送带图片的消息
 {
-  "agentId": "xxx",
-  "event": {
-    "type": "MESSAGE",
-    "priority": 1,
-    "message": {
-      "type": "IMAGE",
-      "text": "描述这张图片",
-      "files": ["https://example.com/image.png"]
+  "msgId": "msg_003",
+  "body": {
+    "agentId": "xxx",
+    "event": {
+      "type": "MESSAGE",
+      "priority": 1,
+      "message": {
+        "type": "IMAGE",
+        "text": "描述这张图片",
+        "files": ["https://example.com/image.png"]
+      }
     }
   }
 }
 
 // 触发记忆整理
 {
-  "agentId": "xxx",
-  "event": {
-    "type": "ORGANIZE_MEMORY",
-    "priority": 5
+  "msgId": "msg_004",
+  "body": {
+    "agentId": "xxx",
+    "event": {
+      "type": "ORGANIZE_MEMORY",
+      "priority": 5
+    }
   }
 }
 ```
@@ -175,11 +221,16 @@ Websocket 集群协议使用 Socket.IO，客户端连接至 `/user` 命名空间
 
 | 事件 | 数据格式 | 说明 |
 |------|----------|------|
-| `agent/message` | `{"agentId":"xxx","message":{}}` | 服务端推送的 Agent 消息 |
+| `agent.message` | `{"msgId":"xxx","body":{"data":{"agentId":"xxx","message":{}}}}` | 服务端推送的 Agent 消息 |
 
 ### 错误响应
 
-当服务端处于关闭状态时，所有事件返回：
+当服务端处于关闭状态或发生错误时，返回：
 
 ```json
-{"error":"server is shutting down"}
+{"msgId":"","body":{"error":"错误信息"}}
+```
+
+常见错误：
+- 服务关闭：`{"msgId":"","body":{"error":"server is shutting down"}}`
+- 未知事件（直接由 transport 返回）：`{"error":"unknown event: xxx"}`

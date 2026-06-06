@@ -8,6 +8,7 @@ import me.karboom.java.iSerf.util.DataUtil;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Socket.IO 传输协议适配，将客户端事件委托给 ContainerServer 统一处理。
@@ -15,11 +16,6 @@ import java.util.List;
  */
 @Slf4j
 public abstract class WebsocketTransport implements ITransport {
-
-    /**
-     * 关闭状态下的拒绝消息
-     */
-    private static final String SHUTTING_DOWN_ERROR = "{\"error\":\"server is shutting down\"}";
 
     /**
      * Socket.IO 服务实例
@@ -78,6 +74,14 @@ public abstract class WebsocketTransport implements ITransport {
     }
 
     @Override
+    public void closeClient(Object clientHandle) {
+        switch (clientHandle) {
+            case SocketIOClient ioClient -> ioClient.disconnect();
+            default -> log.warn("closeClient unsupported clientHandle type: %s".formatted(clientHandle.getClass().getName()));
+        }
+    }
+
+    @Override
     public void sendToClient(Object clientHandle, String event, String bodyJson) {
         switch (clientHandle) {
             case SocketIOClient ioClient -> ioClient.sendEvent(event, bodyJson);
@@ -95,21 +99,6 @@ public abstract class WebsocketTransport implements ITransport {
         config.setSocketConfig(new SocketConfig() {{
             setReuseAddress(true);
         }});
-
-        // 系统授权链：优先检查关闭状态
-        sysAuthListener.addFirst(data -> {
-            if (container.isShuttingDown()) {
-                // 阻塞让 Nginx 等待超时，自动切换到下一个 upstream 节点
-                // 超时时间应大于 Nginx 的 proxy_connect_timeout（默认 60 秒）
-                try {
-                    Thread.sleep(70000);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-                return AuthorizationResult.FAILED_AUTHORIZATION;
-            }
-            return AuthorizationResult.SUCCESSFUL_AUTHORIZATION;
-        });
 
         // 添加连接授权监听，依次调用 sysAuthListener 和 userAuthListener，失败则不继续
         config.setAuthorizationListener(data -> {
@@ -158,15 +147,25 @@ public abstract class WebsocketTransport implements ITransport {
      * @param userNS 用户命名空间
      */
     protected void setupUserNS(SocketIONamespace userNS) {
-        // 注册用户侧事件，委托给 ContainerServer 处理
-        var events = List.of(
+        // 已知事件白名单
+        var knownEvents = Set.of(
                 ContainerServer.EVENT_AGENT_CREATE,
                 ContainerServer.EVENT_AGENT_SEND,
                 ContainerServer.EVENT_AGENT_SUBSCRIBE,
                 ContainerServer.EVENT_AGENT_UNSUBSCRIBE,
-                ContainerServer.EVENT_AGENT_TOOL_CALL
+                ContainerServer.EVENT_AGENT_TOOL_CALL,
+                ContainerServer.EVENT_AGENT_LIST
         );
-        events.forEach(e -> registerUserEvent(userNS, e));
+
+        // 拦截未知事件，立即返回错误
+        userNS.addEventInterceptor((client, eventName, ackRequest, data) -> {
+            if (!knownEvents.contains(eventName)) {
+                log.warn("setupUserNS unknown event: %s from %s".formatted(eventName, client.getSessionId()));
+                client.sendEvent(eventName, "{\"error\":\"unknown event: " + eventName + "\"}");
+            }
+        });
+
+        knownEvents.forEach(e -> registerUserEvent(userNS, e));
     }
 
     /**

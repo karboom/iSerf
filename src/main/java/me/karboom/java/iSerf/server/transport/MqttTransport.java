@@ -112,6 +112,19 @@ public class MqttTransport implements ITransport {
     }
 
     @Override
+    public Object getUser(Object clientHandle) {
+        return clientHandle;
+    }
+
+    @Override
+    public void closeClient(Object clientHandle) {
+        switch (clientHandle) {
+            case String clientId -> unregisterClient(clientId);
+            default -> log.warn("closeClient unsupported clientHandle type: %s".formatted(clientHandle.getClass().getName()));
+        }
+    }
+
+    @Override
     public void sendToClient(Object clientHandle, String event, String bodyJson) {
         switch (clientHandle) {
             case String clientId -> {

@@ -13,10 +13,12 @@ import me.karboom.java.iSerf.server.metaData.Node;
 import me.karboom.java.iSerf.server.transport.ITransport;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 通用传输容器，承载协议无关的元数据管理和消息总线逻辑。
@@ -24,11 +26,6 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Slf4j
 public abstract class ContainerServer {
-
-    /**
-     * 关闭状态下的拒绝消息
-     */
-    private static final String SHUTTING_DOWN_ERROR = "{\"error\":\"server is shutting down\"}";
 
     // ======================== 事件名常量 ========================
     public static final String EVENT_AGENT_CREATE = "agent.create";
@@ -38,6 +35,32 @@ public abstract class ContainerServer {
     public static final String EVENT_AGENT_TOOL_CALL = "agent.toolCall";
     public static final String EVENT_AGENT_LIST = "agent.list";
     public static final String EVENT_AGENT_MESSAGE = "agent.message";
+
+
+    static class Error extends RuntimeException {
+
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    static class Message<T> {
+        public String msgId;
+
+        public T body;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    static class OutMessageBody {
+        public String error;
+
+        public ObjectNode data;
+    }
+
 
     /**
      * 客户端记录：存储 transport 标识和客户端句柄，支持多协议互通
@@ -72,7 +95,7 @@ public abstract class ContainerServer {
         /**
          * 期望响应的节点数
          */
-        public Integer expectedCount;
+        public AtomicInteger expectedCount;
         /**
          * 已收集的结果列表
          */
@@ -113,6 +136,9 @@ public abstract class ContainerServer {
      */
     public String id;
 
+    /**
+     * 集群通信地址（IP），用于注册节点时上报
+     */
     public String clusterIp;
 
     /**
@@ -148,6 +174,7 @@ public abstract class ContainerServer {
     /**
      * 构造通用传输容器
      *
+     * @param clusterIp  集群通信地址
      * @param messageBus 消息总线
      * @param metaData   元数据存储
      */
@@ -161,6 +188,7 @@ public abstract class ContainerServer {
     /**
      * Agent 工厂方法，由子类实现
      *
+     * @param ctx    请求上下文（含 transport、client、user 等信息）
      * @param params Agent 构造参数
      * @return Agent 实例
      */
@@ -168,6 +196,7 @@ public abstract class ContainerServer {
 
     /**
      * 按照条件查找智能体列表
+     *
      * @param ctx
      * @param params
      * @return 匹配的Agent列表
@@ -176,13 +205,15 @@ public abstract class ContainerServer {
 
     /**
      * 删除Agent
-     * @param ctx
-     * @param params
-     * @return
+     *
+     * @param ctx    请求上下文（含 transport、client、user 等信息）
+     * @param params 删除参数（含 target agent ID）
+     * @return 被删除的 Agent 实例，若不存在则返回 null
      */
     protected abstract Agent removeAgent(Context ctx, ObjectNode params);
 
 
+    public void eventInterceptor(Context ctx, String event, String dataJson) {}
     /**
      * 挂载一个传输协议实例
      *
@@ -281,10 +312,13 @@ public abstract class ContainerServer {
     }
 
     /**
-     * 处理 agent.subscribe 事件：订阅 Agent 消息流
+     * 处理 agent.subscribe 事件：订阅 Agent 消息流。
+     * Agent 在本地则直接注册订阅回调，通过 transport 或 messageBus 回推消息给客户端。
+     * Agent 不在本地则将订阅请求转发到目标节点，同时缓存 TransportClientRecord 到 agentClient，
+     * 供后续集群间 reverse 消息回传时定位客户端连接。
      *
      * @param context 上下文（含 transport、client、user）
-     * @param data    请求数据
+     * @param data    请求数据（含 agentId）
      * @return 响应 ObjectNode，可为 null
      */
     public ObjectNode handleAgentSubscribe(Context context, ObjectNode data) {
@@ -296,31 +330,31 @@ public abstract class ContainerServer {
                 var payload = JSONUtil.create()
                         .put("agentId", agentId)
                         .set("message", JSONUtil.convert(item));
-                var wrapped = JSONUtil.create()
-                        .put("requestId", context.requestId)
-                        .set("data", payload);
-                var messageJson = JSONUtil.stringify(wrapped);
+                var messageMsg = Message.<OutMessageBody>builder()
+                        .msgId(context.requestId)
+                        .body(OutMessageBody.builder().data(payload).build());
+                var messageJson = JSONUtil.stringify(messageMsg);
 
-                    if (this.id.equals(context.serverId)) {
-                        if (context.transport != null) {
-                            context.transport.sendToClient(context.client, EVENT_AGENT_MESSAGE, messageJson);
-                        } else {
-                            log.warn("handleAgentSubscribe no transport for client: %s".formatted(context.client));
-                        }
+                if (this.id.equals(context.serverId)) {
+                    if (context.transport != null) {
+                        context.transport.sendToClient(context.client, EVENT_AGENT_MESSAGE, messageJson);
                     } else {
-                        var array = JSONUtil.createArray();
-                        array.add(this.id).add("reverse").add(EVENT_AGENT_MESSAGE).add(messageJson);
-                        messageBus.publish("%s-message".formatted(context.serverId), JSONUtil.stringify(array));
+                        log.warn("handleAgentSubscribe no transport for client: %s".formatted(context.client));
                     }
+                } else {
+                    var array = JSONUtil.createArray();
+                    array.add(this.id).add("reverse").add(EVENT_AGENT_MESSAGE).add(messageJson);
+                    messageBus.publish("%s-message".formatted(context.serverId), JSONUtil.stringify(array));
+                }
             });
             return null;
         } else {
             var targetNodeId = metaData.getAgentStay(agentId);
-                    var transportRecord = TransportClientRecord.builder()
-                            .transportId(context.transport.getTransportId())
-                            .clientHandle(context.client)
-                            .build();
-                    agentClient.put(agentId, transportRecord);
+            var transportRecord = TransportClientRecord.builder()
+                    .transportId(context.transport.getTransportId())
+                    .clientHandle(context.client)
+                    .build();
+            agentClient.put(agentId, transportRecord);
             sendToOtherNode(EVENT_AGENT_SUBSCRIBE, JSONUtil.stringify(data), targetNodeId);
             return null;
         }
@@ -369,13 +403,15 @@ public abstract class ContainerServer {
     }
 
     /**
-     * 按照条件查找智能体，同时从自身和其他节点查询，然后合并
-     * 具体的匹配逻辑委托抽象方法listAgent
-     * 最终通过同名事件响应
+     * 按照条件查找智能体，根据请求来源分三个分支处理：
+     * 1. 代理调用分支（非本节点请求）：直接返回本节点匹配的 Agent 列表
+     * 2. 单节点分支（本节点请求且无其他节点）：同步返回匹配结果
+     * 3. 多节点分支（本节点请求且有其他节点）：广播查询到其他节点，
+     * 通过 ListQueryCollector 异步聚合各节点结果后，由 transport 回传客户端
      *
-     * @param context
-     * @param data
-     * @return null
+     * @param context 上下文（含 transport、client、user、serverId）
+     * @param data    查询条件
+     * @return 分支1、2 返回包含 agents 数组的 ObjectNode；分支3 返回 null（异步回传）
      */
     public ObjectNode handleAgentList(Context context, ObjectNode data) {
         var agents = listAgent(context, data);
@@ -408,10 +444,10 @@ public abstract class ContainerServer {
 
         var collector = ListQueryCollector.builder()
                 .requestId(requestId)
-                .expectedCount(otherNodes.size())
-                .results(localResults)
                 .originalContext(context)
                 .build();
+        collector.expectedCount = new AtomicInteger(otherNodes.size());
+        collector.results = Collections.synchronizedList(new ArrayList<>(localResults));
         listQueryCollectors.put(requestId, collector);
 
         otherNodes.forEach(node -> sendToOtherNode(EVENT_AGENT_LIST, JSONUtil.stringify(data), node.id));
@@ -420,58 +456,73 @@ public abstract class ContainerServer {
     }
 
     /**
-     * 处理用户事件
-     * 非本节点（serverId != this.id）的 proxy 请求直接返回对应值；
-     * 本节点请求若有返回值，通过 transport 派发同名事件
+     * 处理用户事件，根据事件名分发到对应的 handle 方法。
+     * 所有请求均解析 {msgId, body} 结构后进入 switch 分发；
+     * 当 result != null 且为本节点请求时，通过 transport 向客户端派发同名事件。
+     * 返回值用于调用方（如 listenMessage 中 proxy 模式的反向回传），
+     * catch 块中的错误响应同样通过 transport 回传给客户端。
+     * <p>
+     * 出入事件均采用 {msgId, body} 结构，输出的 body 为 {data, error}。
      *
-     * @param context  上下文（含 transport、client、user）
+     * @param context  上下文（含 transport、client、user、serverId）
      * @param event    事件名
      * @param dataJson 请求数据 JSON 字符串
-     * @return 响应 JSON 字符串，可为 null
+     * @return 响应 JSON 字符串（{msgId, body} 格式），无返回值时为 null
      */
     public String handleUserEvent(Context context, String event, String dataJson) {
         try {
             if (isShuttingDown) {
+                var shutdownError = ContainerServer.Message.<ContainerServer.OutMessageBody>builder()
+                        .msgId("")
+                        .body(ContainerServer.OutMessageBody.builder().error("server is shutting down").build());
+                context.transport.sendToClient(context.client, event, JSONUtil.stringify(shutdownError));
+                context.transport.closeClient(context.client);
                 throw new RuntimeException("server is shutting down");
             }
-            var data = JSONUtil.parse(dataJson);
-            if (!data.has("requestId")) {
-                throw new RuntimeException("need requestId");
+            var msg = JSONUtil.parse(dataJson, new TypeReference<Message<ObjectNode>>() {});
+            if (msg.msgId == null) {
+                throw new RuntimeException("need msgId");
             }
 
-            var requestId = data.get("requestId").asString();
-            context.setRequestId(requestId);
+            context.setRequestId(msg.msgId);
+
+            this.eventInterceptor(context, event, dataJson);
 
             var result = switch (event) {
-                case EVENT_AGENT_CREATE -> handleAgentCreate(context, data);
-                case EVENT_AGENT_SEND -> handleAgentSend(context, data);
-                case EVENT_AGENT_SUBSCRIBE -> handleAgentSubscribe(context, data);
-                case EVENT_AGENT_UNSUBSCRIBE -> handleAgentUnsubscribe(context, data);
-                case EVENT_AGENT_TOOL_CALL -> handleAgentToolCall(context, data);
-                case EVENT_AGENT_LIST -> handleAgentList(context, data);
+                case EVENT_AGENT_CREATE -> handleAgentCreate(context, msg.body);
+                case EVENT_AGENT_SEND -> handleAgentSend(context, msg.body);
+                case EVENT_AGENT_SUBSCRIBE -> handleAgentSubscribe(context, msg.body);
+                case EVENT_AGENT_UNSUBSCRIBE -> handleAgentUnsubscribe(context, msg.body);
+                case EVENT_AGENT_TOOL_CALL -> handleAgentToolCall(context, msg.body);
+                case EVENT_AGENT_LIST -> handleAgentList(context, msg.body);
                 default -> null;
             };
-            var wrapped = JSONUtil.create().set("data", result).put("requestId", requestId);
 
             if (result != null && this.id.equals(context.serverId)) {
-                context.transport.sendToClient(context.client, event, JSONUtil.stringify(wrapped));
+                var outMsg = Message.<OutMessageBody>builder()
+                        .msgId(msg.msgId)
+                        .body(OutMessageBody.builder().data(result).build());
+                context.transport.sendToClient(context.client, event, JSONUtil.stringify(outMsg));
             }
-            return result != null ? JSONUtil.stringify(wrapped) : null;
+            return result != null ? JSONUtil.stringify(Message.<OutMessageBody>builder()
+                    .msgId(msg.msgId)
+                    .body(OutMessageBody.builder().data(result).build())) : null;
         } catch (Exception e) {
-            var result = JSONUtil.create().put("error", e.getMessage().toString());
+            var errMsg = "服务器错误";
+            if (e instanceof Error) {
+                errMsg = e.getMessage();
+            }
+            var outMsg = Message.<OutMessageBody>builder()
+                    .msgId("")
+                    .body(OutMessageBody.builder().error(errMsg).build());
 
-            return JSONUtil.stringify(result);
+            if (this.id.equals(context.serverId)) {
+                context.transport.sendToClient(context.client, event, JSONUtil.stringify(outMsg));
+            }
+
+            return JSONUtil.stringify(outMsg);
         }
 
-    }
-
-    /**
-     * 检查是否正在关闭
-     *
-     * @return true 表示正在关闭
-     */
-    public boolean isShuttingDown() {
-        return isShuttingDown;
     }
 
     // ======================== 集群通信 ========================
@@ -487,8 +538,12 @@ public abstract class ContainerServer {
     }
 
     /**
-     * 订阅需要本节点处理的消息
-     * 消息主题为 nodeId-message，消息数据结构为 JSON 数组：[sourceNodeId, type, event, body]
+     * 订阅需要本节点处理的消息，消息主题为 {nodeId}-message，
+     * 消息数据结构为 JSON 数组：[sourceNodeId, type, event, body]。
+     * <p>
+     * proxy 模式：接收其他节点的代理请求，调用 handleUserEvent 处理并将结果反向回传。
+     * reverse 模式：接收反向响应，其中 agent.list 事件走 ListQueryCollector 聚合逻辑，
+     * 其他事件通过 agentClient 查找对应传输通道推送给客户端。
      */
     public void listenMessage() {
         messageBus.subscribe("%s-message".formatted(this.id), (message) -> {
@@ -530,8 +585,9 @@ public abstract class ContainerServer {
                                         agentsArray.forEach(item ->
                                                 collector.results.add((ObjectNode) item));
                                     }
-                                    collector.expectedCount--;
-                                    if (collector.expectedCount <= 0) {
+                                    var remaining = collector.expectedCount.decrementAndGet();
+                                    if (remaining <= 0) {
+                                        listQueryCollectors.remove(ackRequestId);
                                         var mergedArray = JSONUtil.createArray();
                                         collector.results.forEach(mergedArray::add);
                                         var combined = JSONUtil.create()
@@ -539,7 +595,6 @@ public abstract class ContainerServer {
                                                 .set("data", mergedArray);
                                         var ctx = collector.originalContext;
                                         ctx.transport.sendToClient(ctx.client, event, JSONUtil.stringify(combined));
-                                        listQueryCollectors.remove(ackRequestId);
                                     }
                                 }
                             }
@@ -562,7 +617,7 @@ public abstract class ContainerServer {
                     }
                 }
             } catch (Exception e) {
-               log.error("<listenMessage>", e);
+                log.error("<listenMessage>", e);
             }
         });
     }

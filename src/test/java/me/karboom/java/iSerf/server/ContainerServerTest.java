@@ -238,6 +238,16 @@ class ContainerServerTest {
             receivedMessages.add(bodyJson);
         }
 
+        @Override
+        public Object getUser(Object clientHandle) {
+            return null;
+        }
+
+        @Override
+        public void closeClient(Object clientHandle) {
+
+        }
+
         /**
          * 模拟客户端事件，构造 Context 并委托给 ContainerServer 处理
          *
