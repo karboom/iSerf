@@ -1,0 +1,16 @@
+package me.karboom.java.iSerf.agent;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@AllArgsConstructor
+@NoArgsConstructor
+public class AgentMetadata {
+    public String id;
+    public String orgId;
+    public String userId;
+}

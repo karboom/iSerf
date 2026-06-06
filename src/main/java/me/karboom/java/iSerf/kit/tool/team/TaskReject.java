@@ -54,7 +54,7 @@ public class TaskReject implements FunctionWrapper<TaskReject.Parameter> {
 
         // 添加评论
         var comment = Task.Comment.builder()
-                .agentId(ctx.agent.id)
+                .agentId(ctx.agent.metadata.getId())
                 .content(params.reason)
                 .createTime(OffsetDateTime.now())
                 .build();

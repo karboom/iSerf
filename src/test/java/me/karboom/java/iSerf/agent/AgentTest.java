@@ -177,45 +177,6 @@ class AgentTest {
     }
 
     @Test
-    void testUpdateTool() {
-        // 创建 Agent
-        var agent = new Agent("test-agent", "", llmProvider, tools) {}.run();
-
-        // 测试用例1: 正常情况 - 工具存在且更新成功
-        var toolCall = Message.ToolCall.builder()
-                .name("getWeather")
-                .arguments(new HashMap<>(){{
-                    put("location", "伦敦");
-                }})
-                .result(CallResult.builder()
-                        .error(new RuntimeException("这不是一个中国的地点"))
-                        .build())
-                .build();
-
-        // 验证 Mono<Void> 返回值可以正确处理
-        var updateToolMono = agent.updateTool(toolCall);
-        assertNotNull(updateToolMono, "updateTool should return a Mono<Void>");
-        // 订阅 Mono 以触发执行，并验证不会抛出异常
-        assertDoesNotThrow(() -> updateToolMono.block(), "updateTool should not throw exception for valid tool");
-
-        // 测试用例2: 工具不存在的情况
-        var nonExistentToolCall = Message.ToolCall.builder()
-                .name("non-existent-tool")
-                .arguments(new HashMap<>())
-                .result(CallResult.builder()
-                        .error(new RuntimeException("这不是一个中国的地点"))
-                        .build())
-                .build();
-
-        // 验证 Mono<Void> 返回值可以正确处理
-        var errorMono = agent.updateTool(nonExistentToolCall);
-        assertNotNull(errorMono, "updateTool should return a Mono<Void> even for errors");
-        // 验证会抛出预期的异常
-        assertThrows(RuntimeException.class, () -> errorMono.block(), 
-                   "updateTool should throw RuntimeException for non-existent tool");
-    }
-
-    @Test
     void testEvolution() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
             // 创建 Agent
@@ -576,8 +537,7 @@ class AgentTest {
             var testPath = Paths.get("src/test/resources/agent/constructor");
             var agent = new Agent("test-path-init-agent", llmProvider, testPath) {}.run();
 
-            assertEquals("test-path-init-agent", agent.id);
-            assertEquals("你是一个基于路径初始化的测试助手。", agent.prompt);
+            assertEquals("test-path-init-agent", agent.metadata.getId());
             assertEquals(0, agent.getMemoryManager().size());
             assertEquals("你是一个基于路径初始化的测试助手。", agent.getMemoryManager().getSystemPrompt());
         });

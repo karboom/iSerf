@@ -45,10 +45,7 @@ import java.util.function.Consumer;
 @Slf4j
 public class Agent {
     // region ========== 元数据 ==========
-    public String id;
-    public String orgId;
-    public String userId;
-
+    public AgentMetadata metadata;
     // endregion
 
     // region =========== 成员变量 ============
@@ -57,7 +54,7 @@ public class Agent {
     private MemoryManager memoryManager;
     public IPersistence persistence;
     protected ILlmProvider llmProvider;
-    public String prompt;
+
     protected PriorityBlockingQueue<Event> queue;
     public Flux<Message> itemBroadcast;
 
@@ -67,10 +64,8 @@ public class Agent {
     private ExecutorService eventPool;
     private ExecutorService broadcastPool;
 
-    public List<Plan> plans;
     public ISchedule schedule;
 
-    public String eventTransId;
     public Disposable eventDisposable;
 
     public ILedger ledger;
@@ -92,29 +87,44 @@ public class Agent {
 
     // region ============ 构造函数 ===============
     /**
-     * Java代码构造函数
+     * 全参构造函数
      *
-     * @param id    Agent ID
-     * @param llm   LLM 实例
-     * @param tools 工具列表
+     * @param metadata    Agent 元数据（id、orgId、userId）
+     * @param prompt      系统提示词
+     * @param llm         LLM 实例
+     * @param tools       工具列表
+     * @param persistence 持久化实现，null 则使用 NonePersistence
+     * @param ledger      计费账本，null 则使用 Config 默认账本
+     * @param workDir     工作目录，文件系统工具以此目录为根
+     * @param schedule    定时任务调度器，null 则不启用定时任务
      */
-    public Agent(String id, String prompt, ILlmProvider llm, List<Tool<?>> tools) {
-        this.id = id;
-        this.prompt = prompt;
+    public Agent(AgentMetadata metadata, String prompt, ILlmProvider llm, List<Tool<?>> tools,
+                 IPersistence persistence, ILedger ledger, Path workDir, ISchedule schedule) {
+        this.metadata = metadata;
         this.queue = new PriorityBlockingQueue<>(100, Comparator.comparing(Event::getPriority));
 
         this.llmProvider = llm;
-        this.persistence = new NonePersistence();
+        this.persistence = persistence != null ? persistence : new NonePersistence();
         this.memoryManager = new MemoryManager(prompt, llm);
 
         this.sink = Sinks.many().multicast().onBackpressureBuffer();
         this.broadcast = sink.asFlux();
 
         this.eventPool = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Event-", 0).factory());
-        this.broadcastPool =  Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Broadcast-", 0).factory());
-        this.ledger = Config.getInstance().getDefaultLedger();
+        this.broadcastPool = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Broadcast-", 0).factory());
+        this.ledger = ledger != null ? ledger : Config.getInstance().getDefaultLedger();
+
+        this.workDir = workDir;
+        this.schedule = schedule;
 
         this.toolHandler = new ToolHandler(tools, 5, llm);
+    }
+
+    /**
+     * 便捷构造函数，使用默认持久化和默认账本
+     */
+    public Agent(String id, String prompt, ILlmProvider llm, List<Tool<?>> tools) {
+        this(AgentMetadata.builder().id(id).build(), prompt, llm, tools, null, null, null, null);
     }
 
     /**
@@ -123,7 +133,8 @@ public class Agent {
      */
     public Agent(String id, ILlmProvider provider, Path path) throws IOException {
         var tools = new Loader(2000).fromToolFile(path.resolve("tool"), null);
-        this(id, Files.readString(path.resolve("system-prompt.md"), StandardCharsets.UTF_8), provider, tools);
+        this(AgentMetadata.builder().id(id).build(), Files.readString(path.resolve("system-prompt.md"), StandardCharsets.UTF_8), provider, tools,
+                null, null, path, null);
     }
 
     // endregion
@@ -373,7 +384,7 @@ public class Agent {
 
         var systemMessage = Message.builder()
                 .role(Message.ROLE.SYSTEM)
-                .text(this.prompt)
+                .text(this.memoryManager.getSystemPrompt())
                 .build();
 
         var messages = List.of(systemMessage, message);
@@ -419,7 +430,7 @@ public class Agent {
         var cost = Cost.builder()
                 .id(DataUtil.getFlakeId())
                 .targetType("agent")
-                .targetId(this.id)
+                .targetId(this.metadata.getId())
                 .memory((int) memorySize)
                 .captureTime(Instant.now())
                 .build();
@@ -541,7 +552,7 @@ public class Agent {
     }
 
     private void handleRecovery(Event event) {
-        var result = persistence.load(this.orgId, this.userId, this.id);
+        var result = persistence.load(this.metadata.getOrgId(), this.metadata.getUserId(), this.metadata.getId());
 
         var items = result.getT1();
         var events = result.getT2();
@@ -576,7 +587,6 @@ public class Agent {
                 .functionParams(params)
                 .build();
 
-        this.plans.add(plan);
         this.schedule.addPlan(plan);
     }
 

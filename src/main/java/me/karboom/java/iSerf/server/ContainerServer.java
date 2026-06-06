@@ -284,7 +284,7 @@ public abstract class ContainerServer {
      */
     public ObjectNode handleAgentCreate(Context context, ObjectNode data) {
         var agent = createAgent(context, data);
-        var agentId = agent.id;
+        var agentId = agent.metadata.getId();
         localAgents.put(agentId, agent);
         metaData.setAgentStay(agentId, this.id);
         log.debug("handleAgentCreate agent.create: local " + JSONUtil.stringify(data));

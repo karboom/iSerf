@@ -169,7 +169,7 @@ public class Team {
                                 // Todo Agent 在这里直接并发
                                 // 如果任务状态为进行中，找出对应的agent
                                 var targetAgent = this.member.stream()
-                                        .filter(agent -> agent.id.equals(task.getAgentId()))
+                                        .filter(agent -> agent.metadata.getId().equals(task.getAgentId()))
                                         .findFirst()
                                         .orElse(null);
 
