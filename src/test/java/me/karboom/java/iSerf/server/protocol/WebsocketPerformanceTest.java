@@ -295,7 +295,7 @@ class WebsocketPerformanceTest {
                     var text = item.path("text").asText();
                     var isForgotten = item.path("isForgotten").asInt();
 
-                    agent.memory.add(Message.builder()
+                    agent.getMemoryManager().add(Message.builder()
                             .id(id.isEmpty() ? DataUtil.getFlakeId() : id)
                             .role(role)
                             .type(type)

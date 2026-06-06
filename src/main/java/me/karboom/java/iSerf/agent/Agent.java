@@ -4,6 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
+import me.karboom.java.iSerf.agent.memory.MemoryManager;
 import me.karboom.java.iSerf.agent.persistence.IPersistence;
 import me.karboom.java.iSerf.agent.persistence.NonePersistence;
 import me.karboom.java.iSerf.agent.tool.*;
@@ -58,7 +59,8 @@ public class Agent {
     // region =========== 成员变量 ============
 
 
-    public List<Message> memory = new ArrayList<>();
+    private MemoryManager memoryManager;
+    public IPersistence persistence;
     protected List<Tool<?>> tools;
     protected ILlmProvider llmProvider;
     public String prompt;
@@ -72,8 +74,6 @@ public class Agent {
 
     private ExecutorService eventPool;
     private ExecutorService broadcastPool;
-
-    public IPersistence persistence;
 
     public List<Plan> plans;
     public ISchedule schedule;
@@ -112,16 +112,15 @@ public class Agent {
         this.tools = tools != null ? tools : new ArrayList<>();
         this.queue = new PriorityBlockingQueue<>(100, Comparator.comparing(Event::getPriority));
 
-        this.memory.add(me.karboom.java.iSerf.agent.Message.builder().id(id).role(me.karboom.java.iSerf.agent.Message.ROLE.SYSTEM).text(this.prompt).type(me.karboom.java.iSerf.agent.Message.TYPE.TEXT).isForgotten(0).eventId("0").build());
+        this.llmProvider = llm;
+        this.persistence = new NonePersistence();
+        this.memoryManager = new MemoryManager(prompt, llm);
 
         this.sink = Sinks.many().multicast().onBackpressureBuffer();
         this.broadcast = sink.asFlux();
 
         this.eventPool = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Event-", 0).factory());
         this.broadcastPool =  Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Broadcast-", 0).factory());
-
-        this.persistence = new NonePersistence();
-        this.llmProvider = llm;
         this.ledger = Config.getInstance().getDefaultLedger();
 
         run();
@@ -174,7 +173,7 @@ public class Agent {
                         }
 
                         case Event.Type.ORGANIZE_MEMORY -> {
-                            handleOrganizeMemory(event);
+                            memoryManager.organizeMemory();
                         }
 
                         case Event.Type.RECOVERY -> {
@@ -192,7 +191,7 @@ public class Agent {
                         switch (event.getType()) {
                             case Event.Type.MESSAGE -> {
                                 // 清理中间状态的 memory
-                                memory.removeIf(msg -> eventId.equals(msg.getEventId()));
+                                memoryManager.removeByEventId(eventId);
                             }
                         }
                     }
@@ -318,6 +317,10 @@ public class Agent {
 
     public void recovery () {
         this.trigger(Event.builder().type(Event.Type.RECOVERY).build());
+    }
+
+    public MemoryManager getMemoryManager() {
+        return memoryManager;
     }
 
     /**
@@ -459,7 +462,7 @@ public class Agent {
                                 contentItem.setFormatted(JSONUtil.parse(contentItem.getText(), format));
                             }
                             sink.tryEmitNext(contentItem);
-                            memory.add(contentItem);
+                            memoryManager.add(contentItem);
                         }
                     } else {
 
@@ -522,7 +525,7 @@ public class Agent {
      * 2. 调用 ledge.record
      */
     public void calcMemoryBillings() {
-        var memorySize = GraphLayout.parseInstance(this.memory).totalSize();
+        var memorySize = GraphLayout.parseInstance(memoryManager.getMessagesRaw()).totalSize();
         var cost = Cost.builder()
                 .id(DataUtil.getFlakeId())
                 .targetType("agent")
@@ -541,54 +544,6 @@ public class Agent {
 
     // region ========== 事件处理 ==========
     /**
-     * 整理记忆
-     * 1.调用llm.query，将当前的memory压缩
-     * 2.压缩后的内容追加到记忆，并且将参与压缩的记忆标记forgotten
-     * Todo 1.记忆重要程度判断  2.提示词
-     * @param event
-     */
-    @SneakyThrows
-    private void handleOrganizeMemory (Event event) {
-        if (this.memory.isEmpty()) {
-            return;
-        }
-
-        var summaryPrompt = me.karboom.java.iSerf.agent.Message.builder()
-                .role(me.karboom.java.iSerf.agent.Message.ROLE.USER)
-                .text("请将以上对话历史压缩为简洁的摘要，保留关键信息和上下文，用于后续对话参考。")
-                .build();
-
-        var messages = new ArrayList<Message>(this.memory.stream().skip(1).toList());
-        messages.add(summaryPrompt);
-
-        var result = llmProvider.get(null, null, null).query(messages, null);
-
-        if (result != null && result.getChoices() != null && !result.getChoices().isEmpty()) {
-            var summaryText = result.getChoices().get(0).getText();
-            if (summaryText != null && !summaryText.isEmpty()) {
-                var summaryItem = me.karboom.java.iSerf.agent.Message.builder()
-                        .id(UUID.randomUUID().toString())
-                        .role(me.karboom.java.iSerf.agent.Message.ROLE.ASSISTANT)
-                        .type(me.karboom.java.iSerf.agent.Message.TYPE.TEXT)
-                        .text(summaryText)
-                        .isForgotten(0)
-                        .eventId(event.getId())
-                        .build();
-
-                this.memory.add(summaryItem);
-
-                this.memory.stream().skip(1).forEach(item -> {
-                    if (item.getIsForgotten() == null || item.getIsForgotten() == 0) {
-                        item.setIsForgotten(1);
-                    }
-                });
-
-                log.debug("handleOrganizeMemory Memory compressed successfully");
-            }
-        }
-    }
-
-    /**
      * 处理信息输入
      * @param event
      */
@@ -597,11 +552,11 @@ public class Agent {
         userMessage.setEventId(event.getId());
 
         // 添加到记忆中
-        memory.add(userMessage);
+        memoryManager.add(userMessage);
 
         var format = event.getMessage().getFormatted() == null ? null : event.getMessage().getFormatted().getClass();
 
-        var flux = llmProvider.get(tools, format, null).send(this.memory.stream().filter(item -> item.getIsForgotten() == 0).toList(), format, tools);
+        var flux = llmProvider.get(tools, format, null).send(memoryManager.getMessagesForLLM(), format, tools);
 
         fluxHandle(flux, format, event)
                 .flatMapMany(holder -> {
@@ -675,11 +630,11 @@ public class Agent {
                                     .toolCalls(llmCalls)
                                     .build();
 
-                            memory.add(messageInvoke);
-                            memory.add(messageRes);
+                            memoryManager.add(messageInvoke);
+                            memoryManager.add(messageRes);
 
                             // Todo 这里的 tools 参数是否可以去掉，节省 token
-                            var newFlux = llmProvider.get(tools, null, null).send(memory, null, tools);
+                            var newFlux = llmProvider.get(tools, null, null).send(memoryManager.getMessagesForLLM(), null, tools);
 
                             return fluxHandle(newFlux, format, event).thenMany(Flux.empty());
                         } else {
@@ -692,7 +647,7 @@ public class Agent {
                 .blockLast()
         ;
 
-        this.checkMemorySize();
+        memoryManager.checkAndOrganize();
     }
 
     private void handleRecovery(Event event) {
@@ -704,7 +659,7 @@ public class Agent {
         log.debug("handleRecovery items size: %s, events size: %s".formatted(items.size(), events.size()));
 
         // 恢复记忆
-        items.forEach(this.memory::add);
+        memoryManager.addAll(items);
 
         // 重新触发未处理的事件
         events.stream()
@@ -714,27 +669,8 @@ public class Agent {
 
     // endregion
 
-    // region ========== 记忆相关 ==========
 
-    /**
-     * 检查记忆长度
-     * 计算prompt消耗，如果大于150k，那么触发记忆整理事件，Todo 弄一个支持自定义的map，根据model的60%压缩
-     */
-    private void checkMemorySize() {
 
-        var currentMemory = this.memory;
-        var promptTotal = currentMemory.stream()
-                .skip(1)
-                .filter(item -> item.getUsage() != null && item.getUsage().getPromptTotal() != null)
-                .mapToInt(item -> item.getUsage().getPromptTotal())
-                .sum();
-
-        if (promptTotal > 150000) {
-            this.trigger(Event.builder().id(DataUtil.getFlakeId()).type(Event.Type.ORGANIZE_MEMORY).build());
-        }
-    }
-
-    // endregion
 
 
     // region ========== 定时任务 ==========

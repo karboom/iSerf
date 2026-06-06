@@ -377,7 +377,7 @@ class AgentTest {
                         .type(Message.TYPE.TEXT)
                         .text(messages.get(i))
                         .build();
-                agent.memory.add(userItem);
+                agent.getMemoryManager().add(userItem);
 
                 var assistantItem = Message.builder()
                         .id(UUID.randomUUID().toString())
@@ -385,12 +385,12 @@ class AgentTest {
                         .type(Message.TYPE.TEXT)
                         .text("这是一个回复")
                         .build();
-                agent.memory.add(assistantItem);
+                agent.getMemoryManager().add(assistantItem);
             }
 
             Thread.sleep(1000);
 
-            var memoryBeforeCompress = agent.memory;
+            var memoryBeforeCompress = agent.getMemoryManager().getMessages();
             var countBefore = memoryBeforeCompress.size();
             System.out.println("压缩前记忆数量: " + countBefore);
             assertTrue(countBefore > 20, "压缩前应有超过20条记忆");
@@ -404,7 +404,7 @@ class AgentTest {
 
             Thread.sleep(10000);
 
-            var memoryAfterCompress = agent.memory;
+            var memoryAfterCompress = agent.getMemoryManager().getMessages();
             var countAfter = memoryAfterCompress.size();
             System.out.println("压缩后记忆数量: " + countAfter);
             
@@ -490,7 +490,7 @@ class AgentTest {
             var agent = new Agent("test-billing-agent", "你是一个有用的助手", llmProvider, tools) {};
 
             // 添加一些测试记忆
-            agent.memory.add(Message.builder()
+            agent.getMemoryManager().add(Message.builder()
                     .id(UUID.randomUUID().toString())
                     .role(Message.ROLE.USER)
                     .type(Message.TYPE.TEXT)
@@ -498,7 +498,7 @@ class AgentTest {
                     .isForgotten(0)
                     .build());
 
-            agent.memory.add(Message.builder()
+            agent.getMemoryManager().add(Message.builder()
                     .id(UUID.randomUUID().toString())
                     .role(Message.ROLE.ASSISTANT)
                     .type(Message.TYPE.TEXT)
@@ -578,9 +578,8 @@ class AgentTest {
 
             assertEquals("test-path-init-agent", agent.id);
             assertEquals("你是一个基于路径初始化的测试助手。", agent.prompt);
-            assertEquals(1, agent.memory.size());
-            assertEquals(Message.ROLE.SYSTEM, agent.memory.getFirst().getRole());
-            assertEquals("你是一个基于路径初始化的测试助手。", agent.memory.getFirst().getText());
+            assertEquals(0, agent.getMemoryManager().size());
+            assertEquals("你是一个基于路径初始化的测试助手。", agent.getMemoryManager().getSystemPrompt());
         });
     }
 
@@ -592,7 +591,7 @@ class AgentTest {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
             var agent = new Agent("test-call-agent", "你是一个有用的助手", llmProvider, tools) {};
 
-            var memorySizeBefore = agent.memory.size();
+            var memorySizeBefore = agent.getMemoryManager().size();
 
             var userMessage = Message.builder()
                     .role(Message.ROLE.USER)
@@ -606,7 +605,7 @@ class AgentTest {
             assertEquals(Message.ROLE.ASSISTANT, result.getRole(), "返回消息的角色应为 ASSISTANT");
             assertNotNull(result.getText(), "返回消息的文本不应为空");
             assertTrue(result.getText().length() > 0, "返回消息的文本长度应大于0");
-            assertEquals(memorySizeBefore, agent.memory.size(), "call 不应新增记忆");
+            assertEquals(memorySizeBefore, agent.getMemoryManager().size(), "call 不应新增记忆");
 
             System.out.println("call 返回结果: " + result.getText());
         });
