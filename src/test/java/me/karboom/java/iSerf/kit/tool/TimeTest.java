@@ -67,7 +67,7 @@ public class TimeTest {
 
                 var llm = llmTest.getLlm();
                 var llmProvider = new FixedLlmProvider(llm);
-                var agent = new Agent("time-agent-" + System.currentTimeMillis(), "", llmProvider, tools) {};
+                var agent = new Agent("time-agent-" + System.currentTimeMillis(), "", llmProvider, tools) {}.run();
 
                 var result = new StringBuilder();
                 var finished = new AtomicBoolean(false);

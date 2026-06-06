@@ -25,22 +25,22 @@ public class TeamTest {
 
         // 创建5个agent：测试工程师一个、前端两个、后端两个
         var tester = new Agent("tester", "你是一个测试工程师", llmProvider, null) {
-        };
+        }.run();
         
         var frontend1 = new Agent("frontend1", "你是一个前端工程师", llmProvider, null) {
-        };
+        }.run();
         
         var frontend2 = new Agent("frontend2", "你是一个前端工程师", llmProvider, null) {
-        };
+        }.run();
         
         var backend1 = new Agent("backend1", "你是一个后端工程师", llmProvider, null) {
-        };
+        }.run();
         
         var backend2 = new Agent("backend2", "你是一个后端工程师", llmProvider, null) {
-        };
+        }.run();
 
         var leader = new Agent("leader", "你是一个软件团队的管理者", llmProvider, null) {
-        };
+        }.run();
 
         // 将所有agent作为构造函数参数传入team中
         var members = List.of(tester, frontend1, frontend2, backend1, backend2);

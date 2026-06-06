@@ -27,7 +27,8 @@ public class TestContainer extends ContainerServer {
         var llm = new OpenAI("qwen-plus", new HashMap<>(), System.getenv("OPENAI_API_KEY"),
                 "https://dashscope.aliyuncs.com/compatible-mode/v1", 3);
         var provider = new FixedLlmProvider(llm);
-        return new Agent(UUID.randomUUID().toString(), "test transport agent", provider, null);
+        var agent = new Agent(UUID.randomUUID().toString(), "test transport agent", provider, null).run();
+        return agent;
     }
 
     @Override

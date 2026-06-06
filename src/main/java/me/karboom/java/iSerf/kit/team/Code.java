@@ -33,10 +33,10 @@ public class Code {
         var llm = new FixedLlmProvider(new OpenAI("qwen-plus", llmConfig, apiKey, url, 3));
 
         // 创建团队成员
-        var leader = new Agent("leader", "你是一个技术负责人，负责整个项目的架构设计和技术决策", llm, null) {};
-        var frontend = new Agent("frontend", "你是一个前端工程师，负责用户界面和用户体验开发", llm, null) {};
-        var backend = new Agent("backend", "你是一个后端工程师，负责服务端逻辑和数据库设计", llm, null) {};
-        var tester = new Agent("tester", "你是一个测试工程师，负责软件质量保证和测试工作", llm, null) {};
+        var leader = new Agent("leader", "你是一个技术负责人，负责整个项目的架构设计和技术决策", llm, null) {}.run();
+        var frontend = new Agent("frontend", "你是一个前端工程师，负责用户界面和用户体验开发", llm, null) {}.run();
+        var backend = new Agent("backend", "你是一个后端工程师，负责服务端逻辑和数据库设计", llm, null) {}.run();
+        var tester = new Agent("tester", "你是一个测试工程师，负责软件质量保证和测试工作", llm, null) {}.run();
 
         // 创建团队
         var members = List.of(frontend, backend, tester);

@@ -105,7 +105,7 @@ public class VideoSearchTest {
             var llm = llmTest.getLlm();
             var llmProvider = new FixedLlmProvider(llm);
             var agent = new Agent("srag-agent-" + i, "", llmProvider, tools) {
-            };
+            }.run();
 
             // 使用agent.subscribe订阅响应内容
             agent.subscribe(
@@ -149,7 +149,7 @@ public class VideoSearchTest {
         var llm = llmTest.getLlm("qwen3-vl-plus");
         var llmProvider = new FixedLlmProvider(llm);
         var agent = new Agent("build-index-agent", "", llmProvider, tools) {
-        };
+        }.run();
 
         var result = new StringBuilder();
         var finished = new AtomicBoolean(false);

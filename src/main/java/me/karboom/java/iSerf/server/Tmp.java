@@ -97,8 +97,7 @@ public class Tmp extends Websocket {
 
        var tools = new Loader(2000).fromIFunction("/home/karboom/projects/karboom/java/iSlogger/src/main/java/me/karboom/java/iSlogger/iFunction", "echarts", null);
 
-        var agent = new Agent(UUID.randomUUID().toString(), prompt, new OpenAI("qwen-plus", new HashMap<>(), System.getenv("OPENAI_API_KEY"), "https://dashscope.aliyuncs.com/compatible-mode/v1", 3), tools) {};
-
+        var agent = new Agent(UUID.randomUUID().toString(), prompt, new OpenAI("qwen-plus", new HashMap<>(), System.getenv("OPENAI_API_KEY"), "https://dashscope.aliyuncs.com/compatible-mode/v1", 3), tools) {}.run();
 
         return agent;
     }

@@ -304,7 +304,7 @@ class WebsocketTest {
         public Agent createAgent(ObjectNode params) {
             var llm = new OpenAI("qwen-plus", new HashMap<>(), System.getenv("OPENAI_API_KEY"), "https://dashscope.aliyuncs.com/compatible-mode/v1", 3);
             var provider = new FixedLlmProvider(llm);
-            var agent = new Agent(UUID.randomUUID().toString(), "随便输出点啥，测试一下",  provider, null);
+            var agent = new Agent(UUID.randomUUID().toString(), "随便输出点啥，测试一下",  provider, null).run();
 
             return agent;
         }

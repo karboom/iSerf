@@ -99,7 +99,7 @@ class AgentTest {
             inputs.forEach(input -> {
                 var i = inputs.indexOf(input);
 
-                var agent = new Agent("test-agent-" + i, "", llmProvider, tools) {};
+                var agent = new Agent("test-agent-" + i, "", llmProvider, tools) {}.run();
 
                 // 订阅 broadcast
                 agent.subscribe(item -> {
@@ -151,7 +151,7 @@ class AgentTest {
             inputs.forEach(input -> {
                 var i = inputs.indexOf(input);
 
-                var agent = new Agent("test-agent-" + i, "", llmProvider, tools) {};
+                var agent = new Agent("test-agent-" + i, "", llmProvider, tools) {}.run();
 
                 // 订阅 broadcast
                 agent.subscribe(item -> {
@@ -179,7 +179,7 @@ class AgentTest {
     @Test
     void testUpdateTool() {
         // 创建 Agent
-        var agent = new Agent("test-agent", "", llmProvider, tools) {};
+        var agent = new Agent("test-agent", "", llmProvider, tools) {}.run();
 
         // 测试用例1: 正常情况 - 工具存在且更新成功
         var toolCall = Message.ToolCall.builder()
@@ -263,7 +263,7 @@ class AgentTest {
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='操作日志表';
                     """;
 
-            var agent = new Agent("test-agent", prompt, llmProvider, tools) {};
+            var agent = new Agent("test-agent", prompt, llmProvider, tools) {}.run();
 
             // 创建一个列表来收集广播的消息
             var receivedMessages = new ArrayList<Message>();
@@ -294,7 +294,7 @@ class AgentTest {
     @Test
     void testErrorHandle() {
         // 创建 Agent
-        var agent = new Agent("test-agent", "", llmProvider, tools) {};
+        var agent = new Agent("test-agent", "", llmProvider, tools) {}.run();
 
         agent.send("xxx");
 
@@ -312,7 +312,7 @@ class AgentTest {
     @Timeout(30)
     @SneakyThrows
     void testMessageEvent() {
-            var agent = new Agent("test-message-agent", "请你做一个自我介绍", llmProvider, tools) {};
+            var agent = new Agent("test-message-agent", "请你做一个自我介绍", llmProvider, tools) {}.run();
 
             var receivedItems = new ArrayList<Message>();
             var latch = new CountDownLatch(1);
@@ -355,7 +355,7 @@ class AgentTest {
     @Test
     void testOrganizeMemoryEvent() {
         assertTimeoutPreemptively(Duration.ofSeconds(60), () -> {
-            var agent = new Agent("test-organize-memory-agent", "你是一个有用的助手", llmProvider, tools) {};
+            var agent = new Agent("test-organize-memory-agent", "你是一个有用的助手", llmProvider, tools) {}.run();
 
             var messages = List.of(
                     "你好",
@@ -427,7 +427,7 @@ class AgentTest {
     @Test
     void testRecoveryEvent() {
         assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
-            var agent = new Agent("test-recovery-agent", "你是一个有用的助手", llmProvider, tools) {};
+            var agent = new Agent("test-recovery-agent", "你是一个有用的助手", llmProvider, tools) {}.run();
 
             agent.recovery();
 
@@ -443,7 +443,7 @@ class AgentTest {
     @Test
     void testInvokeToolCallCache() {
         assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
-            var agent = new Agent("test-cache-agent", "你是一个有用的助手", llmProvider, tools) {};
+            var agent = new Agent("test-cache-agent", "你是一个有用的助手", llmProvider, tools) {}.run();
 
             // 准备测试参数
             var testParams = new HashMap<String, Object>() {{
@@ -487,7 +487,7 @@ class AgentTest {
     @Test
     void testCalcMemoryBillings() {
         assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
-            var agent = new Agent("test-billing-agent", "你是一个有用的助手", llmProvider, tools) {};
+            var agent = new Agent("test-billing-agent", "你是一个有用的助手", llmProvider, tools) {}.run();
 
             // 添加一些测试记忆
             agent.getMemoryManager().add(Message.builder()
@@ -520,7 +520,7 @@ class AgentTest {
     @Test
     void testInterrupt() {
         assertTimeoutPreemptively(Duration.ofSeconds(60), () -> {
-            var agent = new Agent("test-interrupt-agent", "你是一个有用的助手", llmProvider, tools) {};
+            var agent = new Agent("test-interrupt-agent", "你是一个有用的助手", llmProvider, tools) {}.run();
 
             var receivedItems = new ArrayList<Message>();
             agent.subscribe(item -> {
@@ -574,7 +574,7 @@ class AgentTest {
     void testConstructor() {
         assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
             var testPath = Paths.get("src/test/resources/agent/constructor");
-            var agent = new Agent("test-path-init-agent", llmProvider, testPath) {};
+            var agent = new Agent("test-path-init-agent", llmProvider, testPath) {}.run();
 
             assertEquals("test-path-init-agent", agent.id);
             assertEquals("你是一个基于路径初始化的测试助手。", agent.prompt);
@@ -589,7 +589,7 @@ class AgentTest {
     @Test
     void testCall() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
-            var agent = new Agent("test-call-agent", "你是一个有用的助手", llmProvider, tools) {};
+            var agent = new Agent("test-call-agent", "你是一个有用的助手", llmProvider, tools) {}.run();
 
             var memorySizeBefore = agent.getMemoryManager().size();
 

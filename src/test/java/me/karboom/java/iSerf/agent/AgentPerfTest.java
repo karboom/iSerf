@@ -80,7 +80,7 @@ class AgentPerfTest {
             // 创建所有 agent
             for (var i = 0; i < agentCount; i++) {
                 var agentId = "perf-agent-" + i;
-                var agent = new Agent(agentId, prompt, llmProvider, tools) {};
+                var agent = new Agent(agentId, prompt, llmProvider, tools) {}.run();
 
                 // 订阅 broadcast
                 agent.subscribe(item -> {

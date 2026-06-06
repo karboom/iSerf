@@ -123,8 +123,6 @@ public class Agent {
         this.broadcastPool =  Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Broadcast-", 0).factory());
         this.ledger = Config.getInstance().getDefaultLedger();
 
-        run();
-        this.recovery();
     }
 
     /**
@@ -157,7 +155,7 @@ public class Agent {
     /**
      * 开始运行
      */
-    private void run() {
+    public void run() {
         eventDisposable = Schedulers.fromExecutor(eventPool).schedule(() -> {
             while (true) {
 
@@ -208,111 +206,7 @@ public class Agent {
             }
         });
 
-//            llm.send(memory.get(), format, tools)
-//                    .switchOnFirst((first, other) -> {
-//                        var delta = first.get().choices().get(0).delta();
-//                        var toolCalls = delta.toolCalls();
-//                        var thinking = delta._additionalProperties().get("reasoning_content");
-//
-//                        if (toolCalls.isPresent()) {
-//                            return other
-//                                    .collectList()
-//                                    .flatMapMany((list) -> {
-//                                        // 合并ToolCall参数
-//                                        var calls = mergeToolCalls(list);
-//
-//                                        // 通过cli调用MCP函数
-//                                        var callResult = invokeToolCalls(calls);
-//
-//                                        // 按结果类型分组处理
-//                                        var directCalls = new ArrayList<Message.ToolCall>();
-//                                        var errorCalls = new ArrayList<Message.ToolCall>();
-//                                        var llmCalls = new ArrayList<Message.ToolCall>();
-//
-//                                        for (var call : callResult) {
-//                                            if (call.result.getDirect() != null) {
-//                                                directCalls.add(call);
-//                                            } else if (call.result.getError() != null) {
-//                                                errorCalls.add(call);
-//                                            } else if (call.result.getLlm() != null) {
-//                                                llmCalls.add(call);
-//                                            }
-//                                        }
-//
-//                                        var holder = Flux.empty();
-//
-//                                        // 处理DIRECT类型
-//                                        if (!directCalls.isEmpty()) {
-//                                            for (Message.ToolCall call : directCalls) {
-//                                                sink.tryEmitNext(Message.builder().text(JSONUtil.stringify(call.getResult().getDirect())).isSegment(0).build());
-//                                            }
-//                                        }
-//
-//                                        // 处理ERROR类型
-//                                        if (!errorCalls.isEmpty()) {
-//                                            sink.tryEmitNext(Message.builder().text("我正在更新代码，请您稍后").build());
-//                                            // Todo 判断IFunction
-//
-//                                            for (var toolCall : errorCalls) {
-//                                                updateToolLocal(toolCall);
-//                                                invokeToolCalls(List.of(toolCall));
-//                                            }
-//                                        }
-//
-//                                        // 处理LLM类型
-//                                        if (!llmCalls.isEmpty()) {
-//                                            var messageInvoke = Message.builder()
-//                                                    .role(Message.ROLE.ASSISTANT)
-//                                                    .toolCalls(llmCalls)
-//                                                    .build();
-//
-//                                            var messageRes = Message.builder()
-//                                                    .role(Message.ROLE.TOOL)
-//                                                    .toolCalls(llmCalls)
-//                                                    .build();
-//
-//                                            memory.add(messageInvoke);
-//                                            memory.add(messageRes);
-//
-//                                            // Todo 这里的tools参数是否可以去掉，节省token
-//                                            return llm.send(memory.get(), null, tools);
-//                                        }
-//
-//                                        return holder;
-//                                    });
-//                        } else if (thinking != null) {
-//                            return other;
-//                        } else {
-//                            return other;
-//                        }
-//                    })
-//                    .reduce(Message.builder().build(), (acc, chunk) -> {
-//
-//                        var text = ((ChatCompletionChunk) chunk).choices().get(0).delta().content().get();
-//                        if (format == null) {
-//                            sink.tryEmitNext(Message.builder().text(text).isSegment(1).build());
-//                        }
-//                        acc.setText(acc.getText() + text);
-//
-//                        var usage = ((ChatCompletionChunk) chunk).usage();
-//                        usage.ifPresent(completionUsage -> message.setUsage(((int) completionUsage.totalTokens())));
-//
-//                        return acc;
-//                    })
-//                    .map(f -> {
-//                        f.setIsSegment(0);
-//                        f.setRole(Message.ROLE.ASSISTANT);
-//
-//                        if (format != null) {
-//                            f.setFormatted(JSONUtil.parse(f.getText(), format));
-//                        }
-//
-//                        sink.tryEmitNext(f);
-//                        memory.add(f);
-//
-//                        return f;
-//                    })
-//                    .block();
+        this.recovery();
     }
 
     public void recovery () {

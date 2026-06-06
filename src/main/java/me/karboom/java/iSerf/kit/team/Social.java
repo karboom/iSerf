@@ -30,12 +30,12 @@ public class Social {
         var provider = new FixedLlmProvider(llm);
         var rootPath = Path.of("resources/kit/team/social");
         // 创建团队成员
-        var leader = new Agent("leader", provider, rootPath.resolve("leader")) {} ;
-        var topic = new Agent("topic", provider, rootPath.resolve("topic")) {};
-        var tree = new Agent("tree", provider, rootPath.resolve("tree")) {};
-        var editor = new Agent("editor", provider, rootPath.resolve("editor")) {};
-        var validator = new Agent("validator", provider, rootPath.resolve("validator")) {};
-        var channel = new Agent("channel", provider, rootPath.resolve("channel")) {};
+        var leader = new Agent("leader", provider, rootPath.resolve("leader")) {}.run();
+        var topic = new Agent("topic", provider, rootPath.resolve("topic")) {}.run();
+        var tree = new Agent("tree", provider, rootPath.resolve("tree")) {}.run();
+        var editor = new Agent("editor", provider, rootPath.resolve("editor")) {}.run();
+        var validator = new Agent("validator", provider, rootPath.resolve("validator")) {}.run();
+        var channel = new Agent("channel", provider, rootPath.resolve("channel")) {}.run();
 
         // 创建团队
         var members = List.of(topic, tree, editor, validator, channel);
