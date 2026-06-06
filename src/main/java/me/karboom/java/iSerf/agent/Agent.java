@@ -154,8 +154,10 @@ public class Agent {
 
     /**
      * 开始运行
+     *
+     * @return
      */
-    public void run() {
+    public Agent run() {
         eventDisposable = Schedulers.fromExecutor(eventPool).schedule(() -> {
             while (true) {
 
@@ -207,6 +209,8 @@ public class Agent {
         });
 
         this.recovery();
+        
+        return this;
     }
 
     public void recovery () {
