@@ -7,11 +7,10 @@ import me.karboom.java.iSerf.agent.memory.MemoryManager;
 import me.karboom.java.iSerf.agent.persistence.IPersistence;
 import me.karboom.java.iSerf.agent.persistence.NonePersistence;
 import me.karboom.java.iSerf.agent.tool.*;
+import me.karboom.java.iSerf.agent.billing.AgentBilling;
 import me.karboom.java.iSerf.billing.ILedger;
-import me.karboom.java.iSerf.billing.Cost;
 import me.karboom.java.iSerf.util.*;
 import org.openjdk.jol.info.GraphLayout;
-import me.karboom.java.iSerf.config.Config;
 import me.karboom.java.iSerf.llm.text.Output;
 import me.karboom.java.iSerf.schedule.ISchedule;
 import me.karboom.java.iSerf.schedule.Plan;
@@ -29,7 +28,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
@@ -68,7 +66,7 @@ public class Agent {
 
     public Disposable eventDisposable;
 
-    public ILedger ledger;
+    public AgentBilling agentBilling;
 
     /**
      * 工具调用处理器
@@ -112,7 +110,7 @@ public class Agent {
 
         this.eventPool = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Event-", 0).factory());
         this.broadcastPool = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Broadcast-", 0).factory());
-        this.ledger = ledger != null ? ledger : Config.getInstance().getDefaultLedger();
+        this.agentBilling = new AgentBilling(metadata.getId(), ledger);
 
         this.workDir = workDir;
         this.schedule = schedule;
@@ -165,11 +163,13 @@ public class Agent {
             while (true) {
 
                 Event event = null;
+                long cpuStart = 0;
                 try {
                     event = queue.take();
 
-                    this.eventInterceptor(event);
+                    cpuStart = System.nanoTime();
 
+                    this.eventInterceptor(event);
                     switch (event.getType()) {
                         case Event.Type.MESSAGE -> {
                             handleMessage(event);
@@ -206,6 +206,10 @@ public class Agent {
                     // 如果是人工触发中断，停止循环
                     if (e instanceof InterruptedException) {
                         break;
+                    }
+                } finally {
+                    if (cpuStart > 0) {
+                        agentBilling.recordCpu(System.nanoTime() - cpuStart);
                     }
                 }
             }
@@ -427,18 +431,7 @@ public class Agent {
      */
     public void calcMemoryBillings() {
         var memorySize = GraphLayout.parseInstance(memoryManager.getMessagesRaw()).totalSize();
-        var cost = Cost.builder()
-                .id(DataUtil.getFlakeId())
-                .targetType("agent")
-                .targetId(this.metadata.getId())
-                .memory((int) memorySize)
-                .captureTime(Instant.now())
-                .build();
-
-        // Todo 这个操作可以再开一个线程去做，加快响应时间
-        ledger.record(cost);
-
-        log.debug("calcMemoryBillings memory size: %s bytes".formatted(memorySize));
+        agentBilling.recordMemory(memorySize);
     }
 
     // endregion

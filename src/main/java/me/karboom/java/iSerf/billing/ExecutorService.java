@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import lombok.SneakyThrows;
 import me.karboom.java.iSerf.util.DataUtil;
 import org.jspecify.annotations.NonNull;
+import oshi.SystemInfo;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -14,6 +15,9 @@ import java.util.concurrent.Semaphore;
 
 @Slf4j
 public class ExecutorService implements Executor {
+
+    private static final String CPU_MODEL = new SystemInfo()
+            .getHardware().getProcessor().getProcessorIdentifier().getName();
 
     /**
      * 配置 Map：type-usage -> 最大并发数
@@ -70,6 +74,7 @@ public class ExecutorService implements Executor {
                                 .targetType(type)
                                 .targetId(id)
                                 .usage(usage)
+                                .cpuModel(CPU_MODEL)
                                 .cpu(System.nanoTime() - startTime)
                                 .build());
                     } finally {

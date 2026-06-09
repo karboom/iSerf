@@ -22,6 +22,10 @@ public class Cost {
     public Instant captureTime;
 
     /**
+     * CPU 型号
+     */
+    public String cpuModel;
+    /**
      * CPU运行时间ns
      */
     public Long cpu;

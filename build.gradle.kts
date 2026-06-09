@@ -67,6 +67,8 @@ dependencies {
 
     api("org.openjdk.jol:jol-core:0.17")
 
+    api("com.github.oshi:oshi-core:6.6.5")
+
 
 //    implementation("org.projectlombok:lombok:1.18.42")
 //    annotationProcessor("org.projectlombok:lombok:1.18.42")
