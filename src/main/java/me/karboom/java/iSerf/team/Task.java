@@ -39,6 +39,11 @@ public class Task {
     public String agentId;
 
     /**
+     * 任务执行结果
+     */
+    public String result;
+
+    /**
      * 输出目录
      */
     public Path directory;

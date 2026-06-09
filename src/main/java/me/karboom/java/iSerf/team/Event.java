@@ -40,4 +40,8 @@ public class Event {
     public String id;
     public String type;
     public String desc;
+    /**
+     * 关联的任务ID（用于 COMMENT 等需要定位具体任务的事件）
+     */
+    public String taskId;
 }

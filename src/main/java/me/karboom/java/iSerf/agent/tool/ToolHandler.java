@@ -88,7 +88,7 @@ public class ToolHandler {
                     case Tool.TYPE.FUNCTION:
                         // 调用本地函数
 
-                        result = matchedTool.getFunction().run(new Context(agent, null), JSONUtil.convert(call.arguments, matchedTool.paramType));
+                        result = matchedTool.getFunction().run(new Context(agent), JSONUtil.convert(call.arguments, matchedTool.paramType));
 
                         break;
 
@@ -108,7 +108,7 @@ public class ToolHandler {
 
                             // 加载类
                             var cls = (FunctionWrapper) CodeUtil.load(versionDir, functionPath.get(2));
-                            result = (cls.run(new Context(agent, null), JSONUtil.convert(call.arguments, matchedTool.paramType)));
+                            result = (cls.run(new Context(agent), JSONUtil.convert(call.arguments, matchedTool.paramType)));
                         } catch (Exception e) {
                             result.setError((RuntimeException) e);
                         }
@@ -187,7 +187,7 @@ public class ToolHandler {
 
         // 加载类
         var cls = (FunctionWrapper) CodeUtil.load(versionDir, functionPath.get(2));
-        result = (cls.run(new Context(agent, null), cache.params));
+        result = (cls.run(new Context(agent), cache.params));
 
         return result.direct;
     }
@@ -414,7 +414,7 @@ public class ToolHandler {
                         CodeUtil.compile(updatedCode, targetDir);
                         var obj = CodeUtil.load(targetDir, StrUtil.upperFirst(StrUtil.toCamelCase(toolCall.getName())));
                         if (obj instanceof FunctionWrapper wrapper) {
-                            wrapper.run(new Context(agent, null), toolCall.arguments);
+                            wrapper.run(new Context(agent), toolCall.arguments);
                         } else {
                             throw new RuntimeException();
                         }

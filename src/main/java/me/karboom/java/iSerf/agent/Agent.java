@@ -14,6 +14,7 @@ import org.openjdk.jol.info.GraphLayout;
 import me.karboom.java.iSerf.llm.text.Output;
 import me.karboom.java.iSerf.schedule.ISchedule;
 import me.karboom.java.iSerf.schedule.Plan;
+import me.karboom.java.iSerf.team.Team;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -42,9 +43,7 @@ import java.util.function.Consumer;
  */
 @Slf4j
 public class Agent {
-    // region ========== 元数据 ==========
     public AgentMetadata metadata;
-    // endregion
 
     // region =========== 成员变量 ============
 
@@ -78,8 +77,10 @@ public class Agent {
      */
     public Path workDir;
 
-    public void eventInterceptor(Event event) {
-    }
+    /**
+     * 所属团队，由 Team 构造时设置
+     */
+    public Team team;
 
     // endregion
 
@@ -228,6 +229,8 @@ public class Agent {
         return memoryManager;
     }
 
+    public void eventInterceptor(Event event) {
+    }
     /**
      * 事件统一入口，需要对字段进行校验
      */

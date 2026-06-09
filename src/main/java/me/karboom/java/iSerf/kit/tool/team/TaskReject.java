@@ -34,7 +34,7 @@ public class TaskReject implements FunctionWrapper<TaskReject.Parameter> {
 
     @Override
     public CallResult run(Context ctx, Parameter params) {
-        var team = ctx.team;
+        var team = ctx.getAgent().team;
 
         var task = team.tasks.stream()
                 .filter(t -> t.getId().equals(params.taskId))
@@ -74,7 +74,8 @@ public class TaskReject implements FunctionWrapper<TaskReject.Parameter> {
         team.eventQueue.offer(Event.builder()
                 .id(DataUtil.getFlakeId())
                 .type(Event.TYPE.COMMENT)
-                .desc("Task %s comment: %s".formatted(params.taskId, params.reason))
+                .taskId(params.taskId)
+                .desc(params.reason)
                 .build());
 
         log.debug("taskReject: taskId={}, reason={}", params.taskId, params.reason);

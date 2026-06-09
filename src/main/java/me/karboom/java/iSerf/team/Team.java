@@ -2,6 +2,7 @@ package me.karboom.java.iSerf.team;
 
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.ErrorUtil;
@@ -17,6 +18,7 @@ import java.util.Set;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.function.Consumer;
 
+@Slf4j
 public class Team {
 
     @NoArgsConstructor
@@ -60,6 +62,11 @@ public class Team {
         this.leader = leader;
         this.member = new ArrayList<>(members);
 
+        // 设置团队引用，使工具可以通过 Context 访问 Team
+        this.leader.team = this;
+        for (var m : this.member) {
+            m.team = this;
+        }
 
         // Todo 这一段是否有必要和watch合并
         var leaderBroadcast = leader.broadcast.map(item -> Message.builder().agentId(leader.id).mentions(null).message(item).build());
@@ -166,16 +173,37 @@ public class Team {
                                 }
                             }
                             case Task.STATUS.DOING -> {
-                                // Todo Agent 在这里直接并发
-                                // 如果任务状态为进行中，找出对应的agent
+                                // 如果任务状态为进行中，找出对应的agent，开虚拟线程并发执行
                                 var targetAgent = this.member.stream()
                                         .filter(agent -> agent.metadata.getId().equals(task.getAgentId()))
                                         .findFirst()
                                         .orElse(null);
 
                                 if (targetAgent != null) {
-                                    // 找到了对应的agent，可以向该agent发送任务信息
-                                    targetAgent.send("Task: " + task.getDesc(), null);
+                                    Thread.ofVirtual().name("task-" + task.getId()).start(() -> {
+                                        try {
+                                            var taskMessage = """
+                                                    任务ID: %s
+                                                    任务描述: %s
+                                                    请执行上述任务并返回结果。
+                                                    """.formatted(task.getId(), task.getDesc());
+
+                                            var result = targetAgent.call(
+                                                    me.karboom.java.iSerf.agent.Message.builder()
+                                                            .role(me.karboom.java.iSerf.agent.Message.ROLE.USER)
+                                                            .type(me.karboom.java.iSerf.agent.Message.TYPE.TEXT)
+                                                            .text(taskMessage)
+                                                            .build(),
+                                                    null
+                                            );
+
+                                            log.info("Task {} completed by agent {}, result length: {}",
+                                                    task.getId(), task.getAgentId(),
+                                                    result.getText() != null ? result.getText().length() : 0);
+                                        } catch (Exception e) {
+                                            log.error("Task {} execution failed: {}", task.getId(), e.getMessage(), e);
+                                        }
+                                    });
                                 }
                             }
                         }
@@ -185,7 +213,76 @@ public class Team {
 
                 }
                 case Event.TYPE.COMMENT -> {
+                    // 找到对应的任务
+                    var commentTask = tasks.stream()
+                            .filter(t -> t.getId().equals(event.getTaskId()))
+                            .findFirst()
+                            .orElse(null);
 
+                    if (commentTask == null) {
+                        log.warn("COMMENT event references unknown task: {}", event.getTaskId());
+                        return;
+                    }
+
+                    // 找到任务负责人
+                    var taskAgent = this.member.stream()
+                            .filter(agent -> agent.metadata.getId().equals(commentTask.getAgentId()))
+                            .findFirst()
+                            .orElse(null);
+
+                    if (taskAgent == null) {
+                        log.warn("COMMENT event task {} has no assigned agent: {}", commentTask.getId(), commentTask.getAgentId());
+                        return;
+                    }
+
+                    // 构建评论信息：整个任务上下文 + 评论内容
+                    var resultInfo = commentTask.getResult() != null ? "当前结果: %s\n".formatted(commentTask.getResult()) : "";
+                    var commentsInfo = (commentTask.getComments() != null && !commentTask.getComments().isEmpty())
+                            ? "\n【历史评论】\n%s\n".formatted(
+                                commentTask.getComments().stream()
+                                    .map(c -> "- [%s] %s".formatted(
+                                        c.getAgentId() != null ? c.getAgentId() : c.getUserId(),
+                                        c.getContent()))
+                                    .reduce("", (a, b) -> a + b))
+                            : "";
+                    var commentMessage = """
+                            你有一个任务收到了评审意见，请根据意见进行修改。
+
+                            【任务信息】
+                            任务ID: %s
+                            任务描述: %s
+                            任务状态: %s
+                            %s%s
+                            【最新评审意见】
+                            %s
+
+                            请根据以上评审意见对你的任务结果进行修改和完善。""".formatted(
+                                commentTask.getId(),
+                                commentTask.getDesc(),
+                                commentTask.getStatus(),
+                                resultInfo,
+                                commentsInfo,
+                                event.getDesc());
+
+                    // 开虚拟线程调用任务负责人
+                    Thread.ofVirtual().name("comment-" + commentTask.getId()).start(() -> {
+                        try {
+                            var result = taskAgent.call(
+                                    me.karboom.java.iSerf.agent.Message.builder()
+                                            .role(me.karboom.java.iSerf.agent.Message.ROLE.USER)
+                                            .type(me.karboom.java.iSerf.agent.Message.TYPE.TEXT)
+                                            .text(commentMessage)
+                                            .build(),
+                                    null
+                            );
+
+                            log.info("Comment on task {} processed by agent {}, result length: {}",
+                                    commentTask.getId(), commentTask.getAgentId(),
+                                    result.getText() != null ? result.getText().length() : 0);
+                        } catch (Exception e) {
+                            log.error("Comment on task {} processing failed: {}", commentTask.getId(), e.getMessage(), e);
+                        }
+                    });
                 }
                 default -> {
                 }
