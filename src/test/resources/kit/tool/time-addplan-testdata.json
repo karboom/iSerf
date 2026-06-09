@@ -1,0 +1,66 @@
+[
+  {
+    "description": "下下周上午 9 点数据备份 - cron 表达式",
+    "prompt": "请帮我添加一个定时任务，下下周上午 9 点执行数据备份，函数名称是 backupData"
+  },
+  {
+    "description": "每天凌晨 2 点清理日志 - cron 表达式",
+    "prompt": "请帮我添加一个定时任务，每天凌晨 2 点执行清理日志，函数名称是 cleanLogs"
+  },
+  {
+    "description": "每周一早上 8 点半例会提醒 - cron 表达式",
+    "prompt": "请帮我添加一个定时任务，每周一早上 8 点半执行例会提醒，函数名称是 meetingReminder"
+  },
+  {
+    "description": "每月 1 号午夜生成报表 - cron 表达式",
+    "prompt": "请帮我添加一个定时任务，每月 1 号午夜生成报表，函数名称是 generateReport"
+  },
+  {
+    "description": "每 15 分钟检查系统状态 - cron 表达式",
+    "prompt": "请帮我添加一个定时任务，每 15 分钟检查一次系统状态，函数名称是 checkSystemStatus"
+  },
+  {
+    "description": "工作日早上 9 点打卡提醒 - cron 表达式",
+    "prompt": "请帮我添加一个定时任务，工作日早上 9 点执行打卡提醒，函数名称是 attendanceReminder"
+  },
+  {
+    "description": "2026 年 3 月 15 日上午 10 点执行 - 绝对时间",
+    "prompt": "请帮我添加一个定时任务，在 2026 年 3 月 15 日上午 10 点执行系统升级，函数名称是 systemUpgrade"
+  },
+  {
+    "description": "2026-04-01 00:00:00 执行 - 绝对时间 ISO 格式",
+    "prompt": "请帮我添加一个定时任务，在 2026 年 4 月 1 日零点 0 分 0 秒执行数据归档，函数名称是 archiveData"
+  },
+  {
+    "description": "2026 年 12 月 25 日下午 3 点 30 分 - 绝对时间",
+    "prompt": "请帮我添加一个定时任务，在 2026 年 12 月 25 日下午 3 点 30 分发送节日通知，函数名称是 sendHolidayNotification"
+  },
+  {
+    "description": "30 分钟后执行 - 相对时间",
+    "prompt": "请帮我添加一个定时任务，30 分钟后执行提醒，函数名称 is remindIn30Minutes"
+  },
+  {
+    "description": "1 小时后执行 - 相对时间",
+    "prompt": "请帮我添加一个定时任务，1 小时后执行会议提醒，函数名称是 remindMeetingIn1Hour"
+  },
+  {
+    "description": "2 小时后执行 - 相对时间",
+    "prompt": "请帮我添加一个定时任务，2 小时后执行数据备份，函数名称 is backupIn2Hours"
+  },
+  {
+    "description": "3 天后执行 - 相对时间",
+    "prompt": "请帮我添加一个定时任务，3 天后执行报告生成，函数名称 is generateReportIn3Days"
+  },
+  {
+    "description": "1 周后执行 - 相对时间",
+    "prompt": "请帮我添加一个定时任务，1 周后执行系统检查，函数名称 is checkSystemIn1Week"
+  },
+  {
+    "description": "每天下午 6 点数据同步 - cron 表达式",
+    "prompt": "请帮我添加一个定时任务，每天下午 6 点执行数据同步，函数名称是 syncData"
+  },
+  {
+    "description": "每季度末提交报告 - cron 表达式",
+    "prompt": "请帮我添加一个定时任务，每季度末最后一天提交季度报告，函数名称是 submitQuarterlyReport"
+  }
+]
