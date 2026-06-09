@@ -69,9 +69,9 @@ public class Team {
         }
 
         // Todo 这一段是否有必要和watch合并
-        var leaderBroadcast = leader.broadcast.map(item -> Message.builder().agentId(leader.id).mentions(null).message(item).build());
-        var membersBroadcast = Flux.fromIterable(this.member)
-                .flatMap(m -> m.broadcast.map(item -> Message.builder().agentId(m.id).message(item).build()));
+        var leaderBroadcast = leader.broadcast.map(item -> Message.builder().agentId(leader.metadata.getId()).mentions(null).message(item).build());
+        Flux<Message> membersBroadcast = Flux.fromIterable(this.member)
+                .flatMap(m -> m.broadcast.map(item -> Message.builder().agentId(m.metadata.getId()).message(item).build()));
         this.broadcast = Flux.merge(leaderBroadcast, membersBroadcast).share();
 
         this.eventQueue = new PriorityBlockingQueue<>(100, Comparator.comparing(Event::getId));
@@ -130,7 +130,7 @@ public class Team {
             switch (event.getType()) {
                 case Event.TYPE.TARGET -> {
                     var memberInfo = this.member.stream()
-                            .map(member -> "ID: %s, Prompt: %s".formatted(member.id, member.prompt))
+                            .map(member -> "ID: %s, Prompt: %s".formatted(member.metadata.getId(), member.getMemoryManager().getSystemPrompt()))
                             .reduce("", (acc, info) -> acc + "\n" + info);
 
                     var enhancedMessage = event.getDesc() + "\n团队成员信息:" + memberInfo;

@@ -35,7 +35,7 @@ public class HttpUtil {
                             .connectTimeout(httpConfig.getConnectTimeout(), TimeUnit.SECONDS)
                             .readTimeout(httpConfig.getReadTimeout(), TimeUnit.SECONDS)
                             .writeTimeout(httpConfig.getWriteTimeout(), TimeUnit.SECONDS)
-                            .retryOnConnectionFailure(httpConfig.isRetryOnConnectionFailure())
+                            .retryOnConnectionFailure(httpConfig.getRetryOnConnectionFailure())
                             .connectionPool(new ConnectionPool(
                                     httpConfig.getMaxIdleConnections(),
                                     httpConfig.getKeepAliveMinutes(),
