@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.extern.jackson.Jacksonized;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.Event;
@@ -45,7 +46,7 @@ public abstract class ContainerServer {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    static class Message<T> {
+    public static class Message<T> {
         public String msgId;
 
         public T body;
@@ -55,7 +56,7 @@ public abstract class ContainerServer {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    static class OutMessageBody {
+    public static class OutMessageBody {
         public String error;
 
         public ObjectNode data;
@@ -69,7 +70,7 @@ public abstract class ContainerServer {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    static class TransportClientRecord {
+    public static class TransportClientRecord {
         /**
          * 所属 transport 的唯一标识
          */
@@ -87,7 +88,7 @@ public abstract class ContainerServer {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    static class ListQueryCollector {
+    public static class ListQueryCollector {
         /**
          * 请求唯一标识
          */
@@ -283,7 +284,7 @@ public abstract class ContainerServer {
      * @return 响应 ObjectNode，可为 null
      */
     public ObjectNode handleAgentCreate(Context context, ObjectNode data) {
-        var agent = createAgent(context, data);
+        var agent = createAgent(context, data).run();
         var agentId = agent.metadata.getId();
         localAgents.put(agentId, agent);
         metaData.setAgentStay(agentId, this.id);
@@ -330,9 +331,11 @@ public abstract class ContainerServer {
                 var payload = JSONUtil.create()
                         .put("agentId", agentId)
                         .set("message", JSONUtil.convert(item));
-                var messageMsg = Message.<OutMessageBody>builder()
-                        .msgId(context.requestId)
-                        .body(OutMessageBody.builder().data(payload).build());
+                var messageMsg = new Message<OutMessageBody>() {};
+                messageMsg.setMsgId(context.requestId);
+                var subscribeBody = new OutMessageBody() {};
+                subscribeBody.setData(payload);
+                messageMsg.setBody(subscribeBody);
                 var messageJson = JSONUtil.stringify(messageMsg);
 
                 if (this.id.equals(context.serverId)) {
@@ -472,9 +475,11 @@ public abstract class ContainerServer {
     public String handleUserEvent(Context context, String event, String dataJson) {
         try {
             if (isShuttingDown) {
-                var shutdownError = ContainerServer.Message.<ContainerServer.OutMessageBody>builder()
-                        .msgId("")
-                        .body(ContainerServer.OutMessageBody.builder().error("server is shutting down").build());
+                var shutdownError = new ContainerServer.Message<ContainerServer.OutMessageBody>() {};
+                shutdownError.setMsgId("");
+                var shutdownBody = new ContainerServer.OutMessageBody() {};
+                shutdownBody.setError("server is shutting down");
+                shutdownError.setBody(shutdownBody);
                 context.transport.sendToClient(context.client, event, JSONUtil.stringify(shutdownError));
                 context.transport.closeClient(context.client);
                 throw new RuntimeException("server is shutting down");
@@ -499,22 +504,32 @@ public abstract class ContainerServer {
             };
 
             if (result != null && this.id.equals(context.serverId)) {
-                var outMsg = Message.<OutMessageBody>builder()
-                        .msgId(msg.msgId)
-                        .body(OutMessageBody.builder().data(result).build());
+                var outMsg = new Message<OutMessageBody>() {};
+                outMsg.setMsgId(msg.msgId);
+                var successBody = new OutMessageBody() {};
+                successBody.setData(result);
+                outMsg.setBody(successBody);
                 context.transport.sendToClient(context.client, event, JSONUtil.stringify(outMsg));
             }
-            return result != null ? JSONUtil.stringify(Message.<OutMessageBody>builder()
-                    .msgId(msg.msgId)
-                    .body(OutMessageBody.builder().data(result).build())) : null;
+            if (result != null) {
+                var returnMsg = new Message<OutMessageBody>() {};
+                returnMsg.setMsgId(msg.msgId);
+                var returnBody = new OutMessageBody() {};
+                returnBody.setData(result);
+                returnMsg.setBody(returnBody);
+                return JSONUtil.stringify(returnMsg);
+            }
+            return null;
         } catch (Exception e) {
             var errMsg = "服务器错误";
             if (e instanceof Error) {
                 errMsg = e.getMessage();
             }
-            var outMsg = Message.<OutMessageBody>builder()
-                    .msgId("")
-                    .body(OutMessageBody.builder().error(errMsg).build());
+            var outMsg = new Message<OutMessageBody>() {};
+            outMsg.setMsgId("");
+            var errBody = new OutMessageBody() {};
+            errBody.setError(errMsg);
+            outMsg.setBody(errBody);
 
             if (this.id.equals(context.serverId)) {
                 context.transport.sendToClient(context.client, event, JSONUtil.stringify(outMsg));

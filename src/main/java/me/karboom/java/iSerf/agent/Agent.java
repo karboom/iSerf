@@ -131,7 +131,7 @@ public class Agent {
      * path/system-prompt.md 系统提示词
      */
     public Agent(String id, ILlmProvider provider, Path path) throws IOException {
-        var tools = new Loader(2000).fromToolFile(path.resolve("tool"), null);
+        var tools = new Loader(2000).fromToolFile(path.resolve("tools.yaml"), null);
         this(AgentMetadata.builder().id(id).build(), Files.readString(path.resolve("system-prompt.md"), StandardCharsets.UTF_8), provider, tools,
                 null, null, path, null);
     }
