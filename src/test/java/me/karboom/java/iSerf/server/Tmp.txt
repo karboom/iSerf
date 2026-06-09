@@ -1,20 +1,23 @@
-package me.karboom.java.iSlogger.server;
+package me.karboom.java.iSerf.server;
 
-import me.karboom.java.iSlogger.agent.Agent;
-import me.karboom.java.iSlogger.llm.text.OpenAI;
-import me.karboom.java.iSlogger.tool.Loader;
-import me.karboom.java.iSlogger.tool.Tool;
+import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
+import me.karboom.java.iSerf.llm.text.OpenAI;
+import me.karboom.java.iSerf.server.messageBus.IMessageBus;
+import me.karboom.java.iSerf.server.messageBus.Pulsar;
+import me.karboom.java.iSerf.server.metaData.IMetaData;
+import me.karboom.java.iSerf.server.metaData.RedisSingle;
+import me.karboom.java.iSerf.server.protocol.Websocket;
+import me.karboom.java.iSerf.agent.tool.Loader;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 public class Tmp extends Websocket {
 
     @Override
-    Agent createAgent(ObjectNode params) {
+    public Agent createAgent(ObjectNode params) {
         var prompt = """
                 你是一个数据分析助手，这是目前的pg数据库结构
                 
@@ -95,21 +98,28 @@ public class Tmp extends Websocket {
                 COMMENT ON TABLE public.maintenance_record_details IS '保养记录详细检查项';
                 """;
 
-       var tools = new Loader(2000).fromIFunction("/home/karboom/projects/karboom/java/iSlogger/src/main/java/me/karboom/java/iSlogger/iFunction", "echarts", null);
 
-        var agent = new Agent(UUID.randomUUID().toString(), prompt, new OpenAI("qwen-plus", new HashMap<>(), System.getenv("OPENAI_API_KEY"), "https://dashscope.aliyuncs.com/compatible-mode/v1", 3), tools) {}.run();
+        var tools = new Loader(2000).fromIFunction("/home/karboom/projects/karboom/iSerf/iSerf/src/main/java/me/karboom/java/iSerf/iFunction", "echarts", null);
 
-        return agent;
+        var tools2 = new Loader(2000).fromIFunction("/home/karboom/projects/karboom/iSerf/iSerf/src/main/java/me/karboom/java/iSerf/iFunction", "addFile", null);
+        var tools3 = new Loader(2000).fromIFunction("/home/karboom/projects/karboom/iSerf/iSerf/src/main/java/me/karboom/java/iSerf/iFunction", "addRecord", null);
+       tools.addAll(tools2);
+       tools.addAll(tools3);
+
+       var agent = new Agent(UUID.randomUUID().toString(), prompt, new FixedLlmProvider(new OpenAI("qwen-plus", new HashMap<>(), System.getenv("OPENAI_API_KEY"), "https://dashscope.aliyuncs.com/compatible-mode/v1", 3)), tools) {};
+
+
+       return agent;
+    }
+
+    public Tmp(String ip, Integer port, IMessageBus messageBus, IMetaData metaData) {
+        super(ip, port, messageBus, metaData);
     }
 
     public Tmp(String ip, Integer port) {
-        super(ip, port);
+        this(ip, port, new Pulsar("pulsar://localhost:6650"), new RedisSingle("redis://localhost:6379"));
     }
 
-    @Override
-    public List<String> getNodes() {
-        return List.of(clusterIp + ":" + port);
-    }
 
     public static void main(String[] args) {
         var server = new Tmp("127.0.0.1", 9088);

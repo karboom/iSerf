@@ -127,7 +127,7 @@ var response = llm.send(messages, WeatherResponse.class, null);
 ```java
 var p1 = new Tool.Parameter("location", "string", "地点", true);
 var p2 = new Tool.Parameter("continent", "string", "欧洲还是亚洲", true);
-var tool = Tool.builder()
+var tool = Tool.<Map>builder()
     .name("query_weather")
     .description("查询天气时使用此工具")
     .parameters(List.of(p1, p2))

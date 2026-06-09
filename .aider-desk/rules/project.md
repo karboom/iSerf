@@ -20,6 +20,8 @@
 * 类名BO结尾（以及其静态子类），必须有@Data  @Builder  @NoArgsConstructor  @AllArgsConstructor 四个注解
 * 通过异常优先退出的写法，降低代码层数
 * 带有泛型的类，初始化需要加{}
+* 对整个代码区域分块的注释，使用 region  endregion 标记
+* 当泛型类初始化的时候，使用匿名类写法 new Class<Type> {}，然后set属性
 
 # 并发处理
 * 禁用 synchronized

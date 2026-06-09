@@ -39,7 +39,7 @@ implementation("io.github.karboom:iSerf:0.6.0-alpha")
 ```java
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.llm.text.OpenAI;
-import me.karboom.java.iSerf.memory.Item;
+import me.karboom.java.iSerf.agent.Message;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -85,3 +85,5 @@ public class AgentExample {
 
 ```
 
+
+### RAG
