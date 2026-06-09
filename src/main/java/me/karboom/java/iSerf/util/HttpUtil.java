@@ -33,6 +33,7 @@ public class HttpUtil {
 
                     client = new OkHttpClient.Builder()
                             .connectTimeout(httpConfig.getConnectTimeout(), TimeUnit.SECONDS)
+                            .callTimeout(httpConfig.getCallTimeout(), TimeUnit.SECONDS)
                             .readTimeout(httpConfig.getReadTimeout(), TimeUnit.SECONDS)
                             .writeTimeout(httpConfig.getWriteTimeout(), TimeUnit.SECONDS)
                             .retryOnConnectionFailure(httpConfig.getRetryOnConnectionFailure())

@@ -3,7 +3,6 @@ package me.karboom.java.iSerf.llm.text;
 import com.github.victools.jsonschema.generator.*;
 import com.github.victools.jsonschema.module.jackson.JacksonModule;
 import com.github.victools.jsonschema.module.jackson.JacksonOption;
-import com.openai.client.okhttp.OpenAIOkHttpClient;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Message;
 import me.karboom.java.iSerf.agent.tool.Tool;
@@ -18,7 +17,6 @@ import reactor.core.publisher.Flux;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -45,15 +43,6 @@ public class OpenAI implements IText {
         var configBuilder = new SchemaGeneratorConfigBuilder(SchemaVersion.DRAFT_7, OptionPreset.PLAIN_JSON).with(new JacksonModule(JacksonOption.RESPECT_JSONPROPERTY_REQUIRED));
         configBuilder.forFields().withRequiredCheck(fieldScope -> true);
         this.schemaGenerator = new SchemaGenerator(configBuilder.build());
-
-        var builder = OpenAIOkHttpClient.builder()
-                .apiKey(this.apiKey)
-                .baseUrl(this.url)
-                .timeout(Duration.ofSeconds(120));
-
-        if (this.maxRetries != null) {
-            builder.maxRetries(this.maxRetries);
-        }
     }
 
     /**

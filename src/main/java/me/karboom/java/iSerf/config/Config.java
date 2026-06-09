@@ -95,11 +95,14 @@ public class Config {
     @Data
     public static class HttpConfig {
         /** 连接超时（秒），默认 30 */
-        private Integer connectTimeout = 30;
+        private Integer connectTimeout = 300;
         /** 读取超时（秒），默认 30 */
-        private Integer readTimeout = 30;
+        private Integer readTimeout = 300;
         /** 写入超时（秒），默认 30 */
-        private Integer writeTimeout = 30;
+        private Integer writeTimeout = 300;
+
+        private Integer callTimeout = 300;
+
         /** 最大并发请求数，默认 10000 */
         private Integer maxRequests = 10000;
         /** 每个 Host 最大并发请求数，默认 10000 */

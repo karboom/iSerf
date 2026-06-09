@@ -18,3 +18,5 @@ iSerf:
     keepAliveMinutes: 5
     # 连接失败是否重试，默认 true
     retryOnConnectionFailure: true
+
+    callTimeout: 300
