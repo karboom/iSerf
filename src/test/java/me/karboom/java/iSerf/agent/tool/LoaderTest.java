@@ -18,8 +18,8 @@ public class LoaderTest {
 
     @Test
     void testFromToolFile() {
-        var toolDir = Path.of("src/test/resources/agent/constructor");
-        var tools = loader.fromToolFile(toolDir, null);
+        var toolFile = Path.of("src/test/resources/agent/constructor/tools.yaml");
+        var tools = loader.fromToolFile(toolFile, null);
 
         assertNotNull(tools, "应该返回非空列表");
         assertEquals(1, tools.size(), "应该找到1个工具");

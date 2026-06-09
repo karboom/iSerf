@@ -239,4 +239,39 @@ class MemoryManagerTest {
     }
 
     // endregion
+
+    // region ========== getMessagesForLLM 边界 ==========
+
+    @Test
+    void testGetMessagesForLLMSkipsForgotten() {
+        memoryManager.add(Message.builder().text("visible").isForgotten(0).role(Message.ROLE.USER).build());
+        memoryManager.add(Message.builder().text("hidden").isForgotten(1).role(Message.ROLE.USER).build());
+
+        var llmMessages = memoryManager.getMessagesForLLM();
+
+        // system prompt + 1 visible
+        assertEquals(2, llmMessages.size());
+        assertEquals(Message.ROLE.SYSTEM, llmMessages.get(0).getRole());
+        assertTrue(llmMessages.stream().anyMatch(m -> "visible".equals(m.getText())));
+        assertTrue(llmMessages.stream().noneMatch(m -> "hidden".equals(m.getText())));
+    }
+
+    // endregion
+
+    // region ========== checkAndOrganize 边界 ==========
+
+    @Test
+    void testCheckAndOrganizeWithNullUsage() {
+        var msg = Message.builder()
+                .text("no usage field")
+                .isForgotten(0)
+                .build();
+        memoryManager.add(msg);
+
+        var sizeBefore = memoryManager.size();
+        memoryManager.checkAndOrganize();
+        assertEquals(sizeBefore, memoryManager.size(), "null usage 不应触发压缩");
+    }
+
+    // endregion
 }

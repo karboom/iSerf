@@ -261,7 +261,7 @@ public class PicTreeBuilder {
                     .type(Message.TYPE.IMAGE)
 
                     .text(prompt)
-                    .images(List.of(dataUrl))
+                    .files(List.of(dataUrl))
                     .build());
 
             var output = openAI.query(messages, PicInfo.class);

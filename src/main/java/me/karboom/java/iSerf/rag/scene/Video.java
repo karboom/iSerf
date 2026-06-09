@@ -212,7 +212,7 @@ public class Video {
             var message = Message.builder()
                     .role(Message.ROLE.USER)
                     .type(Message.TYPE.IMAGE)
-                    .images(List.of(imageUrl))
+                    .files(List.of(imageUrl))
                     .text("请描述这张图片的内容，提取关键信息")
                     .build();
 

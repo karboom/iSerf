@@ -6,6 +6,8 @@ build/
 !**/src/test/**/build/
 .kotlin
 
+local.env
+
 scripts/
 **/node_modules/
 logs/
