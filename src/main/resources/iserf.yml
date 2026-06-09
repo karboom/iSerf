@@ -1,0 +1,20 @@
+# iSerf 配置文件
+
+iSerf:
+  http:
+    # 连接超时（秒），默认 30
+    connectTimeout: 30
+    # 读取超时（秒），默认 30
+    readTimeout: 30
+    # 写入超时（秒），默认 30
+    writeTimeout: 30
+    # 最大并发请求数，默认 10000
+    maxRequests: 10000
+    # 每个 Host 最大并发请求数，默认 10000
+    maxRequestsPerHost: 10000
+    # 连接池最大空闲连接数，默认 10000
+    maxIdleConnections: 10000
+    # 连接保活时间（分钟），默认 5
+    keepAliveMinutes: 5
+    # 连接失败是否重试，默认 true
+    retryOnConnectionFailure: true
