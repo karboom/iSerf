@@ -1,8 +1,5 @@
 package me.karboom.java.iSerf.llm.text;
 
-import com.github.victools.jsonschema.generator.*;
-import com.github.victools.jsonschema.module.jackson.JacksonModule;
-import com.github.victools.jsonschema.module.jackson.JacksonOption;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Message;
 import me.karboom.java.iSerf.agent.tool.Tool;
@@ -26,24 +23,20 @@ import java.util.Map;
  * OpenAI Responses API 实现
  */
 @Slf4j
-public class OpenAIResponse implements IText {
-    public String llmType;
-    public Map<String, Object> llmConfig;
-    protected String apiKey;
-    protected String url;
-    protected Integer maxRetries;
-    private final SchemaGenerator schemaGenerator;
+public class OpenAIResponse extends AbstractOpenAIText {
 
     public OpenAIResponse(String llmType, Map<String, Object> llmConfig, String apiKey, String url, Integer maxRetries) {
-        this.llmType = llmType;
-        this.llmConfig = llmConfig;
-        this.apiKey = apiKey;
-        this.url = url;
-        this.maxRetries = maxRetries;
+        super(llmType, llmConfig, apiKey, url, maxRetries);
+    }
 
-        var configBuilder = new SchemaGeneratorConfigBuilder(SchemaVersion.DRAFT_7, OptionPreset.PLAIN_JSON).with(new JacksonModule(JacksonOption.RESPECT_JSONPROPERTY_REQUIRED));
-        configBuilder.forFields().withRequiredCheck(fieldScope -> true);
-        this.schemaGenerator = new SchemaGenerator(configBuilder.build());
+    @Override
+    protected String chatEndpoint() {
+        return "/v1/responses";
+    }
+
+    @Override
+    protected String batchEndpoint() {
+        return "/v1/responses";
     }
 
     /**
@@ -52,7 +45,7 @@ public class OpenAIResponse implements IText {
     @Override
     public Flux<Output> send(List<Message> memory, Class<?> outputFormat, List<Tool<?>> tools) {
         return Flux.create(sink -> {
-            var requestBody = buildRequestBody(memory, outputFormat, tools, true);
+            var requestBody = buildRequestBody(memory, outputFormat, tools);
 
             var request = new Request.Builder()
                     .url("%s/responses".formatted(this.url))
@@ -75,7 +68,7 @@ public class OpenAIResponse implements IText {
                             sink.complete();
                             return;
                         }
-                        var output = parseOutput(JSONUtil.parse(data), true, type);
+                        var output = parseOutput(JSONUtil.parse(data), true);
                         if (output != null) {
                             sink.next(output);
                         }
@@ -106,7 +99,7 @@ public class OpenAIResponse implements IText {
      */
     @Override
     public Output query(List<Message> messages, Class<?> outputFormat) {
-        var requestBody = buildRequestBody(messages, outputFormat, null, false);
+        var requestBody = buildRequestBody(messages, outputFormat, null);
         var requestJson = JSONUtil.parse(requestBody);
         requestJson.remove("stream");
 
@@ -129,196 +122,20 @@ public class OpenAIResponse implements IText {
                 throw ErrorUtil.make("Query response is null");
             }
             var responseJson = JSONUtil.parse(responseBody.string());
-            return parseOutput(responseJson, false, "response.completed");
+            return parseOutput(responseJson, false);
         } catch (Exception e) {
             throw ErrorUtil.make("Query error: %s".formatted(e.getMessage()));
         }
     }
 
     /**
-     * 批量查询（Responses API 暂不支持原生 batch，使用 Chat Completion batch API）
-     */
-    @Override
-    public String batch(List<List<Message>> messageBatch, Class<?> outputFormat) {
-        var jsonlBuilder = new StringBuilder();
-        for (var i = 0; i < messageBatch.size(); i++) {
-            var messages = messageBatch.get(i);
-            var requestBody = buildRequestBody(messages, outputFormat, null, false);
-            var requestJson = JSONUtil.parse(requestBody);
-            requestJson.remove("stream");
-
-            var requestNode = JSONUtil.create();
-            requestNode.put("custom_id", "request-%d".formatted(i));
-            requestNode.put("method", "POST");
-            requestNode.put("url", "/v1/responses");
-            requestNode.set("body", requestJson);
-
-            jsonlBuilder.append(requestNode.toString()).append("\n");
-        }
-
-        var mediaType = MediaType.parse("application/jsonl");
-        var fileBody = RequestBody.create(jsonlBuilder.toString().getBytes(), mediaType);
-        var fileMultipartBody = new MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
-                .addFormDataPart("file", "batch.jsonl", fileBody)
-                .addFormDataPart("purpose", "batch")
-                .build();
-
-        var fileRequest = new Request.Builder()
-                .url("%s/files".formatted(this.url))
-                .addHeader("Authorization", "Bearer %s".formatted(this.apiKey))
-                .post(fileMultipartBody)
-                .build();
-
-        String fileId;
-        try (var fileResponse = HttpUtil.getClient().newCall(fileRequest).execute()) {
-            if (!fileResponse.isSuccessful()) {
-                var body = fileResponse.body();
-                var bodyStr = body != null ? body.string() : "null";
-                log.error(" batch file upload failed code={} body={} ", fileResponse.code(), bodyStr);
-                throw ErrorUtil.make("File upload failed: %s".formatted(fileResponse.code()));
-            }
-            var fileResponseBody = fileResponse.body();
-            if (fileResponseBody == null) {
-                throw ErrorUtil.make("File upload response is null");
-            }
-            var fileResponseJson = JSONUtil.parse(fileResponseBody.string());
-            var fileIdNode = fileResponseJson.path("id");
-            if (fileIdNode.isMissingNode() || fileIdNode.isNull()) {
-                throw ErrorUtil.make("File upload response missing id");
-            }
-            fileId = fileIdNode.asString();
-        } catch (Exception e) {
-            throw ErrorUtil.make("File upload error: %s".formatted(e.getMessage()));
-        }
-
-        var batchRequestBody = JSONUtil.create();
-        batchRequestBody.put("input_file_id", fileId);
-        batchRequestBody.put("endpoint", "/v1/responses");
-        batchRequestBody.put("completion_window", "24h");
-
-        var batchRequest = new Request.Builder()
-                .url("%s/batches".formatted(this.url))
-                .addHeader("Authorization", "Bearer %s".formatted(this.apiKey))
-                .addHeader("Content-Type", "application/json")
-                .post(RequestBody.create(batchRequestBody.toString(), MediaType.parse("application/json")))
-                .build();
-
-        try (var batchResponse = HttpUtil.getClient().newCall(batchRequest).execute()) {
-            if (!batchResponse.isSuccessful()) {
-                var body = batchResponse.body();
-                var bodyStr = body != null ? body.string() : "null";
-                log.error(" batch creation failed code={} body={} ", batchResponse.code(), bodyStr);
-                throw ErrorUtil.make("Batch creation failed: %s".formatted(batchResponse.code()));
-            }
-            var batchResponseBody = batchResponse.body();
-            if (batchResponseBody == null) {
-                throw ErrorUtil.make("Batch creation response is null");
-            }
-            var batchResponseJson = JSONUtil.parse(batchResponseBody.string());
-            var batchIdNode = batchResponseJson.path("id");
-            if (batchIdNode.isMissingNode() || batchIdNode.isNull()) {
-                throw ErrorUtil.make("Batch creation response missing id");
-            }
-            return batchIdNode.asString();
-        } catch (Exception e) {
-            throw ErrorUtil.make("Batch creation error: %s".formatted(e.getMessage()));
-        }
-    }
-
-    /**
-     * 查询批量任务状态
-     */
-    @Override
-    public BatchTaskInfo taskStatus(String taskId) {
-        var request = new Request.Builder()
-                .url("%s/batches/%s".formatted(this.url, taskId))
-                .addHeader("Authorization", "Bearer %s".formatted(this.apiKey))
-                .addHeader("Content-Type", "application/json")
-                .get()
-                .build();
-
-        try (var response = HttpUtil.getClient().newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                var body = response.body();
-                var bodyStr = body != null ? body.string() : "null";
-                log.error(" taskStatus failed code={} body={} ", response.code(), bodyStr);
-                throw ErrorUtil.make("Task status query failed: %s".formatted(response.code()));
-            }
-            var responseBody = response.body();
-            if (responseBody == null) {
-                throw ErrorUtil.make("Task status response is null");
-            }
-            var responseJson = JSONUtil.parse(responseBody.string());
-
-            var statusNode = responseJson.path("status");
-            var apiStatus = statusNode.isMissingNode() || statusNode.isNull() ? "unknown" : statusNode.asText();
-            var mappedStatus = switch (apiStatus) {
-                case "completed" -> BatchTaskInfo.STATUS.DONE;
-                case "failed" -> BatchTaskInfo.STATUS.ERROR;
-                case "expired" -> BatchTaskInfo.STATUS.EXPIRED;
-                case "cancelled" -> BatchTaskInfo.STATUS.CANCELLED;
-                default -> BatchTaskInfo.STATUS.DOING;
-            };
-
-            var taskStatus = BatchTaskInfo.builder()
-                    .id(responseJson.path("id").asText())
-                    .status(mappedStatus)
-                    .build();
-
-            var outputFilesNode = responseJson.path("output_file_id");
-            if (!outputFilesNode.isMissingNode() && !outputFilesNode.isNull()) {
-                taskStatus.setSuccessResultId(outputFilesNode.asText());
-            }
-
-            var errorFilesNode = responseJson.path("error_file_id");
-            if (!errorFilesNode.isMissingNode() && !errorFilesNode.isNull()) {
-                taskStatus.setErrorResultId(errorFilesNode.asText());
-            }
-
-            return taskStatus;
-        } catch (Exception e) {
-            throw ErrorUtil.make("Task status query error: %s".formatted(e.getMessage()));
-        }
-    }
-
-    /**
-     * 获取批量任务结果
-     */
-    @Override
-    public List<Output> taskResult(BatchTaskInfo task) {
-        var downloadRequest = new Request.Builder()
-                .url("%s/files/%s/content".formatted(this.url, task.getSuccessResultId()))
-                .addHeader("Authorization", "Bearer %s".formatted(this.apiKey))
-                .get()
-                .build();
-
-        try (var response = HttpUtil.getClient().newCall(downloadRequest).execute()) {
-            if (!response.isSuccessful()) {
-                var body = response.body();
-                var bodyStr = body != null ? body.string() : "null";
-                log.error(" taskResult download failed code={} body={} ", response.code(), bodyStr);
-                throw ErrorUtil.make("Task result download failed: %s".formatted(response.code()));
-            }
-            var responseBody = response.body();
-            if (responseBody == null) {
-                throw ErrorUtil.make("Task result response is null");
-            }
-
-            var content = responseBody.string();
-            return parseOutputBatch(content);
-        } catch (Exception e) {
-            throw ErrorUtil.make("Task result download error: %s".formatted(e.getMessage()));
-        }
-    }
-
-    /**
      * 构建请求体
      */
-    private String buildRequestBody(List<Message> memory, Class<?> outputFormat, List<Tool<?>> tools, boolean stream) {
+    @Override
+    protected String buildRequestBody(List<Message> memory, Class<?> outputFormat, List<Tool<?>> tools) {
         var body = JSONUtil.create();
         body.put("model", llmType);
-        body.put("stream", stream);
+        body.put("stream", true);
 
         var input = convertMessagesToInput(memory, tools);
         body.set("input", input);
@@ -469,50 +286,10 @@ public class OpenAIResponse implements IText {
     }
 
     /**
-     * 构建工具 JSON（Responses API 格式）
-     */
-    public ArrayNode buildToolsJson(List<Tool<?>> tools) {
-        var toolsArray = JSONUtil.createArray();
-        for (var tool : tools) {
-            var toolNode = JSONUtil.create();
-            toolNode.put("type", "function");
-
-            var function = JSONUtil.create();
-            function.put("name", tool.name);
-            function.put("description", tool.description);
-            function.set("parameters", JSONUtil.parse(schemaGenerator.generateSchema(tool.paramType).toString()));
-
-            toolNode.set("function", function);
-            toolsArray.add(toolNode);
-        }
-        return toolsArray;
-    }
-
-    /**
-     * 解析批量输出
-     */
-    private List<Output> parseOutputBatch(String data) {
-        var outputs = new ArrayList<Output>();
-        var lines = data.split("\n");
-        for (var line : lines) {
-            if (line != null && !line.trim().isEmpty()) {
-                var jsonLine = JSONUtil.parse(line);
-                var bodyNode = jsonLine.path("response").path("body");
-                if (!bodyNode.isMissingNode() && !bodyNode.isNull()) {
-                    var output = parseOutput((ObjectNode) bodyNode, false, "response.completed");
-                    if (output != null) {
-                        outputs.add(output);
-                    }
-                }
-            }
-        }
-        return outputs;
-    }
-
-    /**
      * 解析响应
      */
-    private Output parseOutput(ObjectNode data, boolean isStream, String eventType) {
+    @Override
+    protected Output parseOutput(ObjectNode data, boolean isStream) {
         var output = new Output();
         output.isDelta = isStream;
 
