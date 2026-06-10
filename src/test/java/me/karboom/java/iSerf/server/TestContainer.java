@@ -3,6 +3,7 @@ package me.karboom.java.iSerf.server;
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 import me.karboom.java.iSerf.llm.text.OpenAI;
+import me.karboom.java.iSerf.llm.text.OpenAI;
 import me.karboom.java.iSerf.server.ContainerServer;
 import me.karboom.java.iSerf.server.messageBus.Pulsar;
 import me.karboom.java.iSerf.server.metaData.RedisSingle;
@@ -14,16 +15,12 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 测试用 ContainerServer 子类，内置消息总线和元数据存储，实现 Agent 工厂方法
+ * 测试用 AgentLifecycle 实现，Agent 工厂方法
  */
-public class TestContainer extends ContainerServer {
-
-    public TestContainer() {
-        super("127.0.0.1", new Pulsar("pulsar://localhost:6650"), new RedisSingle("redis://:RGluZ1NoZW5nMTIz@localhost:6379"));
-    }
+public class TestContainer extends AgentLifecycle {
 
     @Override
-    protected Agent createAgent(Context ctx, ObjectNode params) {
+    public Agent createAgent(ContainerServer.Context ctx, ObjectNode params) {
         var llm = new OpenAI("qwen-plus", new HashMap<>(), System.getenv("OPENAI_API_KEY"),
                 "https://dashscope.aliyuncs.com/compatible-mode/v1", 3);
         var provider = new FixedLlmProvider(llm);
@@ -32,12 +29,22 @@ public class TestContainer extends ContainerServer {
     }
 
     @Override
-    protected List<Agent> listAgent(Context ctx, ObjectNode params) {
+    public List<Agent> listAgent(ContainerServer.Context ctx, ObjectNode params) {
         return new ArrayList<>();
     }
 
     @Override
-    protected Agent removeAgent(Context ctx, ObjectNode params) {
+    public Agent removeAgent(ContainerServer.Context ctx, ObjectNode params) {
+        return null;
+    }
+
+    @Override
+    public Agent editAgent(ContainerServer.Context ctx, ObjectNode params) {
+        return null;
+    }
+
+    @Override
+    public Agent detailAgent(ContainerServer.Context ctx, ObjectNode params) {
         return null;
     }
 }

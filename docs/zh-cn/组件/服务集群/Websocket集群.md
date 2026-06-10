@@ -4,7 +4,9 @@
 
 ## 架构概述
 
-- `ContainerServer`（抽象类）承载协议无关的元数据管理和消息总线逻辑
+- `ContainerServer` 承载协议无关的元数据管理和消息总线逻辑
+- `AgentLifecycle`（抽象类）定义 Agent 的创建、查询、删除生命周期
+- `TeamLifecycle`（抽象类）定义 Team 的创建、查询、删除生命周期
 - `WebsocketTransport`（继承 `ITransport`）作为 Socket.IO 传输协议适配层
 - 每个节点既是服务端，也是其他节点的代理
 - 使用 `IMetaData`（如 Redis）存储元数据（节点列表、Agent 路由信息）
@@ -15,13 +17,14 @@
 
 ### 服务端
 
-继承 `ContainerServer` 并实现抽象方法，然后通过 `addTransport()` 挂载 `WebsocketTransport`：
+实现 `AgentLifecycle` 并实例化 `ContainerServer`，然后通过 `addTransport()` 挂载 `WebsocketTransport`：
 
 ```java
 package me.karboom.java.iSerf.server;
 
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.llm.text.OpenAI;
+import me.karboom.java.iSerf.team.Team;
 import me.karboom.java.iSerf.server.messageBus.Pulsar;
 import me.karboom.java.iSerf.server.metaData.RedisSingle;
 import me.karboom.java.iSerf.server.transport.WebsocketTransport;
@@ -32,17 +35,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.UUID;
 
-public class MyServer extends ContainerServer {
-
-    public MyServer(String clusterIp, Integer port) {
-        super(clusterIp, new Pulsar("pulsar://localhost:6650"),
-              new RedisSingle("redis://localhost:6379"));
-        // 挂载 WebsocketTransport
-        addTransport(new WebsocketTransport(this, port) {});
-    }
+public class MyLifecycle extends AgentLifecycle {
 
     @Override
-    protected Agent createAgent(Context ctx, ObjectNode params) {
+    public Agent createAgent(Context ctx, ObjectNode params) {
         var prompt = params.path("prompt").asText();
         var llm = new OpenAI("qwen-plus", new HashMap<>(),
                 System.getenv("OPENAI_API_KEY"),
@@ -51,18 +47,45 @@ public class MyServer extends ContainerServer {
     }
 
     @Override
-    protected List<Agent> listAgent(Context ctx, ObjectNode params) {
+    public List<Agent> listAgent(Context ctx, ObjectNode params) {
         return new ArrayList<>(localAgents.values());
     }
 
     @Override
-    protected Agent removeAgent(Context ctx, ObjectNode params) {
+    public Agent removeAgent(Context ctx, ObjectNode params) {
         var agentId = params.path("agentId").asText();
         return localAgents.remove(agentId);
     }
 
+public class MyTeamLifecycle extends TeamLifecycle {
+
+    @Override
+    public Team createTeam(Context ctx, ObjectNode params) {
+        // 从 params 解析 leader 和 members
+        return null;
+    }
+
+    @Override
+    public List<Team> listTeam(Context ctx, ObjectNode params) {
+        return new ArrayList<>(localTeams.values());
+    }
+
+    @Override
+    public Team removeTeam(Context ctx, ObjectNode params) {
+        var teamId = params.path("teamId").asText();
+        return localTeams.remove(teamId);
+    }
+
     public static void main(String[] args) {
-        var server = new MyServer("192.168.1.10", 9092);
+        var lifecycle = new MyLifecycle();
+        var teamLifecycle = new MyTeamLifecycle();
+        var server = new ContainerServer("192.168.1.10",
+                new Pulsar("pulsar://localhost:6650"),
+                new RedisSingle("redis://localhost:6379"),
+                lifecycle,
+                teamLifecycle);
+        // 挂载 WebsocketTransport
+        server.addTransport(new WebsocketTransport(server, 9092) {});
         server.start();
     }
 }

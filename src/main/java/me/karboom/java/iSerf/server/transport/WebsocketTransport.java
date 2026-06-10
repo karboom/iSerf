@@ -154,7 +154,14 @@ public abstract class WebsocketTransport implements ITransport {
                 ContainerServer.EVENT_AGENT_SUBSCRIBE,
                 ContainerServer.EVENT_AGENT_UNSUBSCRIBE,
                 ContainerServer.EVENT_AGENT_TOOL_CALL,
-                ContainerServer.EVENT_AGENT_LIST
+                ContainerServer.EVENT_AGENT_LIST,
+                ContainerServer.EVENT_AGENT_EDIT,
+                ContainerServer.EVENT_AGENT_DETAIL,
+                ContainerServer.EVENT_TEAM_CREATE,
+                ContainerServer.EVENT_TEAM_LIST,
+                ContainerServer.EVENT_TEAM_REMOVE,
+                ContainerServer.EVENT_TEAM_EDIT,
+                ContainerServer.EVENT_TEAM_DETAIL
         );
 
         // 拦截未知事件，立即返回错误

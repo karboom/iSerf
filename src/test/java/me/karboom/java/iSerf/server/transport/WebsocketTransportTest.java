@@ -6,6 +6,9 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.server.ContainerServer;
 import me.karboom.java.iSerf.server.TestContainer;
+import me.karboom.java.iSerf.server.TestTeamLifecycle;
+import me.karboom.java.iSerf.server.messageBus.Pulsar;
+import me.karboom.java.iSerf.server.metaData.RedisSingle;
 import me.karboom.java.iSerf.util.JSONUtil;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,12 +27,19 @@ import static org.junit.jupiter.api.Assertions.*;
 @Slf4j
 class WebsocketTransportTest {
 
-    private TestContainer container;
+    private ContainerServer container;
     private TestWebsocketTransport transport;
 
     @BeforeEach
     void setUp() {
-        container = new TestContainer();
+        container = new ContainerServer("127.0.0.1",
+                new Pulsar("pulsar://localhost:6650"),
+                new RedisSingle("redis://:RGluZ1NoZW5nMTIz@localhost:6379"),
+                new TestContainer(),
+                new TestTeamLifecycle()) {
+            @Override
+            public void eventInterceptor(Context ctx, String event, String dataJson) {}
+        };
         transport = new TestWebsocketTransport(container, 9090);
         transport.start();
     }

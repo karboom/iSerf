@@ -8,6 +8,7 @@ import lombok.extern.jackson.Jacksonized;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.Event;
+import me.karboom.java.iSerf.team.Team;
 import me.karboom.java.iSerf.server.messageBus.IMessageBus;
 import me.karboom.java.iSerf.server.metaData.IMetaData;
 import me.karboom.java.iSerf.server.metaData.Node;
@@ -36,6 +37,13 @@ public abstract class ContainerServer {
     public static final String EVENT_AGENT_TOOL_CALL = "agent.toolCall";
     public static final String EVENT_AGENT_LIST = "agent.list";
     public static final String EVENT_AGENT_MESSAGE = "agent.message";
+    public static final String EVENT_AGENT_EDIT = "agent.edit";
+    public static final String EVENT_AGENT_DETAIL = "agent.detail";
+    public static final String EVENT_TEAM_CREATE = "team.create";
+    public static final String EVENT_TEAM_LIST = "team.list";
+    public static final String EVENT_TEAM_REMOVE = "team.remove";
+    public static final String EVENT_TEAM_EDIT = "team.edit";
+    public static final String EVENT_TEAM_DETAIL = "team.detail";
 
 
     static class Error extends RuntimeException {
@@ -168,6 +176,21 @@ public abstract class ContainerServer {
     public Map<String, ListQueryCollector> listQueryCollectors = new ConcurrentHashMap<>();
 
     /**
+     * 本地 Team 缓存
+     */
+    public Map<String, Team> localTeams = new ConcurrentHashMap<>();
+
+    /**
+     * Agent 生命周期管理
+     */
+    public AgentLifecycle agentLifecycle;
+
+    /**
+     * Team 生命周期管理
+     */
+    public TeamLifecycle teamLifecycle;
+
+    /**
      * 关闭状态标志
      */
     public volatile boolean isShuttingDown = false;
@@ -175,46 +198,25 @@ public abstract class ContainerServer {
     /**
      * 构造通用传输容器
      *
-     * @param clusterIp  集群通信地址
-     * @param messageBus 消息总线
-     * @param metaData   元数据存储
+     * @param clusterIp      集群通信地址
+     * @param messageBus     消息总线
+     * @param metaData       元数据存储
+     * @param agentLifecycle Agent 生命周期管理
+     * @param teamLifecycle  Team 生命周期管理
      */
-    public ContainerServer(String clusterIp, IMessageBus messageBus, IMetaData metaData) {
+    public ContainerServer(String clusterIp, IMessageBus messageBus, IMetaData metaData,
+                           AgentLifecycle agentLifecycle, TeamLifecycle teamLifecycle) {
         this.clusterIp = clusterIp;
         this.id = DataUtil.getFlakeId();
         this.messageBus = messageBus;
         this.metaData = metaData;
+        this.agentLifecycle = agentLifecycle;
+        this.agentLifecycle.init(this.localAgents);
+        this.teamLifecycle = teamLifecycle;
+        this.teamLifecycle.init(this.localTeams);
     }
 
-    /**
-     * Agent 工厂方法，由子类实现
-     *
-     * @param ctx    请求上下文（含 transport、client、user 等信息）
-     * @param params Agent 构造参数
-     * @return Agent 实例
-     */
-    protected abstract Agent createAgent(Context ctx, ObjectNode params);
-
-    /**
-     * 按照条件查找智能体列表
-     *
-     * @param ctx
-     * @param params
-     * @return 匹配的Agent列表
-     */
-    protected abstract List<Agent> listAgent(Context ctx, ObjectNode params);
-
-    /**
-     * 删除Agent
-     *
-     * @param ctx    请求上下文（含 transport、client、user 等信息）
-     * @param params 删除参数（含 target agent ID）
-     * @return 被删除的 Agent 实例，若不存在则返回 null
-     */
-    protected abstract Agent removeAgent(Context ctx, ObjectNode params);
-
-
-    public void eventInterceptor(Context ctx, String event, String dataJson) {}
+    public abstract void eventInterceptor(Context ctx, String event, String dataJson);
     /**
      * 挂载一个传输协议实例
      *
@@ -284,7 +286,7 @@ public abstract class ContainerServer {
      * @return 响应 ObjectNode，可为 null
      */
     public ObjectNode handleAgentCreate(Context context, ObjectNode data) {
-        var agent = createAgent(context, data).run();
+        var agent = agentLifecycle.createAgent(context, data).run();
         var agentId = agent.metadata.getId();
         localAgents.put(agentId, agent);
         metaData.setAgentStay(agentId, this.id);
@@ -417,12 +419,12 @@ public abstract class ContainerServer {
      * @return 分支1、2 返回包含 agents 数组的 ObjectNode；分支3 返回 null（异步回传）
      */
     public ObjectNode handleAgentList(Context context, ObjectNode data) {
-        var agents = listAgent(context, data);
+        var agents = agentLifecycle.listAgent(context, data);
 
         // region 代理调用：其他节点查询本节点Agent，直接返回结果
         if (!this.id.equals(context.serverId)) {
             var resultArray = JSONUtil.createArray();
-            agents.forEach(agent -> resultArray.add(JSONUtil.convert(agent)));
+            agents.forEach(agent -> resultArray.add(agentLifecycle.serializeAgent(agent)));
             return JSONUtil.create().set("agents", resultArray);
         }
         // endregion
@@ -435,7 +437,7 @@ public abstract class ContainerServer {
         // region 本节点调用 + 无其他节点：直接同步返回
         if (otherNodes.isEmpty()) {
             var resultArray = JSONUtil.createArray();
-            agents.forEach(agent -> resultArray.add(JSONUtil.convert(agent)));
+            agents.forEach(agent -> resultArray.add(agentLifecycle.serializeAgent(agent)));
             return JSONUtil.create().set("agents", resultArray);
         }
         // endregion
@@ -443,7 +445,7 @@ public abstract class ContainerServer {
         // region 本节点调用 + 有其他节点：广播查询，异步聚合
         var requestId = context.requestId;
         var localResults = new ArrayList<ObjectNode>();
-        agents.forEach(agent -> localResults.add((ObjectNode) JSONUtil.convert(agent)));
+        agents.forEach(agent -> localResults.add(agentLifecycle.serializeAgent(agent)));
 
         var collector = ListQueryCollector.builder()
                 .requestId(requestId)
@@ -456,6 +458,183 @@ public abstract class ContainerServer {
         otherNodes.forEach(node -> sendToOtherNode(EVENT_AGENT_LIST, JSONUtil.stringify(data), node.id));
         return null;
         // endregion
+    }
+
+    /**
+     * 处理 agent.edit 事件：编辑 Agent
+     *
+     * @param context 上下文（含 transport、client、user）
+     * @param data    请求数据（含 agentId 及要修改的字段）
+     * @return 响应 ObjectNode，可为 null
+     */
+    public ObjectNode handleAgentEdit(Context context, ObjectNode data) {
+        var agent = agentLifecycle.editAgent(context, data);
+        if (agent != null) {
+            return agentLifecycle.serializeAgent(agent);
+        }
+        return null;
+    }
+
+    /**
+     * 处理 agent.detail 事件：获取 Agent 详情。
+     * Agent 在本地则直接返回详情，不在本地则代理到目标节点。
+     *
+     * @param context 上下文（含 transport、client、user）
+     * @param data    请求数据（含 agentId）
+     * @return 响应 ObjectNode，本地命中时返回；远程代理时返回 null（异步回调）
+     */
+    public ObjectNode handleAgentDetail(Context context, ObjectNode data) {
+        var agent = agentLifecycle.detailAgent(context, data);
+        if (agent != null) {
+            return agentLifecycle.serializeAgent(agent);
+        }
+        var agentId = data.path("agentId").asText();
+        var targetNodeId = metaData.getAgentStay(agentId);
+        if (targetNodeId != null && !this.id.equals(targetNodeId)) {
+            var transportRecord = TransportClientRecord.builder()
+                    .transportId(context.transport.getTransportId())
+                    .clientHandle(context.client)
+                    .build();
+            agentClient.put(agentId, transportRecord);
+            sendToOtherNode(EVENT_AGENT_DETAIL, JSONUtil.stringify(data), targetNodeId);
+        }
+        return null;
+    }
+
+    // ======================== Team 事件处理 ========================
+
+    /**
+     * 处理 team.create 事件：创建 Team
+     *
+     * @param context 上下文（含 transport、client、user）
+     * @param data    请求数据
+     * @return 响应 ObjectNode，可为 null
+     */
+    public ObjectNode handleTeamCreate(Context context, ObjectNode data) {
+        var team = teamLifecycle.createTeam(context, data);
+        var teamId = DataUtil.getFlakeId();
+        localTeams.put(teamId, team);
+        metaData.setAgentStay(teamId, this.id);
+        log.debug("handleTeamCreate team.create: local " + JSONUtil.stringify(data));
+        return JSONUtil.create().put("teamId", teamId);
+    }
+
+    /**
+     * 按照条件查找 Team，根据请求来源分三个分支处理：
+     * 1. 代理调用分支（非本节点请求）：直接返回本节点匹配的 Team 列表
+     * 2. 单节点分支（本节点请求且无其他节点）：同步返回匹配结果
+     * 3. 多节点分支（本节点请求且有其他节点）：广播查询到其他节点，
+     * 通过 ListQueryCollector 异步聚合各节点结果后，由 transport 回传客户端
+     *
+     * @param context 上下文（含 transport、client、user、serverId）
+     * @param data    查询条件
+     * @return 分支1、2 返回包含 teams 数组的 ObjectNode；分支3 返回 null（异步回传）
+     */
+    public ObjectNode handleTeamList(Context context, ObjectNode data) {
+        var teams = teamLifecycle.listTeam(context, data);
+
+        // region 代理调用：其他节点查询本节点Team，直接返回结果
+        if (!this.id.equals(context.serverId)) {
+            var resultArray = JSONUtil.createArray();
+            teams.forEach(team -> resultArray.add(teamLifecycle.serializeTeam(team)));
+            return JSONUtil.create().set("teams", resultArray);
+        }
+        // endregion
+
+        var allNodes = metaData.getNodes();
+        var otherNodes = allNodes.stream()
+                .filter(node -> !this.id.equals(node.id))
+                .toList();
+
+        // region 本节点调用 + 无其他节点：直接同步返回
+        if (otherNodes.isEmpty()) {
+            var resultArray = JSONUtil.createArray();
+            teams.forEach(team -> resultArray.add(teamLifecycle.serializeTeam(team)));
+            return JSONUtil.create().set("teams", resultArray);
+        }
+        // endregion
+
+        // region 本节点调用 + 有其他节点：广播查询，异步聚合
+        var requestId = context.requestId;
+        var localResults = new ArrayList<ObjectNode>();
+        teams.forEach(team -> localResults.add(teamLifecycle.serializeTeam(team)));
+
+        var collector = ListQueryCollector.builder()
+                .requestId(requestId)
+                .originalContext(context)
+                .build();
+        collector.expectedCount = new AtomicInteger(otherNodes.size());
+        collector.results = Collections.synchronizedList(new ArrayList<>(localResults));
+        listQueryCollectors.put(requestId, collector);
+
+        otherNodes.forEach(node -> sendToOtherNode(EVENT_TEAM_LIST, JSONUtil.stringify(data), node.id));
+        return null;
+        // endregion
+    }
+
+    /**
+     * 处理 team.edit 事件：编辑 Team
+     *
+     * @param context 上下文（含 transport、client、user）
+     * @param data    请求数据（含 teamId 及要修改的字段）
+     * @return 响应 ObjectNode，可为 null
+     */
+    public ObjectNode handleTeamEdit(Context context, ObjectNode data) {
+        var team = teamLifecycle.editTeam(context, data);
+        if (team != null) {
+            return teamLifecycle.serializeTeam(team);
+        }
+        return null;
+    }
+
+    /**
+     * 处理 team.detail 事件：获取 Team 详情。
+     * Team 在本地则直接返回详情，不在本地则代理到目标节点。
+     *
+     * @param context 上下文（含 transport、client、user）
+     * @param data    请求数据（含 teamId）
+     * @return 响应 ObjectNode，本地命中时返回；远程代理时返回 null（异步回调）
+     */
+    public ObjectNode handleTeamDetail(Context context, ObjectNode data) {
+        var team = teamLifecycle.detailTeam(context, data);
+        if (team != null) {
+            return teamLifecycle.serializeTeam(team);
+        }
+        var teamId = data.path("teamId").asText();
+        var targetNodeId = metaData.getAgentStay(teamId);
+        if (targetNodeId != null && !this.id.equals(targetNodeId)) {
+            var transportRecord = TransportClientRecord.builder()
+                    .transportId(context.transport.getTransportId())
+                    .clientHandle(context.client)
+                    .build();
+            agentClient.put(teamId, transportRecord);
+            sendToOtherNode(EVENT_TEAM_DETAIL, JSONUtil.stringify(data), targetNodeId);
+        }
+        return null;
+    }
+
+    /**
+     * 处理 team.remove 事件：删除 Team
+     *
+     * @param context 上下文（含 transport、client、user）
+     * @param data    请求数据
+     * @return 响应 ObjectNode，可为 null
+     */
+    public ObjectNode handleTeamRemove(Context context, ObjectNode data) {
+        var team = teamLifecycle.removeTeam(context, data);
+        if (team != null) {
+            // 从缓存中移除：遍历找到并删除
+            var teamId = localTeams.entrySet().stream()
+                    .filter(entry -> entry.getValue().equals(team))
+                    .map(e -> e.getKey())
+                    .findFirst()
+                    .orElse(null);
+            if (teamId != null) {
+                localTeams.remove(teamId);
+            }
+            return JSONUtil.create().put("teamId", teamId);
+        }
+        return null;
     }
 
     /**
@@ -500,6 +679,13 @@ public abstract class ContainerServer {
                 case EVENT_AGENT_UNSUBSCRIBE -> handleAgentUnsubscribe(context, msg.body);
                 case EVENT_AGENT_TOOL_CALL -> handleAgentToolCall(context, msg.body);
                 case EVENT_AGENT_LIST -> handleAgentList(context, msg.body);
+                case EVENT_AGENT_EDIT -> handleAgentEdit(context, msg.body);
+                case EVENT_AGENT_DETAIL -> handleAgentDetail(context, msg.body);
+                case EVENT_TEAM_CREATE -> handleTeamCreate(context, msg.body);
+                case EVENT_TEAM_LIST -> handleTeamList(context, msg.body);
+                case EVENT_TEAM_REMOVE -> handleTeamRemove(context, msg.body);
+                case EVENT_TEAM_EDIT -> handleTeamEdit(context, msg.body);
+                case EVENT_TEAM_DETAIL -> handleTeamDetail(context, msg.body);
                 default -> null;
             };
 
@@ -610,6 +796,51 @@ public abstract class ContainerServer {
                                                 .set("data", mergedArray);
                                         var ctx = collector.originalContext;
                                         ctx.transport.sendToClient(ctx.client, event, JSONUtil.stringify(combined));
+                                    }
+                                }
+                            }
+                            // endregion
+                        } else if (EVENT_TEAM_LIST.equals(event)) {
+                            // region 聚合 team.list 各节点查询结果
+                            var ackData = JSONUtil.parse(bodyJson);
+                            var wrappedData = ackData.path("data");
+                            if (!wrappedData.isMissingNode() && wrappedData.has("teams")) {
+                                var ackRequestId = ackData.path("requestId").asText();
+                                var collector = listQueryCollectors.get(ackRequestId);
+                                if (collector != null) {
+                                    var teamsArray = wrappedData.path("teams");
+                                    if (teamsArray.isArray()) {
+                                        teamsArray.forEach(item ->
+                                                collector.results.add((ObjectNode) item));
+                                    }
+                                    var remaining = collector.expectedCount.decrementAndGet();
+                                    if (remaining <= 0) {
+                                        listQueryCollectors.remove(ackRequestId);
+                                        var mergedArray = JSONUtil.createArray();
+                                        collector.results.forEach(mergedArray::add);
+                                        var combined = JSONUtil.create()
+                                                .put("requestId", ackRequestId)
+                                                .set("data", mergedArray);
+                                        var ctx = collector.originalContext;
+                                        ctx.transport.sendToClient(ctx.client, event, JSONUtil.stringify(combined));
+                                    }
+                                }
+                            }
+                            // endregion
+                        } else if (EVENT_AGENT_DETAIL.equals(event) || EVENT_TEAM_DETAIL.equals(event)) {
+                            // region 处理 detail 反向回调：从结果中提取 ID 查找 agentClient 并转发
+                            var parsed = JSONUtil.parse(bodyJson);
+                            var dataNode = parsed.path("body").path("data");
+                            if (!dataNode.isMissingNode()) {
+                                var targetId = dataNode.path("metadata").path("id").asText();
+                                var record = agentClient.get(targetId);
+                                if (record != null) {
+                                    for (var transport : transports) {
+                                        if (record.getTransportId().equals(transport.getTransportId())) {
+                                            transport.sendToClient(record.getClientHandle(), event, JSONUtil.stringify(dataNode));
+                                            agentClient.remove(targetId);
+                                            break;
+                                        }
                                     }
                                 }
                             }

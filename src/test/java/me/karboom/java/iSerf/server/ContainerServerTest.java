@@ -2,6 +2,8 @@ package me.karboom.java.iSerf.server;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import me.karboom.java.iSerf.server.messageBus.Pulsar;
+import me.karboom.java.iSerf.server.metaData.RedisSingle;
 import me.karboom.java.iSerf.server.transport.ITransport;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
@@ -21,12 +23,19 @@ import static org.junit.jupiter.api.Assertions.*;
 @Slf4j
 class ContainerServerTest {
 
-    private TestContainer server;
+    private ContainerServer server;
     private StubTransport stub;
 
     @BeforeEach
     void setUp() {
-        server = new TestContainer();
+        server = new ContainerServer("127.0.0.1",
+                new Pulsar("pulsar://localhost:6650"),
+                new RedisSingle("redis://:RGluZ1NoZW5nMTIz@localhost:6379"),
+                new TestContainer(),
+                new TestTeamLifecycle()) {
+            @Override
+            public void eventInterceptor(Context ctx, String event, String dataJson) {}
+        };
         stub = new StubTransport(server);
     }
 
