@@ -9,6 +9,7 @@
   - [大模型](zh-cn/组件/大模型/说明.md)
     - [文本](zh-cn/组件/大模型/文本/说明.md)
       - [OpenAI兼容](zh-cn/组件/大模型/文本/OpenAI兼容.md)
+      - [Anthropic](zh-cn/组件/大模型/文本/Anthropic.md)
     - [向量](zh-cn/组件/大模型/向量/说明.md)
       - [千问](zh-cn/组件/大模型/向量/千问.md)
   - [服务集群](zh-cn/组件/服务集群/说明.md)
