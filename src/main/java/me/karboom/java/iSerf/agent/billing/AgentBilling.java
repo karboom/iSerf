@@ -111,4 +111,29 @@ public class AgentBilling {
         ledger.record(cost);
         log.debug("recordTraffic agent: {} traffic: {} bytes", agentId, bytes);
     }
+
+    /**
+     * 统计使用次数
+     * @return 使用次数
+     */
+    public long usageCount() {
+        var costs = ledger.query("agent", agentId);
+        var count = (long) costs.size();
+        log.debug("usageCount agent: {} count: {}", agentId, count);
+        return count;
+    }
+
+    /**
+     * 统计 token 总量
+     * @return token 总量
+     */
+    public long totalTokens() {
+        var costs = ledger.query("agent", agentId);
+        var total = costs.stream()
+                .filter(c -> c.getToken() != null)
+                .mapToLong(Cost::getToken)
+                .sum();
+        log.debug("totalTokens agent: {} total: {}", agentId, total);
+        return total;
+    }
 }

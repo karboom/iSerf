@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 public class Cost {
     public String id;
 
+    public String userId;
     public String targetType;
     public String targetId;
     public String usage;

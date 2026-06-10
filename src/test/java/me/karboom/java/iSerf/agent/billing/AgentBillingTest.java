@@ -19,7 +19,26 @@ class AgentBillingTest {
     @BeforeEach
     void setUp() {
         recordedCosts = new ArrayList<>();
-        testLedger = recordedCosts::add;
+        testLedger = new ILedger() {
+            @Override
+            public void record(Cost cost) {
+                recordedCosts.add(cost);
+            }
+
+            @Override
+            public List<Cost> query(String targetType, String targetId) {
+                return recordedCosts.stream()
+                        .filter(c -> targetType.equals(c.getTargetType()) && targetId.equals(c.getTargetId()))
+                        .toList();
+            }
+
+            @Override
+            public List<Cost> queryByUser(String userId) {
+                return recordedCosts.stream()
+                        .filter(c -> userId.equals(c.getUserId()))
+                        .toList();
+            }
+        };
         billing = new AgentBilling("test-agent-001", testLedger);
     }
 
@@ -118,6 +137,36 @@ class AgentBillingTest {
         billing.recordCpu(1000L);
 
         assertEquals(3, recordedCosts.size());
+    }
+
+    // endregion
+
+    // region ========== usageCount ==========
+
+    @Test
+    void testUsageCount() {
+        billing.recordMemory(512L);
+        billing.recordToken(100);
+        billing.recordCpu(1000L);
+
+        var count = billing.usageCount();
+
+        assertEquals(3, count);
+    }
+
+    // endregion
+
+    // region ========== totalTokens ==========
+
+    @Test
+    void testTotalTokens() {
+        billing.recordToken(100);
+        billing.recordToken(200);
+        billing.recordToken(300);
+
+        var total = billing.totalTokens();
+
+        assertEquals(600, total);
     }
 
     // endregion

@@ -53,3 +53,4 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+.aider*
