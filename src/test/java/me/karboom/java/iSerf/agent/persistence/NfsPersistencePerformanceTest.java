@@ -1,11 +1,11 @@
 package me.karboom.java.iSerf.agent.persistence;
 
-import me.karboom.java.iSerf.agent.Event;
+import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.AgentMetadata;
 import me.karboom.java.iSerf.agent.Message;
 import me.karboom.java.iSerf.util.DataUtil;
 import org.junit.jupiter.api.Test;
 
-import java.io.File;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,9 +25,11 @@ class NfsPersistencePerformanceTest {
             var persistence = new NfsPersistence(baseDir);
 
             // 使用 generateSimulatedCborFile 生成的固定 ID 加载 200 轮对话数据
-            var orgId = "test-org-simulated";
-            var userId = "test-user-simulated";
-            var agentId = "test-agent-simulated";
+            var metadata = AgentMetadata.builder()
+                    .orgId("test-org-simulated")
+                    .userId("test-user-simulated")
+                    .id("test-agent-simulated")
+                    .build();
 
             var callCount = 10000;
             var completedCount = new AtomicInteger(0);
@@ -40,8 +42,8 @@ class NfsPersistencePerformanceTest {
                 for (var i = 0; i < callCount; i++) {
                     executor.submit(() -> {
                         try {
-                            var result = persistence.load(orgId, userId, agentId);
-                            if (result.getT1().isEmpty()) {
+                            var result = persistence.load(metadata);
+                            if (result.getMemories().isEmpty()) {
                                 System.out.println("加载结果为空");
                             }
                         } finally {
@@ -66,35 +68,40 @@ class NfsPersistencePerformanceTest {
     }
 
     @Test
-    void savePerformance() {
+    void syncMemoryPerformance() {
         assertTimeoutPreemptively(Duration.ofMinutes(10), () -> {
             var baseDir = "src/test/resources/agent";
             var persistence = new NfsPersistence(baseDir);
-            var orgId = "test-org-" + UUID.randomUUID();
-            var userId = "test-user-" + UUID.randomUUID();
 
             var callCount = 1000;
             var completedCount = new AtomicInteger(0);
             var latch = new CountDownLatch(callCount);
 
-            System.out.println("开始执行 " + callCount + " 次 save 调用...");
+            System.out.println("开始执行 " + callCount + " 次 syncMemory 调用...");
             var startTime = System.currentTimeMillis();
 
             try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
                 for (var i = 0; i < callCount; i++) {
-                    var agentId = "test-agent-" + i;
                     var finalI = i;
                     executor.submit(() -> {
                         try {
-                            var memories = List.of(
-                                    Message.builder()
-                                            .id(UUID.randomUUID().toString())
-                                            .role(Message.ROLE.USER)
-                                            .type(Message.TYPE.TEXT)
-                                            .text("测试消息 " + finalI)
-                                            .build()
-                            );
-                            persistence.save(orgId, userId, agentId, List.of(), memories);
+                            var metadata = AgentMetadata.builder()
+                                    .orgId("test-org-" + UUID.randomUUID())
+                                    .userId("test-user-" + UUID.randomUUID())
+                                    .id("test-agent-" + finalI)
+                                    .build();
+
+                            var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
+                            agent.metadata = metadata;
+
+                            agent.getMemoryManager().add(Message.builder()
+                                    .id(UUID.randomUUID().toString())
+                                    .role(Message.ROLE.USER)
+                                    .type(Message.TYPE.TEXT)
+                                    .text("测试消息 " + finalI)
+                                    .build());
+
+                            persistence.syncMemory(agent);
                         } finally {
                             completedCount.incrementAndGet();
                             latch.countDown();
@@ -108,7 +115,7 @@ class NfsPersistencePerformanceTest {
             Thread.sleep(500);
             var totalTime = System.currentTimeMillis() - startTime;
 
-            System.out.println("=== NfsPersistence Save 性能测试 ===");
+            System.out.println("=== NfsPersistence SyncMemory 性能测试 ===");
             System.out.println("总耗时：" + totalTime + "ms");
             System.out.println("完成的调用数量：" + completedCount.get());
             System.out.println("平均每次调用耗时：" + (totalTime * 1.0 / callCount) + "ms");
@@ -134,7 +141,7 @@ class NfsPersistencePerformanceTest {
     }
 
     /**
-     * 生成具有 2 个 event 和 200 轮对话（约 200kb）的 CBOR 文件
+     * 生成具有 200 轮对话（约 200kb）的 CBOR 文件
      */
     @Test
     void generateSimulatedCborFile() {
@@ -142,9 +149,11 @@ class NfsPersistencePerformanceTest {
 
         var baseDir = "src/test/resources/agent";
         var persistence = new NfsPersistence(baseDir);
-        var orgId = "test-org-simulated";
-        var userId = "test-user-simulated";
-        var agentId = "test-agent-simulated";
+        var metadata = AgentMetadata.builder()
+                .orgId("test-org-simulated")
+                .userId("test-user-simulated")
+                .id("test-agent-simulated")
+                .build();
 
         var templates = new String[]{
                 "你好，我想了解一下关于%s的话题。",
@@ -159,8 +168,8 @@ class NfsPersistencePerformanceTest {
                 "能给我讲讲%s的历史吗？"
         };
 
-        var memories = new ArrayList<Message>();
-        var events = new ArrayList<Event>();
+        var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
+        agent.metadata = metadata;
 
         // 生成 200 轮对话，每轮约 500 字符（user + assistant 各 250），总计约 200kb
         var charsPerRound = 400;
@@ -176,7 +185,7 @@ class NfsPersistencePerformanceTest {
                     .type(Message.TYPE.TEXT)
                     .text(userText)
                     .build();
-            memories.add(userItem);
+            agent.getMemoryManager().add(userItem);
 
             var assistantItem = Message.builder()
                     .id(DataUtil.getFlakeId())
@@ -184,34 +193,19 @@ class NfsPersistencePerformanceTest {
                     .type(Message.TYPE.TEXT)
                     .text(assistantText)
                     .build();
-            memories.add(assistantItem);
+            agent.getMemoryManager().add(assistantItem);
         }
 
-        // 添加 2 个 event
-        var event1 = Event.builder()
-                .priority(1)
-                .type(Event.Type.ORGANIZE_MEMORY)
-                .message(memories.get(0))
-                .build();
-        events.add(event1);
+        // 使用 syncMemory 方法生成 CBOR 文件
+        persistence.syncMemory(agent);
 
-        var event2 = Event.builder()
-                .priority(2)
-                .type(Event.Type.MESSAGE)
-                .message(memories.get(1))
-                .build();
-        events.add(event2);
+        var agentDir = "%s/%s/%s/%s".formatted(baseDir, metadata.getOrgId(), metadata.getUserId(), metadata.getId());
+        var memoryFile = agentDir + "/memory.cbor";
+        var fileSize = new java.io.File(memoryFile).length();
 
-        // 使用 save 方法生成 CBOR 文件
-        persistence.save(orgId, userId, agentId, events, memories);
-
-        var outputFile = "src/test/resources/agent/%s/%s/%s.cbor".formatted(orgId, userId, agentId);
-        var fileSize = new File(outputFile).length();
-
-        System.out.println(" generateSimulatedCborFile 文件已生成：" + outputFile);
+        System.out.println(" generateSimulatedCborFile 文件已生成：" + memoryFile);
         System.out.println(" generateSimulatedCborFile 文件大小：" + fileSize + " bytes");
         System.out.println(" generateSimulatedCborFile 对话轮数：" + roundCount);
-        System.out.println(" generateSimulatedCborFile Communication 数量：" + memories.size());
-        System.out.println(" generateSimulatedCborFile Event 数量：" + events.size());
+        System.out.println(" generateSimulatedCborFile Message 数量：" + agent.getMemoryManager().getMessagesRaw().size());
     }
 }

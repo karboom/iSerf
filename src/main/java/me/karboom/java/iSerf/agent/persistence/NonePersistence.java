@@ -1,20 +1,58 @@
 package me.karboom.java.iSerf.agent.persistence;
 
-import me.karboom.java.iSerf.agent.Event;
-import me.karboom.java.iSerf.agent.Message;
-import reactor.util.function.Tuple2;
-import reactor.util.function.Tuples;
+import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.AgentMetadata;
 
 import java.util.List;
 
+/**
+ * 空持久化实现
+ * 不进行任何持久化操作，用于测试或无需持久化的场景
+ */
 public class NonePersistence implements IPersistence {
+
     @Override
-    public Tuple2<List<Message>, List<Event>> load(String orgId, String userId, String agentId) {
-        return Tuples.of(List.of(), List.of());
+    public AgentSnapshot load(AgentMetadata metadata) {
+        return AgentSnapshot.builder()
+                .memories(List.of())
+                .events(List.of())
+                .toolCalls(List.of())
+                .plans(List.of())
+                .build();
     }
 
     @Override
-    public void save(String orgId, String userId, String agentId, List<Event> events, List<Message> memories) {
+    public void remove(Agent agent) {
+        // do nothing
+    }
 
+    @Override
+    public void syncMemory(Agent agent) {
+        // do nothing
+    }
+
+    @Override
+    public void addMemory(Agent agent) {
+        // do nothing
+    }
+
+    @Override
+    public void syncEvent(Agent agent) {
+        // do nothing
+    }
+
+    @Override
+    public void syncToolCall(Agent agent) {
+        // do nothing
+    }
+
+    @Override
+    public void addToolCall(Agent agent) {
+        // do nothing
+    }
+
+    @Override
+    public void syncPlan(Agent agent) {
+        // do nothing
     }
 }

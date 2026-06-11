@@ -178,6 +178,8 @@ public class Agent {
 
                         case Event.Type.ORGANIZE_MEMORY -> {
                             memoryManager.organizeMemory();
+                            // 记忆压缩后全量刷盘
+                            persistence.syncMemory(this);
                         }
 
                         case Event.Type.RECOVERY -> {
@@ -227,6 +229,10 @@ public class Agent {
 
     public MemoryManager getMemoryManager() {
         return memoryManager;
+    }
+
+    public ToolHandler getToolHandler() {
+        return toolHandler;
     }
 
     public void eventInterceptor(Event event) {
@@ -494,8 +500,11 @@ public class Agent {
                                         .build();
                                 toolHandler.addCache(cache);
 
+                                // 持久化新增工具调用缓存
+                                persistence.addToolCall(this);
+
                                 // 触发消息
-                                sink.tryEmitNext(me.karboom.java.iSerf.agent.Message.builder().toolCalls(List.of(call)).custom(call.getResult().getDirect()).type(me.karboom.java.iSerf.agent.Message.TYPE.CUSTOM).isSegment(0).build());
+                                sink.tryEmitNext(Message.builder().toolCalls(List.of(call)).custom(call.getResult().getDirect()).type(Message.TYPE.CUSTOM).isSegment(0).build());
                             }
                         }
 
@@ -544,19 +553,32 @@ public class Agent {
                 .blockLast()
         ;
 
+        // 持久化新增记忆
+        persistence.addMemory(this);
+
         memoryManager.checkAndOrganize();
     }
 
     private void handleRecovery(Event event) {
-        var result = persistence.load(this.metadata.getOrgId(), this.metadata.getUserId(), this.metadata.getId());
+        var snapshot = persistence.load(this.metadata);
 
-        var items = result.getT1();
-        var events = result.getT2();
+        var items = snapshot.getMemories();
+        var events = snapshot.getEvents();
 
         log.debug("handleRecovery items size: %s, events size: %s".formatted(items.size(), events.size()));
 
         // 恢复记忆
         memoryManager.addAll(items);
+
+        // 恢复工具调用缓存
+        if (snapshot.getToolCalls() != null) {
+            snapshot.getToolCalls().forEach(toolHandler::addCache);
+        }
+
+        // 恢复定时任务计划
+        if (snapshot.getPlans() != null && schedule != null) {
+            snapshot.getPlans().forEach(schedule::addPlan);
+        }
 
         // 重新触发未处理的事件
         events.stream()
@@ -584,6 +606,9 @@ public class Agent {
                 .build();
 
         this.schedule.addPlan(plan);
+
+        // 持久化定时任务计划
+        persistence.syncPlan(this);
     }
 
     // endregion

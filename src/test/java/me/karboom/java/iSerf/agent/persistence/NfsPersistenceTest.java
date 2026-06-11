@@ -1,12 +1,16 @@
 package me.karboom.java.iSerf.agent.persistence;
 
+import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.AgentMetadata;
 import me.karboom.java.iSerf.agent.Event;
 import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.tool.CallCache;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.UUID;
 
@@ -18,105 +22,276 @@ import static org.junit.jupiter.api.Assertions.*;
 class NfsPersistenceTest {
 
     @Test
-    void testSaveAndLoad() {
+    void testLoadAndRemove() {
         assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
             var baseDir = "src/test/resources/agent";
             var persistence = new NfsPersistence(baseDir);
-            var orgId = "test-org-" + UUID.randomUUID();
-            var userId = "test-user-" + UUID.randomUUID();
-            var agentId = "test-agent-" + UUID.randomUUID();
+            var metadata = AgentMetadata.builder()
+                    .orgId("test-org-" + UUID.randomUUID())
+                    .userId("test-user-" + UUID.randomUUID())
+                    .id("test-agent-" + UUID.randomUUID())
+                    .build();
 
-            // 测试加载不存在的文件
-            var emptyResult = persistence.load(orgId, userId, agentId);
+            // 测试加载不存在的数据
+            var emptyResult = persistence.load(metadata);
             assertNotNull(emptyResult);
-            assertTrue(emptyResult.getT1().isEmpty(), "不存在的文件应返回空记忆列表");
-            assertTrue(emptyResult.getT2().isEmpty(), "不存在的文件应返回空事件列表");
+            assertTrue(emptyResult.getMemories().isEmpty(), "不存在的数据应返回空记忆列表");
+            assertTrue(emptyResult.getEvents().isEmpty(), "不存在的数据应返回空事件列表");
+            assertTrue(emptyResult.getToolCalls().isEmpty(), "不存在的数据应返回空工具调用列表");
+            assertTrue(emptyResult.getPlans().isEmpty(), "不存在的数据应返回空计划列表");
 
-            // 准备测试数据
-            var toolCall = Message.ToolCall.builder()
-                    .id("call-001")
-                    .name("getWeather")
-                    .arguments(new java.util.HashMap<>() {{
+            // 验证目录不存在
+            var agentDir = "%s/%s/%s/%s".formatted(baseDir, metadata.getOrgId(), metadata.getUserId(), metadata.getId());
+            assertFalse(Files.exists(Paths.get(agentDir)), "目录不应存在");
+
+            // 测试 remove 不存在的数据（不应抛出异常）
+            var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
+            agent.metadata = metadata;
+            persistence.remove(agent);
+        });
+    }
+
+    @Test
+    void testSyncMemory() {
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            var baseDir = "src/test/resources/agent";
+            var persistence = new NfsPersistence(baseDir);
+            var metadata = AgentMetadata.builder()
+                    .orgId("test-org-" + UUID.randomUUID())
+                    .userId("test-user-" + UUID.randomUUID())
+                    .id("test-agent-" + UUID.randomUUID())
+                    .build();
+
+            // 创建 Agent 并添加记忆
+            var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
+            agent.metadata = metadata;
+
+            var message1 = Message.builder()
+                    .id(UUID.randomUUID().toString())
+                    .role(Message.ROLE.USER)
+                    .type(Message.TYPE.TEXT)
+                    .text("你好")
+                    .build();
+            agent.getMemoryManager().add(message1);
+
+            // 全量同步记忆
+            persistence.syncMemory(agent);
+
+            // 加载并验证
+            var result = persistence.load(metadata);
+            assertEquals(1, result.getMemories().size(), "应加载 1 条记忆");
+            assertEquals("你好", result.getMemories().getFirst().getText());
+
+            // 添加更多记忆并再次同步
+            var message2 = Message.builder()
+                    .id(UUID.randomUUID().toString())
+                    .role(Message.ROLE.ASSISTANT)
+                    .type(Message.TYPE.TEXT)
+                    .text("你好，有什么可以帮助你的吗？")
+                    .build();
+            agent.getMemoryManager().add(message2);
+            persistence.syncMemory(agent);
+
+            result = persistence.load(metadata);
+            assertEquals(2, result.getMemories().size(), "应加载 2 条记忆");
+
+            // 清理
+            persistence.remove(agent);
+        });
+    }
+
+    @Test
+    void testAddMemory() {
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            var baseDir = "src/test/resources/agent";
+            var persistence = new NfsPersistence(baseDir);
+            var metadata = AgentMetadata.builder()
+                    .orgId("test-org-" + UUID.randomUUID())
+                    .userId("test-user-" + UUID.randomUUID())
+                    .id("test-agent-" + UUID.randomUUID())
+                    .build();
+
+            var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
+            agent.metadata = metadata;
+
+            // 添加第一条记忆并追加
+            var message1 = Message.builder()
+                    .id(UUID.randomUUID().toString())
+                    .role(Message.ROLE.USER)
+                    .type(Message.TYPE.TEXT)
+                    .text("第一条消息")
+                    .build();
+            agent.getMemoryManager().add(message1);
+            persistence.addMemory(agent);
+
+            // 添加第二条记忆并追加
+            var message2 = Message.builder()
+                    .id(UUID.randomUUID().toString())
+                    .role(Message.ROLE.ASSISTANT)
+                    .type(Message.TYPE.TEXT)
+                    .text("第二条消息")
+                    .build();
+            agent.getMemoryManager().add(message2);
+            persistence.addMemory(agent);
+
+            // 加载并验证
+            var result = persistence.load(metadata);
+            assertEquals(2, result.getMemories().size(), "应加载 2 条记忆");
+            assertEquals("第一条消息", result.getMemories().get(0).getText());
+            assertEquals("第二条消息", result.getMemories().get(1).getText());
+
+            // 清理
+            persistence.remove(agent);
+        });
+    }
+
+    @Test
+    void testSyncEvent() {
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            var baseDir = "src/test/resources/agent";
+            var persistence = new NfsPersistence(baseDir);
+            var metadata = AgentMetadata.builder()
+                    .orgId("test-org-" + UUID.randomUUID())
+                    .userId("test-user-" + UUID.randomUUID())
+                    .id("test-agent-" + UUID.randomUUID())
+                    .build();
+
+            var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
+            agent.metadata = metadata;
+
+            // 同步事件（清空）
+            persistence.syncEvent(agent);
+
+            // 加载并验证
+            var result = persistence.load(metadata);
+            assertTrue(result.getEvents().isEmpty(), "事件应为空");
+
+            // 清理
+            persistence.remove(agent);
+        });
+    }
+
+    @Test
+    void testSyncToolCall() {
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            var baseDir = "src/test/resources/agent";
+            var persistence = new NfsPersistence(baseDir);
+            var metadata = AgentMetadata.builder()
+                    .orgId("test-org-" + UUID.randomUUID())
+                    .userId("test-user-" + UUID.randomUUID())
+                    .id("test-agent-" + UUID.randomUUID())
+                    .build();
+
+            var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
+            agent.metadata = metadata;
+
+            // 添加工具调用缓存
+            var cache = CallCache.builder()
+                    .callId("call-001")
+                    .toolName("getWeather")
+                    .params(new HashMap<>() {{
                         put("location", "北京");
                     }})
                     .build();
+            agent.toolHandler.addCache(cache);
 
-            var memories = List.of(
-                    Message.builder()
-                            .id(UUID.randomUUID().toString())
-                            .role(Message.ROLE.USER)
-                            .type(Message.TYPE.TEXT)
-                            .text("你好")
-                            .build(),
-                    Message.builder()
-                            .id(UUID.randomUUID().toString())
-                            .role(Message.ROLE.ASSISTANT)
-                            .type(Message.TYPE.TEXT)
-                            .text("你好，有什么可以帮助你的吗？")
-                            .build(),
-                    Message.builder()
-                            .id(UUID.randomUUID().toString())
-                            .role(Message.ROLE.ASSISTANT)
-                            .type(Message.TYPE.TOOL_CALLS)
-                            .toolCalls(List.of(toolCall))
-                            .build()
-            );
+            // 全量同步
+            persistence.syncToolCall(agent);
 
-            var events = List.of(
-                    Event.builder()
-                            .type(Event.Type.MESSAGE)
-                            .priority(1)
-                            .build(),
-                    Event.builder()
-                            .type(Event.Type.ORGANIZE_MEMORY)
-                            .priority(2)
-                            .build()
-            );
+            // 加载并验证
+            var result = persistence.load(metadata);
+            assertEquals(1, result.getToolCalls().size(), "应加载 1 个工具调用缓存");
+            assertEquals("getWeather", result.getToolCalls().getFirst().getToolName());
 
-            // 保存数据
-            persistence.save(orgId, userId, agentId, events, memories);
-            Thread.sleep(100);
+            // 清理
+            persistence.remove(agent);
+        });
+    }
 
-            // 加载数据
-            var result = persistence.load(orgId, userId, agentId);
+    @Test
+    void testAddToolCall() {
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            var baseDir = "src/test/resources/agent";
+            var persistence = new NfsPersistence(baseDir);
+            var metadata = AgentMetadata.builder()
+                    .orgId("test-org-" + UUID.randomUUID())
+                    .userId("test-user-" + UUID.randomUUID())
+                    .id("test-agent-" + UUID.randomUUID())
+                    .build();
 
-            // 验证结果
-            assertNotNull(result);
-            assertEquals(3, result.getT1().size(), "应加载 3 条记忆");
-            assertEquals(2, result.getT2().size(), "应加载 2 个事件");
+            var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
+            agent.metadata = metadata;
 
-            // 验证记忆内容
-            var loadedMemories = result.getT1();
-            assertEquals("你好", loadedMemories.get(0).getText());
-            assertEquals("你好，有什么可以帮助你的吗？", loadedMemories.get(1).getText());
-            assertNotNull(loadedMemories.get(2).getToolCalls());
-            assertEquals("getWeather", loadedMemories.get(2).getToolCalls().get(0).getName());
+            // 添加第一个工具调用缓存
+            var cache1 = CallCache.builder()
+                    .callId("call-001")
+                    .toolName("getWeather")
+                    .params(new HashMap<>() {{
+                        put("location", "北京");
+                    }})
+                    .build();
+            agent.toolHandler.addCache(cache1);
+            persistence.addToolCall(agent);
 
-            // 验证事件类型
-            var loadedEvents = result.getT2();
-            assertEquals(Event.Type.MESSAGE, loadedEvents.get(0).getType());
-            assertEquals(Event.Type.ORGANIZE_MEMORY, loadedEvents.get(1).getType());
+            // 添加第二个工具调用缓存
+            var cache2 = CallCache.builder()
+                    .callId("call-002")
+                    .toolName("getTemperature")
+                    .params(new HashMap<>() {{
+                        put("city", "上海");
+                    }})
+                    .build();
+            agent.toolHandler.addCache(cache2);
+            persistence.addToolCall(agent);
 
-            // 验证文件已创建
-            var dir = "%s/%s/%s".formatted(baseDir, orgId, userId);
-            var fileName = "%s/%s.cbor".formatted(dir, agentId);
-            assertTrue(Files.exists(Paths.get(fileName)), "CBOR 文件应已创建");
+            // 加载并验证
+            var result = persistence.load(metadata);
+            assertEquals(2, result.getToolCalls().size(), "应加载 2 个工具调用缓存");
+            assertEquals("getWeather", result.getToolCalls().get(0).getToolName());
+            assertEquals("getTemperature", result.getToolCalls().get(1).getToolName());
 
-            // 测试覆盖写入
-            var memories2 = List.of(
-                    Message.builder()
-                            .id(UUID.randomUUID().toString())
-                            .role(Message.ROLE.USER)
-                            .type(Message.TYPE.TEXT)
-                            .text("第二条消息")
-                            .build()
-            );
-            persistence.save(orgId, userId, agentId, List.of(), memories2);
-            Thread.sleep(100);
+            // 清理
+            persistence.remove(agent);
+        });
+    }
 
-            var overwrittenResult = persistence.load(orgId, userId, agentId);
-            assertEquals(1, overwrittenResult.getT1().size(), "应只加载 1 条记忆");
-            assertEquals("第二条消息", overwrittenResult.getT1().get(0).getText(), "应为第二次保存的消息");
+    @Test
+    void testRemove() {
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            var baseDir = "src/test/resources/agent";
+            var persistence = new NfsPersistence(baseDir);
+            var metadata = AgentMetadata.builder()
+                    .orgId("test-org-" + UUID.randomUUID())
+                    .userId("test-user-" + UUID.randomUUID())
+                    .id("test-agent-" + UUID.randomUUID())
+                    .build();
+
+            var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
+            agent.metadata = metadata;
+
+            // 添加一些数据
+            agent.getMemoryManager().add(Message.builder()
+                    .id(UUID.randomUUID().toString())
+                    .role(Message.ROLE.USER)
+                    .type(Message.TYPE.TEXT)
+                    .text("测试消息")
+                    .build());
+            persistence.syncMemory(agent);
+
+            // 验证数据存在
+            var result = persistence.load(metadata);
+            assertEquals(1, result.getMemories().size(), "应有 1 条记忆");
+
+            // 删除数据
+            persistence.remove(agent);
+
+            // 验证数据已删除
+            result = persistence.load(metadata);
+            assertTrue(result.getMemories().isEmpty(), "记忆应为空");
+
+            // 验证目录已删除
+            var agentDir = "%s/%s/%s/%s".formatted(baseDir, metadata.getOrgId(), metadata.getUserId(), metadata.getId());
+            assertFalse(Files.exists(Paths.get(agentDir)), "目录应已删除");
         });
     }
 }
