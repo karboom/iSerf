@@ -1,5 +1,6 @@
 package me.karboom.java.iSerf.agent.memory;
 
+import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.Message;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
@@ -14,12 +15,14 @@ import static org.junit.jupiter.api.Assertions.*;
 class MemoryManagerTest {
 
     private MemoryManager memoryManager;
+    private Agent testAgent;
 
     @BeforeEach
     void setUp() {
         var llmTest = new OpenAITest();
         var provider = new FixedLlmProvider(llmTest.getLlm());
-        memoryManager = new MemoryManager("你是一个测试助手", provider);
+        memoryManager = new MemoryManager("你是一个测试助手");
+        testAgent = new Agent("test-agent", "test prompt", provider, List.of());
     }
 
     // region ========== 构造函数 & systemPrompt ==========
@@ -28,7 +31,7 @@ class MemoryManagerTest {
     void testConstructorAndSystemPrompt() {
         assertEquals("你是一个测试助手", memoryManager.getSystemPrompt());
 
-        var mm = new MemoryManager(null, null);
+        var mm = new MemoryManager(null);
         assertNull(mm.getSystemPrompt());
 
         mm.setSystemPrompt("新提示词");
@@ -157,8 +160,8 @@ class MemoryManagerTest {
 
     @Test
     void testOrganizeMemoryEmpty() {
-        var mm = new MemoryManager("prompt", null);
-        mm.organizeMemory();
+        var mm = new MemoryManager("prompt");
+        mm.organizeMemory(testAgent);
         assertEquals(0, mm.size());
     }
 
@@ -180,7 +183,7 @@ class MemoryManagerTest {
         }
 
         var sizeBefore = memoryManager.size();
-        memoryManager.organizeMemory();
+        memoryManager.organizeMemory(testAgent);
 
         // 压缩后应有更多的消息（原消息 + 1条摘要）
         assertEquals(sizeBefore + 1, memoryManager.size());
@@ -212,7 +215,7 @@ class MemoryManagerTest {
         memoryManager.add(msg);
 
         var sizeBefore = memoryManager.size();
-        memoryManager.checkAndOrganize();
+        memoryManager.checkAndOrganize(testAgent);
         assertEquals(sizeBefore, memoryManager.size(), "低于阈值不应触发压缩");
     }
 
@@ -227,14 +230,14 @@ class MemoryManagerTest {
         memoryManager.add(msg);
 
         var sizeBefore = memoryManager.size();
-        memoryManager.checkAndOrganize();
+        memoryManager.checkAndOrganize(testAgent);
 
         assertEquals(sizeBefore + 1, memoryManager.size());
     }
 
     @Test
     void testCheckAndOrganizeNoMessages() {
-        memoryManager.checkAndOrganize();
+        memoryManager.checkAndOrganize(testAgent);
         assertEquals(0, memoryManager.size());
     }
 
@@ -269,7 +272,7 @@ class MemoryManagerTest {
         memoryManager.add(msg);
 
         var sizeBefore = memoryManager.size();
-        memoryManager.checkAndOrganize();
+        memoryManager.checkAndOrganize(testAgent);
         assertEquals(sizeBefore, memoryManager.size(), "null usage 不应触发压缩");
     }
 

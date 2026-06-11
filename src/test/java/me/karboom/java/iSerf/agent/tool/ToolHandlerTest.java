@@ -1,5 +1,6 @@
 package me.karboom.java.iSerf.agent.tool;
 
+import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.Message;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
@@ -17,6 +18,7 @@ class ToolHandlerTest {
 
     private List<Tool<?>> tools;
     private ToolHandler toolHandler;
+    private Agent testAgent;
 
     static class ToolParam {
         public String location;
@@ -39,7 +41,8 @@ class ToolHandlerTest {
         });
         tools.add(weatherT);
 
-        toolHandler = new ToolHandler(tools, 5, llmProvider);
+        toolHandler = new ToolHandler(tools, 5);
+        testAgent = new Agent("test-agent", "test prompt", llmProvider, tools);
     }
 
     @Test
@@ -54,7 +57,7 @@ class ToolHandlerTest {
                         .build())
                 .build();
 
-        var updateMono = toolHandler.update(toolCall);
+        var updateMono = toolHandler.update(testAgent, toolCall);
         assertNotNull(updateMono, "update should return a Mono<Void>");
     }
 
@@ -68,7 +71,7 @@ class ToolHandlerTest {
                         .build())
                 .build();
 
-        var errorMono = toolHandler.update(nonExistentToolCall);
+        var errorMono = toolHandler.update(testAgent, nonExistentToolCall);
         assertNotNull(errorMono, "update should return a Mono<Void> even for errors");
         assertThrows(RuntimeException.class, () -> errorMono.block(),
                 "update should throw RuntimeException for non-existent tool");

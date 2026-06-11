@@ -104,19 +104,19 @@ public class Agent {
 
         this.llmProvider = llm;
         this.persistence = persistence != null ? persistence : new NonePersistence();
-        this.memoryManager = new MemoryManager(prompt, llm);
+        this.memoryManager = new MemoryManager(prompt);
 
         this.sink = Sinks.many().multicast().onBackpressureBuffer();
         this.broadcast = sink.asFlux();
 
         this.eventPool = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Event-", 0).factory());
         this.broadcastPool = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Broadcast-", 0).factory());
-        this.agentBilling = new AgentBilling(metadata.getId(), ledger);
+        this.agentBilling = new AgentBilling(ledger);
 
         this.workDir = workDir;
         this.schedule = schedule;
 
-        this.toolHandler = new ToolHandler(tools, 5, llm);
+        this.toolHandler = new ToolHandler(tools, 5);
     }
 
     /**
@@ -177,7 +177,7 @@ public class Agent {
                         }
 
                         case Event.Type.ORGANIZE_MEMORY -> {
-                            memoryManager.organizeMemory();
+                            memoryManager.organizeMemory(this);
                             // 记忆压缩后全量刷盘
                             persistence.syncMemory(this);
                         }
@@ -212,7 +212,7 @@ public class Agent {
                     }
                 } finally {
                     if (cpuStart > 0) {
-                        agentBilling.recordCpu(System.nanoTime() - cpuStart);
+                        agentBilling.recordCpu(this, System.nanoTime() - cpuStart);
                     }
                 }
             }
@@ -233,6 +233,10 @@ public class Agent {
 
     public ToolHandler getToolHandler() {
         return toolHandler;
+    }
+
+    public ILlmProvider getLlmProvider() {
+        return llmProvider;
     }
 
     public void eventInterceptor(Event event) {
@@ -440,7 +444,7 @@ public class Agent {
      */
     public void calcMemoryBillings() {
         var memorySize = GraphLayout.parseInstance(memoryManager.getMessagesRaw()).totalSize();
-        agentBilling.recordMemory(memorySize);
+        agentBilling.recordMemory(this, memorySize);
     }
 
     // endregion
@@ -556,7 +560,7 @@ public class Agent {
         // 持久化新增记忆
         persistence.addMemory(this);
 
-        memoryManager.checkAndOrganize();
+        memoryManager.checkAndOrganize(this);
     }
 
     private void handleRecovery(Event event) {
@@ -628,7 +632,7 @@ public class Agent {
      * @see ToolHandler#update
      */
     public Mono<Void> updateTool(Message.ToolCall toolCall) {
-        return toolHandler.update(toolCall);
+        return toolHandler.update(this, toolCall);
     }
 
     // endregion

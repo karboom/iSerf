@@ -2,8 +2,8 @@ package me.karboom.java.iSerf.agent.memory;
 
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.Message;
-import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,15 +19,12 @@ public class MemoryManager {
 
     private String systemPrompt;
     private final List<Message> messages = new ArrayList<>();
-    private final ILlmProvider llmProvider;
 
     /**
      * @param systemPrompt  系统提示词
-     * @param llmProvider   LLM 提供者，用于记忆压缩
      */
-    public MemoryManager(String systemPrompt, ILlmProvider llmProvider) {
+    public MemoryManager(String systemPrompt) {
         this.systemPrompt = systemPrompt;
-        this.llmProvider = llmProvider;
     }
 
     // region ========== 基础操作 ==========
@@ -105,8 +102,9 @@ public class MemoryManager {
      * 整理记忆
      * 1. 调用 llm.query 将当前记忆压缩为摘要
      * 2. 摘要追加到记忆，原参与压缩的记忆标记为遗忘
+     * @param agent Agent 实例，用于获取 LLM 提供者
      */
-    public void organizeMemory() {
+    public void organizeMemory(Agent agent) {
         if (messages.isEmpty()) {
             return;
         }
@@ -119,7 +117,7 @@ public class MemoryManager {
         var list = new ArrayList<>(messages);
         list.add(summaryPrompt);
 
-        var result = llmProvider.get(null, null, null).query(list, null);
+        var result = agent.getLlmProvider().get(null, null, null).query(list, null);
 
         if (result != null && result.getChoices() != null && !result.getChoices().isEmpty()) {
             var summaryText = result.getChoices().get(0).getText();
@@ -150,15 +148,16 @@ public class MemoryManager {
 
     /**
      * 检查记忆是否超出阈值（prompt token > 150k），超出则直接压缩
+     * @param agent Agent 实例，用于获取 LLM 提供者
      */
-    public void checkAndOrganize() {
+    public void checkAndOrganize(Agent agent) {
         var promptTotal = messages.stream()
                 .filter(item -> item.getUsage() != null && item.getUsage().getPromptTotal() != null)
                 .mapToInt(item -> item.getUsage().getPromptTotal())
                 .sum();
 
         if (promptTotal > 150000) {
-            organizeMemory();
+            organizeMemory(agent);
         }
     }
 

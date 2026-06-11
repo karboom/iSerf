@@ -5,7 +5,6 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.Message;
-import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
 import me.karboom.java.iSerf.llm.text.Output;
 import me.karboom.java.iSerf.util.*;
 import okhttp3.MediaType;
@@ -30,13 +29,11 @@ public class ToolHandler {
     private final List<Tool<?>> tools;
     private final List<CallCache> toolCallCaches;
     private final int maxEvoRetry;
-    private final ILlmProvider llmProvider;
 
-    public ToolHandler(List<Tool<?>> tools, int maxEvoRetry, ILlmProvider llmProvider) {
+    public ToolHandler(List<Tool<?>> tools, int maxEvoRetry) {
         this.tools = tools != null ? tools : new ArrayList<>();
         this.toolCallCaches = new ArrayList<>();
         this.maxEvoRetry = maxEvoRetry;
-        this.llmProvider = llmProvider;
     }
 
     // region ========== 访问器 ==========
@@ -273,7 +270,7 @@ public class ToolHandler {
      * 根据错误反馈更新工具内容
      * @deprecated
      */
-    public Mono<Void> update(Message.ToolCall toolCall) {
+    public Mono<Void> update(Agent agent, Message.ToolCall toolCall) {
         // 1. 根据ToolCall 匹配tool
         var matchedTool = tools.stream()
                 .filter(tool -> tool.getName().equals(toolCall.getName()))
@@ -318,7 +315,7 @@ public class ToolHandler {
                         messages.add(userMessage);
 
                         // 调用LLM生成更新后的代码
-                        return llmProvider.get(null, null, null).send(messages, null, null)
+                        return agent.getLlmProvider().get(null, null, null).send(messages, null, null)
                                 .map(chunk -> {
                                     if (chunk.getChoices() != null && !chunk.getChoices().isEmpty()) {
                                         var delta = chunk.getChoices().get(0).getText();
@@ -393,7 +390,7 @@ public class ToolHandler {
                 .build();
 
         // Todo 这里直接给format
-        return llmProvider.get(null, null, null).send(List.of(userMessage), null, null)
+        return agent.getLlmProvider().get(null, null, null).send(List.of(userMessage), null, null)
                 .reduce("", (acc, chunk) -> {
                     var text = "";
                     if (chunk.getChoices() != null && !chunk.getChoices().isEmpty()) {

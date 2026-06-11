@@ -1,5 +1,6 @@
 package me.karboom.java.iSerf.agent.billing;
 
+import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.billing.Cost;
 import me.karboom.java.iSerf.billing.ILedger;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,6 +16,7 @@ class AgentBillingTest {
     private List<Cost> recordedCosts;
     private ILedger testLedger;
     private AgentBilling billing;
+    private Agent testAgent;
 
     @BeforeEach
     void setUp() {
@@ -39,14 +41,15 @@ class AgentBillingTest {
                         .toList();
             }
         };
-        billing = new AgentBilling("test-agent-001", testLedger);
+        billing = new AgentBilling(testLedger);
+        testAgent = new Agent("test-agent-001", "test prompt", null, List.of());
     }
 
     // region ========== recordMemory ==========
 
     @Test
     void testRecordMemory() {
-        billing.recordMemory(1024L);
+        billing.recordMemory(testAgent, 1024L);
 
         assertEquals(1, recordedCosts.size());
         var cost = recordedCosts.get(0);
@@ -63,7 +66,7 @@ class AgentBillingTest {
 
     @Test
     void testRecordCpu() {
-        billing.recordCpu(500_000L);
+        billing.recordCpu(testAgent, 500_000L);
 
         assertEquals(1, recordedCosts.size());
         var cost = recordedCosts.get(0);
@@ -81,7 +84,7 @@ class AgentBillingTest {
 
     @Test
     void testRecordToken() {
-        billing.recordToken(2500);
+        billing.recordToken(testAgent, 2500);
 
         assertEquals(1, recordedCosts.size());
         var cost = recordedCosts.get(0);
@@ -98,7 +101,7 @@ class AgentBillingTest {
 
     @Test
     void testRecordDisk() {
-        billing.recordDisk(4096);
+        billing.recordDisk(testAgent, 4096);
 
         assertEquals(1, recordedCosts.size());
         var cost = recordedCosts.get(0);
@@ -115,7 +118,7 @@ class AgentBillingTest {
 
     @Test
     void testRecordTraffic() {
-        billing.recordTraffic(8192);
+        billing.recordTraffic(testAgent, 8192);
 
         assertEquals(1, recordedCosts.size());
         var cost = recordedCosts.get(0);
@@ -132,9 +135,9 @@ class AgentBillingTest {
 
     @Test
     void testMultipleRecords() {
-        billing.recordMemory(512L);
-        billing.recordToken(100);
-        billing.recordCpu(1000L);
+        billing.recordMemory(testAgent, 512L);
+        billing.recordToken(testAgent, 100);
+        billing.recordCpu(testAgent, 1000L);
 
         assertEquals(3, recordedCosts.size());
     }
@@ -145,11 +148,11 @@ class AgentBillingTest {
 
     @Test
     void testUsageCount() {
-        billing.recordMemory(512L);
-        billing.recordToken(100);
-        billing.recordCpu(1000L);
+        billing.recordMemory(testAgent, 512L);
+        billing.recordToken(testAgent, 100);
+        billing.recordCpu(testAgent, 1000L);
 
-        var count = billing.usageCount();
+        var count = billing.usageCount(testAgent);
 
         assertEquals(3, count);
     }
@@ -160,11 +163,11 @@ class AgentBillingTest {
 
     @Test
     void testTotalTokens() {
-        billing.recordToken(100);
-        billing.recordToken(200);
-        billing.recordToken(300);
+        billing.recordToken(testAgent, 100);
+        billing.recordToken(testAgent, 200);
+        billing.recordToken(testAgent, 300);
 
-        var total = billing.totalTokens();
+        var total = billing.totalTokens(testAgent);
 
         assertEquals(600, total);
     }

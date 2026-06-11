@@ -1,6 +1,7 @@
 package me.karboom.java.iSerf.agent.billing;
 
 import lombok.extern.slf4j.Slf4j;
+import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.billing.Cost;
 import me.karboom.java.iSerf.billing.ILedger;
 import me.karboom.java.iSerf.config.Config;
@@ -19,23 +20,22 @@ public class AgentBilling {
     private static final String CPU_MODEL = new SystemInfo()
             .getHardware().getProcessor().getProcessorIdentifier().getName();
 
-    private final String agentId;
     private final ILedger ledger;
 
     /**
-     * @param agentId Agent ID，用于标识计费目标
-     * @param ledger  计费账本实现，为 null 时使用 Config 默认账本
+     * @param ledger 计费账本实现，为 null 时使用 Config 默认账本
      */
-    public AgentBilling(String agentId, ILedger ledger) {
-        this.agentId = agentId;
+    public AgentBilling(ILedger ledger) {
         this.ledger = ledger != null ? ledger : Config.getInstance().getDefaultLedger();
     }
 
     /**
      * 记录内存占用
+     * @param agent Agent 实例
      * @param bytes 内存占用字节数
      */
-    public void recordMemory(long bytes) {
+    public void recordMemory(Agent agent, long bytes) {
+        var agentId = agent.metadata.getId();
         var cost = Cost.builder()
                 .id(DataUtil.getFlakeId())
                 .targetType("agent")
@@ -49,9 +49,11 @@ public class AgentBilling {
 
     /**
      * 记录 CPU 耗时
+     * @param agent Agent 实例
      * @param nanos CPU 耗时（纳秒）
      */
-    public void recordCpu(long nanos) {
+    public void recordCpu(Agent agent, long nanos) {
+        var agentId = agent.metadata.getId();
         var cost = Cost.builder()
                 .id(DataUtil.getFlakeId())
                 .targetType("agent")
@@ -66,9 +68,11 @@ public class AgentBilling {
 
     /**
      * 记录 LLM token 消耗
+     * @param agent  Agent 实例
      * @param tokens token 数量
      */
-    public void recordToken(int tokens) {
+    public void recordToken(Agent agent, int tokens) {
+        var agentId = agent.metadata.getId();
         var cost = Cost.builder()
                 .id(DataUtil.getFlakeId())
                 .targetType("agent")
@@ -82,9 +86,11 @@ public class AgentBilling {
 
     /**
      * 记录存储占用
+     * @param agent Agent 实例
      * @param bytes 存储占用字节数
      */
-    public void recordDisk(int bytes) {
+    public void recordDisk(Agent agent, int bytes) {
+        var agentId = agent.metadata.getId();
         var cost = Cost.builder()
                 .id(DataUtil.getFlakeId())
                 .targetType("agent")
@@ -98,9 +104,11 @@ public class AgentBilling {
 
     /**
      * 记录网络流量
+     * @param agent Agent 实例
      * @param bytes 网络流量字节数
      */
-    public void recordTraffic(int bytes) {
+    public void recordTraffic(Agent agent, int bytes) {
+        var agentId = agent.metadata.getId();
         var cost = Cost.builder()
                 .id(DataUtil.getFlakeId())
                 .targetType("agent")
@@ -114,9 +122,11 @@ public class AgentBilling {
 
     /**
      * 统计使用次数
+     * @param agent Agent 实例
      * @return 使用次数
      */
-    public long usageCount() {
+    public long usageCount(Agent agent) {
+        var agentId = agent.metadata.getId();
         var costs = ledger.query("agent", agentId);
         var count = (long) costs.size();
         log.debug("usageCount agent: {} count: {}", agentId, count);
@@ -125,9 +135,11 @@ public class AgentBilling {
 
     /**
      * 统计 token 总量
+     * @param agent Agent 实例
      * @return token 总量
      */
-    public long totalTokens() {
+    public long totalTokens(Agent agent) {
+        var agentId = agent.metadata.getId();
         var costs = ledger.query("agent", agentId);
         var total = costs.stream()
                 .filter(c -> c.getToken() != null)
