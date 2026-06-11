@@ -15,6 +15,7 @@ import java.util.List;
  * Nodes 存储节点信息，一个 HSet。数据结构：{[id]: "ip:port"}
  * AS:id 存储 Agent 和驻留节点关系，Value。数据结构：stayNodeId
  * AN:id 存储 Agent 和订阅节点关系，LIST。数据结构：[subscribeNodeId]
+ * TS:id 存储 Team 和驻留节点关系，Value。数据结构：stayNodeId
  */
 @Slf4j
 public class RedisSingle implements IMetaData{
@@ -24,6 +25,7 @@ public class RedisSingle implements IMetaData{
     private static final String NODES_KEY = "Nodes";
     private static final String AGENT_STAY_TEMPLATE = "AS:%s";
     private static final String AGENT_SUBSCRIBE_TEMPLATE = "AN:%s";
+    private static final String TEAM_STAY_TEMPLATE = "TS:%s";
 
     public RedisSingle(String url) {
         this.client = RedisClient.create(url);
@@ -86,5 +88,23 @@ public class RedisSingle implements IMetaData{
     public void removeAgentSubscribeNode(String agentId, String nodeId) {
         var key = AGENT_SUBSCRIBE_TEMPLATE.formatted(agentId);
         commands.lrem(key, 0, nodeId);
+    }
+
+    @Override
+    public String getTeamStay(String id) {
+        var key = TEAM_STAY_TEMPLATE.formatted(id);
+        return commands.get(key);
+    }
+
+    @Override
+    public void setTeamStay(String teamId, String nodeId) {
+        var key = TEAM_STAY_TEMPLATE.formatted(teamId);
+        commands.set(key, nodeId);
+    }
+
+    @Override
+    public void removeTeamStay(String teamId) {
+        var key = TEAM_STAY_TEMPLATE.formatted(teamId);
+        commands.del(key);
     }
 }

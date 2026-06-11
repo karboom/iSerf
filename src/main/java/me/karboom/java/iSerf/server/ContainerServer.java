@@ -15,11 +15,13 @@ import me.karboom.java.iSerf.server.metaData.Node;
 import me.karboom.java.iSerf.server.transport.ITransport;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
+import reactor.core.Disposable;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -113,6 +115,10 @@ public abstract class ContainerServer {
          * 发起查询的原始上下文（用于回传结果给客户端）
          */
         public Context originalContext;
+        /**
+         * 创建时间戳，用于超时清理
+         */
+        public long createTime;
     }
 
     @Data
@@ -138,7 +144,7 @@ public abstract class ContainerServer {
     /**
      * 挂载的所有传输协议实例
      */
-    public final List<ITransport> transports = new ArrayList<>();
+    public final List<ITransport> transports = new CopyOnWriteArrayList<>();
 
     /**
      * 本节点 ID
@@ -166,9 +172,19 @@ public abstract class ContainerServer {
     public Map<String, Agent> localAgents = new ConcurrentHashMap<>();
 
     /**
-     * client 缓存：AgentId 对应 TransportClientRecord（多协议互通）
+     * Agent client 缓存：AgentId 对应 TransportClientRecord（多协议互通，用于远程订阅场景）
      */
     public Map<String, TransportClientRecord> agentClient = new ConcurrentHashMap<>();
+
+    /**
+     * Team client 缓存：TeamId 对应 TransportClientRecord（多协议互通，用于远程 detail 场景）
+     */
+    public Map<String, TransportClientRecord> teamClient = new ConcurrentHashMap<>();
+
+    /**
+     * 本地订阅缓存：AgentId 对应 Disposable，用于取消本地订阅
+     */
+    public Map<String, Disposable> localSubscriptions = new ConcurrentHashMap<>();
 
     /**
      * Agent 列表查询聚合收集器缓存：requestId 对应 ListQueryCollector
@@ -290,7 +306,7 @@ public abstract class ContainerServer {
         var agentId = agent.metadata.getId();
         localAgents.put(agentId, agent);
         metaData.setAgentStay(agentId, this.id);
-        log.debug("handleAgentCreate agent.create: local " + JSONUtil.stringify(data));
+        log.debug("handleAgentCreate agent.create: local %s".formatted(JSONUtil.stringify(data)));
         return JSONUtil.create().put("agentId", agentId);
     }
 
@@ -329,7 +345,7 @@ public abstract class ContainerServer {
         var agent = localAgents.get(agentId);
 
         if (agent != null) {
-            agent.subscribe(item -> {
+            var disposable = agent.subscribe(item -> {
                 var payload = JSONUtil.create()
                         .put("agentId", agentId)
                         .set("message", JSONUtil.convert(item));
@@ -352,6 +368,7 @@ public abstract class ContainerServer {
                     messageBus.publish("%s-message".formatted(context.serverId), JSONUtil.stringify(array));
                 }
             });
+            localSubscriptions.put(agentId, disposable);
             return null;
         } else {
             var targetNodeId = metaData.getAgentStay(agentId);
@@ -376,7 +393,10 @@ public abstract class ContainerServer {
         var agentId = data.path("agentId").asText();
         var agent = localAgents.get(agentId);
         if (agent != null) {
-            agentClient.remove(agentId);
+            var disposable = localSubscriptions.remove(agentId);
+            if (disposable != null) {
+                disposable.dispose();
+            }
             return null;
         } else {
             var targetNodeId = metaData.getAgentStay(agentId);
@@ -396,7 +416,7 @@ public abstract class ContainerServer {
         var agentId = data.path("agentId").asText();
         var toolCallId = data.path("toolCallId").asText();
         var agent = localAgents.get(agentId);
-        log.debug("handleAgentToolCall agentId: " + agentId + ", toolCallId: " + toolCallId);
+        log.debug("handleAgentToolCall agentId: %s, toolCallId: %s".formatted(agentId, toolCallId));
         if (agent != null) {
             var result = agent.invokeToolCallCache(toolCallId);
             return (ObjectNode) JSONUtil.convert(result);
@@ -450,10 +470,12 @@ public abstract class ContainerServer {
         var collector = ListQueryCollector.builder()
                 .requestId(requestId)
                 .originalContext(context)
+                .createTime(System.currentTimeMillis())
                 .build();
         collector.expectedCount = new AtomicInteger(otherNodes.size());
         collector.results = Collections.synchronizedList(new ArrayList<>(localResults));
         listQueryCollectors.put(requestId, collector);
+        cleanupExpiredCollectors();
 
         otherNodes.forEach(node -> sendToOtherNode(EVENT_AGENT_LIST, JSONUtil.stringify(data), node.id));
         return null;
@@ -514,8 +536,8 @@ public abstract class ContainerServer {
         var team = teamLifecycle.createTeam(context, data);
         var teamId = DataUtil.getFlakeId();
         localTeams.put(teamId, team);
-        metaData.setAgentStay(teamId, this.id);
-        log.debug("handleTeamCreate team.create: local " + JSONUtil.stringify(data));
+        metaData.setTeamStay(teamId, this.id);
+        log.debug("handleTeamCreate team.create: local %s".formatted(JSONUtil.stringify(data)));
         return JSONUtil.create().put("teamId", teamId);
     }
 
@@ -562,10 +584,12 @@ public abstract class ContainerServer {
         var collector = ListQueryCollector.builder()
                 .requestId(requestId)
                 .originalContext(context)
+                .createTime(System.currentTimeMillis())
                 .build();
         collector.expectedCount = new AtomicInteger(otherNodes.size());
         collector.results = Collections.synchronizedList(new ArrayList<>(localResults));
         listQueryCollectors.put(requestId, collector);
+        cleanupExpiredCollectors();
 
         otherNodes.forEach(node -> sendToOtherNode(EVENT_TEAM_LIST, JSONUtil.stringify(data), node.id));
         return null;
@@ -601,13 +625,13 @@ public abstract class ContainerServer {
             return teamLifecycle.serializeTeam(team);
         }
         var teamId = data.path("teamId").asText();
-        var targetNodeId = metaData.getAgentStay(teamId);
+        var targetNodeId = metaData.getTeamStay(teamId);
         if (targetNodeId != null && !this.id.equals(targetNodeId)) {
             var transportRecord = TransportClientRecord.builder()
                     .transportId(context.transport.getTransportId())
                     .clientHandle(context.client)
                     .build();
-            agentClient.put(teamId, transportRecord);
+            teamClient.put(teamId, transportRecord);
             sendToOtherNode(EVENT_TEAM_DETAIL, JSONUtil.stringify(data), targetNodeId);
         }
         return null;
@@ -631,6 +655,7 @@ public abstract class ContainerServer {
                     .orElse(null);
             if (teamId != null) {
                 localTeams.remove(teamId);
+                metaData.removeTeamStay(teamId);
             }
             return JSONUtil.create().put("teamId", teamId);
         }
@@ -654,12 +679,8 @@ public abstract class ContainerServer {
     public String handleUserEvent(Context context, String event, String dataJson) {
         try {
             if (isShuttingDown) {
-                var shutdownError = new ContainerServer.Message<ContainerServer.OutMessageBody>() {};
-                shutdownError.setMsgId("");
-                var shutdownBody = new ContainerServer.OutMessageBody() {};
-                shutdownBody.setError("server is shutting down");
-                shutdownError.setBody(shutdownBody);
-                context.transport.sendToClient(context.client, event, JSONUtil.stringify(shutdownError));
+                var shutdownErrorJson = buildErrorResponse("", "server is shutting down");
+                context.transport.sendToClient(context.client, event, shutdownErrorJson);
                 context.transport.closeClient(context.client);
                 throw new RuntimeException("server is shutting down");
             }
@@ -669,6 +690,10 @@ public abstract class ContainerServer {
             }
 
             context.setRequestId(msg.msgId);
+
+            if (context.transport != null) {
+                context.user = context.transport.getUser(context.client);
+            }
 
             this.eventInterceptor(context, event, dataJson);
 
@@ -690,20 +715,10 @@ public abstract class ContainerServer {
             };
 
             if (result != null && this.id.equals(context.serverId)) {
-                var outMsg = new Message<OutMessageBody>() {};
-                outMsg.setMsgId(msg.msgId);
-                var successBody = new OutMessageBody() {};
-                successBody.setData(result);
-                outMsg.setBody(successBody);
-                context.transport.sendToClient(context.client, event, JSONUtil.stringify(outMsg));
+                context.transport.sendToClient(context.client, event, buildSuccessResponse(msg.msgId, result));
             }
             if (result != null) {
-                var returnMsg = new Message<OutMessageBody>() {};
-                returnMsg.setMsgId(msg.msgId);
-                var returnBody = new OutMessageBody() {};
-                returnBody.setData(result);
-                returnMsg.setBody(returnBody);
-                return JSONUtil.stringify(returnMsg);
+                return buildSuccessResponse(msg.msgId, result);
             }
             return null;
         } catch (Exception e) {
@@ -711,22 +726,62 @@ public abstract class ContainerServer {
             if (e instanceof Error) {
                 errMsg = e.getMessage();
             }
-            var outMsg = new Message<OutMessageBody>() {};
-            outMsg.setMsgId("");
-            var errBody = new OutMessageBody() {};
-            errBody.setError(errMsg);
-            outMsg.setBody(errBody);
+            var errResponse = buildErrorResponse("", errMsg);
 
             if (this.id.equals(context.serverId)) {
-                context.transport.sendToClient(context.client, event, JSONUtil.stringify(outMsg));
+                context.transport.sendToClient(context.client, event, errResponse);
             }
 
-            return JSONUtil.stringify(outMsg);
+            return errResponse;
         }
 
     }
 
     // ======================== 集群通信 ========================
+
+    /**
+     * 概率清理过期的 listQueryCollectors（10% 概率触发，超时60秒移除）
+     */
+    private void cleanupExpiredCollectors() {
+        if (Math.random() < 0.1) {
+            var now = System.currentTimeMillis();
+            listQueryCollectors.entrySet().removeIf(entry ->
+                    now - entry.getValue().getCreateTime() > 60000
+            );
+        }
+    }
+
+    /**
+     * 构建成功响应 JSON 字符串
+     *
+     * @param msgId 消息ID
+     * @param data  响应数据
+     * @return 响应 JSON 字符串（{msgId, body: {data}} 格式）
+     */
+    private String buildSuccessResponse(String msgId, ObjectNode data) {
+        var outMsg = new Message<OutMessageBody>() {};
+        outMsg.setMsgId(msgId);
+        var body = new OutMessageBody() {};
+        body.setData(data);
+        outMsg.setBody(body);
+        return JSONUtil.stringify(outMsg);
+    }
+
+    /**
+     * 构建错误响应 JSON 字符串
+     *
+     * @param msgId 消息ID
+     * @param error 错误信息
+     * @return 响应 JSON 字符串（{msgId, body: {error}} 格式）
+     */
+    private String buildErrorResponse(String msgId, String error) {
+        var outMsg = new Message<OutMessageBody>() {};
+        outMsg.setMsgId(msgId);
+        var body = new OutMessageBody() {};
+        body.setError(error);
+        outMsg.setBody(body);
+        return JSONUtil.stringify(outMsg);
+    }
 
     /**
      * 通过MessageBus发布消息给其他节点
@@ -749,7 +804,7 @@ public abstract class ContainerServer {
     public void listenMessage() {
         messageBus.subscribe("%s-message".formatted(this.id), (message) -> {
             try {
-                log.debug("listenMessage message: " + message);
+                log.debug("listenMessage message: %s".formatted(message));
                 var parts = JSONUtil.parseArray(message);
 
                 var sourceNode = parts.get(0).asText();
@@ -763,7 +818,7 @@ public abstract class ContainerServer {
 
                         var proxyCtx = Context.builder().client(sourceNode).serverId(sourceNode).build();
                         var result = handleUserEvent(proxyCtx, event, bodyJson);
-                        log.debug("listenMessage proxy event: " + event + ", result: " + result);
+                        log.debug("listenMessage proxy event: %s, result: %s".formatted(event, result));
 
                         if (result != null) {
                             var array = JSONUtil.createArray();
@@ -827,8 +882,8 @@ public abstract class ContainerServer {
                                 }
                             }
                             // endregion
-                        } else if (EVENT_AGENT_DETAIL.equals(event) || EVENT_TEAM_DETAIL.equals(event)) {
-                            // region 处理 detail 反向回调：从结果中提取 ID 查找 agentClient 并转发
+                        } else if (EVENT_AGENT_DETAIL.equals(event)) {
+                            // region 处理 agent.detail 反向回调：从 agentClient 查找传输通道并转发
                             var parsed = JSONUtil.parse(bodyJson);
                             var dataNode = parsed.path("body").path("data");
                             if (!dataNode.isMissingNode()) {
@@ -839,6 +894,24 @@ public abstract class ContainerServer {
                                         if (record.getTransportId().equals(transport.getTransportId())) {
                                             transport.sendToClient(record.getClientHandle(), event, JSONUtil.stringify(dataNode));
                                             agentClient.remove(targetId);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            // endregion
+                        } else if (EVENT_TEAM_DETAIL.equals(event)) {
+                            // region 处理 team.detail 反向回调：从 teamClient 查找传输通道并转发
+                            var parsed = JSONUtil.parse(bodyJson);
+                            var dataNode = parsed.path("body").path("data");
+                            if (!dataNode.isMissingNode()) {
+                                var targetId = dataNode.path("metadata").path("id").asText();
+                                var record = teamClient.get(targetId);
+                                if (record != null) {
+                                    for (var transport : transports) {
+                                        if (record.getTransportId().equals(transport.getTransportId())) {
+                                            transport.sendToClient(record.getClientHandle(), event, JSONUtil.stringify(dataNode));
+                                            teamClient.remove(targetId);
                                             break;
                                         }
                                     }
