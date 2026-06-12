@@ -225,5 +225,10 @@ class WebsocketTransportTest {
         @Override
         public void authorizeConnection(Object clientHandle) {
         }
+
+        @Override
+        public String getUserId(Object clientHandle) {
+            return null;
+        }
     }
 }

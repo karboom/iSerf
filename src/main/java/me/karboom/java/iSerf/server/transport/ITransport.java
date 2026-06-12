@@ -39,6 +39,13 @@ public interface ITransport {
     Object getUser(Object clientHandle);
 
     /**
+     * 根据客户端句柄获取用户唯一标识
+     * @param clientHandle 客户端句柄
+     * @return 用户唯一标识字符串
+     */
+    String getUserId(Object clientHandle);
+
+    /**
      * 断开连接
      */
     void closeClient(Object clientHandle);

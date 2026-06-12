@@ -126,6 +126,9 @@ public abstract class DingtalkTransport implements ITransport {
     public abstract void authorizeConnection(Object clientHandle);
 
     @Override
+    public abstract String getUserId(Object clientHandle);
+
+    @Override
     public void sendToClient(Object clientHandle, String event, String bodyJson) {
         switch (clientHandle) {
             case String senderStaffId -> {

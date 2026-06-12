@@ -707,6 +707,7 @@ public abstract class ContainerServer {
 
             if (context.transport != null) {
                 context.userData = context.transport.getUser(context.client);
+                context.userId = context.transport.getUserId(context.client);
             }
 
             this.eventInterceptor(context, event, dataJson);

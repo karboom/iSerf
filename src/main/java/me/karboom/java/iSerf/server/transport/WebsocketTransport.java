@@ -89,6 +89,14 @@ public abstract class WebsocketTransport implements ITransport {
     public abstract void authorizeConnection(Object clientHandle);
 
     /**
+     * 根据客户端句柄获取用户唯一标识
+     * @param clientHandle 客户端句柄
+     * @return 用户唯一标识字符串
+     */
+    @Override
+    public abstract String getUserId(Object clientHandle);
+
+    /**
      * 启动 Socket.IO 服务器
      */
     @Override

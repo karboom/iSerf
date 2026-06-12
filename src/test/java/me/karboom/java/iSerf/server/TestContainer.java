@@ -7,6 +7,7 @@ import me.karboom.java.iSerf.llm.text.OpenAI;
 import me.karboom.java.iSerf.server.ContainerServer;
 import me.karboom.java.iSerf.server.messageBus.Pulsar;
 import me.karboom.java.iSerf.server.metaData.RedisSingle;
+import me.karboom.java.iSerf.util.JSONUtil;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.util.ArrayList;
@@ -46,5 +47,10 @@ public class TestContainer extends AgentLifecycle {
     @Override
     public Agent detailAgent(ContainerServer.Context ctx, ObjectNode params) {
         return null;
+    }
+
+    @Override
+    public ObjectNode serializeAgent(Agent agent) {
+        return JSONUtil.convert(agent);
     }
 }

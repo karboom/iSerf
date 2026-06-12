@@ -1,7 +1,6 @@
 package me.karboom.java.iSerf.server;
 
 import me.karboom.java.iSerf.team.Team;
-import me.karboom.java.iSerf.util.JSONUtil;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.util.List;
@@ -65,9 +64,7 @@ public abstract class TeamLifecycle {
      * @param team Team 实例
      * @return Team 对应的 ObjectNode
      */
-    public ObjectNode serializeTeam(Team team) {
-        return JSONUtil.convert(team);
-    }
+    public abstract ObjectNode serializeTeam(Team team);
 
     // endregion
 }

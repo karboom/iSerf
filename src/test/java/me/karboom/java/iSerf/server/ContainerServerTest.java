@@ -257,6 +257,15 @@ class ContainerServerTest {
 
         }
 
+        @Override
+        public void authorizeConnection(Object clientHandle) {
+        }
+
+        @Override
+        public String getUserId(Object clientHandle) {
+            return null;
+        }
+
         /**
          * 模拟客户端事件，构造 Context 并委托给 ContainerServer 处理
          *

@@ -1,7 +1,6 @@
 package me.karboom.java.iSerf.server;
 
 import me.karboom.java.iSerf.agent.Agent;
-import me.karboom.java.iSerf.util.JSONUtil;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.util.List;
@@ -65,9 +64,7 @@ public abstract class AgentLifecycle {
      * @param agent Agent 实例
      * @return Agent 对应的 ObjectNode
      */
-    public ObjectNode serializeAgent(Agent agent) {
-        return JSONUtil.convert(agent);
-    }
+    public abstract ObjectNode serializeAgent(Agent agent);
 
     // endregion
 }

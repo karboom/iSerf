@@ -1,6 +1,7 @@
 package me.karboom.java.iSerf.server;
 
 import me.karboom.java.iSerf.team.Team;
+import me.karboom.java.iSerf.util.JSONUtil;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.util.ArrayList;
@@ -34,5 +35,10 @@ public class TestTeamLifecycle extends TeamLifecycle {
     @Override
     public Team detailTeam(ContainerServer.Context ctx, ObjectNode params) {
         return null;
+    }
+
+    @Override
+    public ObjectNode serializeTeam(Team team) {
+        return JSONUtil.convert(team);
     }
 }
