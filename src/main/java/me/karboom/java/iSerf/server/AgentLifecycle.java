@@ -5,27 +5,12 @@ import me.karboom.java.iSerf.util.JSONUtil;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * Agent 生命周期管理，定义 Agent 的创建、查询、删除操作。
- * 由 ContainerServer 注入 localAgents 后，实现类通过 protected 字段访问本地 Agent 缓存。
+ * 通过 ctx.container 访问 ContainerServer 实例及其缓存（如 localAgents）。
  */
 public abstract class AgentLifecycle {
-
-    /**
-     * 本地 Agent 缓存，由 ContainerServer 在 init 中注入
-     */
-    protected Map<String, Agent> localAgents;
-
-    /**
-     * 由 ContainerServer 调用，注入本地 Agent 缓存引用
-     *
-     * @param localAgents 本地 Agent 缓存
-     */
-    void init(Map<String, Agent> localAgents) {
-        this.localAgents = localAgents;
-    }
 
     /**
      * Agent 工厂方法

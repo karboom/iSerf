@@ -26,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * - 服务端向 iserf/response/{clientId} 发布消息作为下行通道
  */
 @Slf4j
-public class MqttTransport implements ITransport {
+public abstract class MqttTransport implements ITransport {
 
     /**
      * 请求 topic 前缀
@@ -123,6 +123,9 @@ public class MqttTransport implements ITransport {
             default -> log.warn("closeClient unsupported clientHandle type: %s".formatted(clientHandle.getClass().getName()));
         }
     }
+
+    @Override
+    public abstract void authorizeConnection(Object clientHandle);
 
     @Override
     public void sendToClient(Object clientHandle, String event, String bodyJson) {
@@ -233,6 +236,8 @@ public class MqttTransport implements ITransport {
                 .transport(this)
                 .client(clientId)
                 .serverId(container.id)
+                .server(container)
+                .isInternal(false)
                 .build();
 
         try {

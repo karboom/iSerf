@@ -134,11 +134,27 @@ public abstract class ContainerServer {
 
         public Object client;
 
-        public Object user;
+        public Object userData;
+        /**
+         * 用户标识
+         */
+        public String userId;
+        /**
+         * 请求原始数据
+         */
+        public ObjectNode requestData;
         /**
          * 消息来源服务器标识
          */
         public String serverId;
+        /**
+         * 所属容器实例，供生命周期方法访问 messageBus、metaData 等
+         */
+        public ContainerServer server;
+        /**
+         * 是否集群内部通信（来自其他节点的代理请求）
+         */
+        public Boolean isInternal;
     }
 
     /**
@@ -227,9 +243,7 @@ public abstract class ContainerServer {
         this.messageBus = messageBus;
         this.metaData = metaData;
         this.agentLifecycle = agentLifecycle;
-        this.agentLifecycle.init(this.localAgents);
         this.teamLifecycle = teamLifecycle;
-        this.teamLifecycle.init(this.localTeams);
     }
 
     public abstract void eventInterceptor(Context ctx, String event, String dataJson);
@@ -356,7 +370,7 @@ public abstract class ContainerServer {
                 messageMsg.setBody(subscribeBody);
                 var messageJson = JSONUtil.stringify(messageMsg);
 
-                if (this.id.equals(context.serverId)) {
+                if (!context.isInternal) {
                     if (context.transport != null) {
                         context.transport.sendToClient(context.client, EVENT_AGENT_MESSAGE, messageJson);
                     } else {
@@ -434,7 +448,7 @@ public abstract class ContainerServer {
      * 3. 多节点分支（本节点请求且有其他节点）：广播查询到其他节点，
      * 通过 ListQueryCollector 异步聚合各节点结果后，由 transport 回传客户端
      *
-     * @param context 上下文（含 transport、client、user、serverId）
+     * @param context 上下文（含 transport、client、user、container）
      * @param data    查询条件
      * @return 分支1、2 返回包含 agents 数组的 ObjectNode；分支3 返回 null（异步回传）
      */
@@ -442,7 +456,7 @@ public abstract class ContainerServer {
         var agents = agentLifecycle.listAgent(context, data);
 
         // region 代理调用：其他节点查询本节点Agent，直接返回结果
-        if (!this.id.equals(context.serverId)) {
+        if (context.isInternal) {
             var resultArray = JSONUtil.createArray();
             agents.forEach(agent -> resultArray.add(agentLifecycle.serializeAgent(agent)));
             return JSONUtil.create().set("agents", resultArray);
@@ -548,7 +562,7 @@ public abstract class ContainerServer {
      * 3. 多节点分支（本节点请求且有其他节点）：广播查询到其他节点，
      * 通过 ListQueryCollector 异步聚合各节点结果后，由 transport 回传客户端
      *
-     * @param context 上下文（含 transport、client、user、serverId）
+     * @param context 上下文（含 transport、client、user、container）
      * @param data    查询条件
      * @return 分支1、2 返回包含 teams 数组的 ObjectNode；分支3 返回 null（异步回传）
      */
@@ -556,7 +570,7 @@ public abstract class ContainerServer {
         var teams = teamLifecycle.listTeam(context, data);
 
         // region 代理调用：其他节点查询本节点Team，直接返回结果
-        if (!this.id.equals(context.serverId)) {
+        if (context.isInternal) {
             var resultArray = JSONUtil.createArray();
             teams.forEach(team -> resultArray.add(teamLifecycle.serializeTeam(team)));
             return JSONUtil.create().set("teams", resultArray);
@@ -671,7 +685,7 @@ public abstract class ContainerServer {
      * <p>
      * 出入事件均采用 {msgId, body} 结构，输出的 body 为 {data, error}。
      *
-     * @param context  上下文（含 transport、client、user、serverId）
+     * @param context  上下文（含 transport、client、user、container）
      * @param event    事件名
      * @param dataJson 请求数据 JSON 字符串
      * @return 响应 JSON 字符串（{msgId, body} 格式），无返回值时为 null
@@ -692,7 +706,7 @@ public abstract class ContainerServer {
             context.setRequestId(msg.msgId);
 
             if (context.transport != null) {
-                context.user = context.transport.getUser(context.client);
+                context.userData = context.transport.getUser(context.client);
             }
 
             this.eventInterceptor(context, event, dataJson);
@@ -714,7 +728,7 @@ public abstract class ContainerServer {
                 default -> null;
             };
 
-            if (result != null && this.id.equals(context.serverId)) {
+            if (result != null && !context.isInternal) {
                 context.transport.sendToClient(context.client, event, buildSuccessResponse(msg.msgId, result));
             }
             if (result != null) {
@@ -728,7 +742,7 @@ public abstract class ContainerServer {
             }
             var errResponse = buildErrorResponse("", errMsg);
 
-            if (this.id.equals(context.serverId)) {
+            if (!context.isInternal) {
                 context.transport.sendToClient(context.client, event, errResponse);
             }
 
@@ -816,7 +830,7 @@ public abstract class ContainerServer {
                 switch (type) {
                     case "proxy" -> {
 
-                        var proxyCtx = Context.builder().client(sourceNode).serverId(sourceNode).build();
+                        var proxyCtx = Context.builder().client(sourceNode).serverId(sourceNode).isInternal(true).build();
                         var result = handleUserEvent(proxyCtx, event, bodyJson);
                         log.debug("listenMessage proxy event: %s, result: %s".formatted(event, result));
 

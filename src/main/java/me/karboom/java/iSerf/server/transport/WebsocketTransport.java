@@ -6,8 +6,6 @@ import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.server.ContainerServer;
 import me.karboom.java.iSerf.util.DataUtil;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Set;
 
 /**
@@ -36,16 +34,6 @@ public abstract class WebsocketTransport implements ITransport {
      * 传输协议唯一标识
      */
     protected String transportId;
-
-    /**
-     * 用户授权监听链
-     */
-    public List<AuthorizationListener> userAuthListener = new ArrayList<>();
-
-    /**
-     * 系统授权监听链
-     */
-    public List<AuthorizationListener> sysAuthListener = new ArrayList<>();
 
     /**
      * 构造 Websocket 传输适配
@@ -90,6 +78,17 @@ public abstract class WebsocketTransport implements ITransport {
     }
 
     /**
+     * 连接鉴权回调，子类覆写以提供自定义鉴权逻辑。
+     * 通过 client.getHandshakeData() 获取请求头、URL 参数等握手信息。
+     * 鉴权通过后可在此方法内将用户信息绑定到 client，供后续 getUser() 使用。
+     * 鉴权失败时由子类自行调用 closeClient() 断开连接。
+     *
+     * @param clientHandle 已连接的客户端句柄
+     */
+    @Override
+    public abstract void authorizeConnection(Object clientHandle);
+
+    /**
      * 启动 Socket.IO 服务器
      */
     @Override
@@ -99,25 +98,6 @@ public abstract class WebsocketTransport implements ITransport {
         config.setSocketConfig(new SocketConfig() {{
             setReuseAddress(true);
         }});
-
-        // 添加连接授权监听，依次调用 sysAuthListener 和 userAuthListener，失败则不继续
-        config.setAuthorizationListener(data -> {
-            for (var listener : sysAuthListener) {
-                var result = listener.getAuthorizationResult(data);
-                if (result != AuthorizationResult.SUCCESSFUL_AUTHORIZATION) {
-                    return AuthorizationResult.FAILED_AUTHORIZATION;
-                }
-            }
-
-            for (var listener : userAuthListener) {
-                var result = listener.getAuthorizationResult(data);
-                if (result != AuthorizationResult.SUCCESSFUL_AUTHORIZATION) {
-                    return AuthorizationResult.FAILED_AUTHORIZATION;
-                }
-            }
-
-            return AuthorizationResult.SUCCESSFUL_AUTHORIZATION;
-        });
 
         server = new SocketIOServer(config);
 
@@ -164,6 +144,9 @@ public abstract class WebsocketTransport implements ITransport {
                 ContainerServer.EVENT_TEAM_DETAIL
         );
 
+        // 连接鉴权，子类自行处理通过/断开
+        userNS.addConnectListener(client -> authorizeConnection(client));
+
         // 拦截未知事件，立即返回错误
         userNS.addEventInterceptor((client, eventName, ackRequest, data) -> {
             if (!knownEvents.contains(eventName)) {
@@ -187,6 +170,8 @@ public abstract class WebsocketTransport implements ITransport {
                     .transport(this)
                     .client(client)
                     .serverId(container.id)
+                    .server(container)
+                    .isInternal(false)
                     .build();
             container.handleUserEvent(ctx, event, dataJson);
         });

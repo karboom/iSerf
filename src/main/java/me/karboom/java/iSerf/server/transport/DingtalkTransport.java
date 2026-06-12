@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit;
  * - 下行：ContainerServer 调用 sendToClient -> 通过 WebSocket 回复钉钉消息
  */
 @Slf4j
-public class DingtalkTransport implements ITransport {
+public abstract class DingtalkTransport implements ITransport {
 
     /**
      * 钉钉 Stream 模式 WebSocket 地址
@@ -121,6 +121,9 @@ public class DingtalkTransport implements ITransport {
             default -> log.warn("closeClient unsupported clientHandle type: %s".formatted(clientHandle.getClass().getName()));
         }
     }
+
+    @Override
+    public abstract void authorizeConnection(Object clientHandle);
 
     @Override
     public void sendToClient(Object clientHandle, String event, String bodyJson) {
@@ -323,6 +326,8 @@ public class DingtalkTransport implements ITransport {
                     .transport(this)
                     .client(senderStaffId)
                     .serverId(container.id)
+                    .server(container)
+                    .isInternal(false)
                     .build();
 
             var eventData = JSONUtil.stringify(JSONUtil.create()

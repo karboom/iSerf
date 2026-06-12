@@ -42,4 +42,13 @@ public interface ITransport {
      * 断开连接
      */
     void closeClient(Object clientHandle);
+
+    /**
+     * 连接鉴权，子类覆写以提供自定义鉴权逻辑。
+     * 鉴权通过后可在此方法内将用户信息绑定到 client，供后续 getUser() 使用。
+     * 鉴权失败时由子类自行调用 closeClient() 断开连接。
+     *
+     * @param clientHandle 已连接的客户端句柄
+     */
+    void authorizeConnection(Object clientHandle);
 }

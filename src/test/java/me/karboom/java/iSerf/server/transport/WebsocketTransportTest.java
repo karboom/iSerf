@@ -221,5 +221,9 @@ class WebsocketTransportTest {
         public Object getUser(Object clientHandle) {
             return null;
         }
+
+        @Override
+        public void authorizeConnection(Object clientHandle) {
+        }
     }
 }
