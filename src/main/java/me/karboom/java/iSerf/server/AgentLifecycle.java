@@ -1,6 +1,7 @@
 package me.karboom.java.iSerf.server;
 
 import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.persistence.AgentSnapshot;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.util.List;
@@ -65,6 +66,14 @@ public abstract class AgentLifecycle {
      * @return Agent 对应的 ObjectNode
      */
     public abstract ObjectNode serializeAgent(Agent agent);
+
+    /**
+     * 将 AgentSnapshot 序列化为 ObjectNode
+     *
+     * @param snapshot Agent 快照
+     * @return AgentSnapshot 对应的 ObjectNode
+     */
+    public abstract ObjectNode serializeAgentSnapshot(AgentSnapshot snapshot);
 
     // endregion
 }

@@ -55,4 +55,9 @@ public class NonePersistence implements IPersistence {
     public void syncPlan(Agent agent) {
         // do nothing
     }
+
+    @Override
+    public List<AgentSnapshot> search(String keyword) {
+        return List.of();
+    }
 }

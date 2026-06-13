@@ -2,6 +2,7 @@ package me.karboom.java.iSerf.server;
 
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
+import me.karboom.java.iSerf.agent.persistence.AgentSnapshot;
 import me.karboom.java.iSerf.llm.text.OpenAI;
 import me.karboom.java.iSerf.llm.text.OpenAI;
 import me.karboom.java.iSerf.server.ContainerServer;
@@ -52,5 +53,10 @@ public class TestContainer extends AgentLifecycle {
     @Override
     public ObjectNode serializeAgent(Agent agent) {
         return JSONUtil.convert(agent);
+    }
+
+    @Override
+    public ObjectNode serializeAgentSnapshot(AgentSnapshot snapshot) {
+        return JSONUtil.convert(snapshot);
     }
 }

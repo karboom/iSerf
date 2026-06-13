@@ -8,6 +8,8 @@ import lombok.extern.jackson.Jacksonized;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.Event;
+import me.karboom.java.iSerf.agent.persistence.IPersistence;
+import me.karboom.java.iSerf.config.Config;
 import me.karboom.java.iSerf.team.Team;
 import me.karboom.java.iSerf.server.messageBus.IMessageBus;
 import me.karboom.java.iSerf.server.metaData.IMetaData;
@@ -22,7 +24,7 @@ import tools.jackson.databind.node.ObjectNode;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.atomic.AtomicInteger;
+
 
 /**
  * 通用传输容器，承载协议无关的元数据管理和消息总线逻辑。
@@ -91,35 +93,7 @@ public abstract class ContainerServer {
         public Object clientHandle;
     }
 
-    /**
-     * Agent 列表查询的聚合收集器，用于异步收集多节点查询结果
-     */
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class ListQueryCollector {
-        /**
-         * 请求唯一标识
-         */
-        public String requestId;
-        /**
-         * 期望响应的节点数
-         */
-        public AtomicInteger expectedCount;
-        /**
-         * 已收集的结果列表
-         */
-        public List<ObjectNode> results;
-        /**
-         * 发起查询的原始上下文（用于回传结果给客户端）
-         */
-        public Context originalContext;
-        /**
-         * 创建时间戳，用于超时清理
-         */
-        public long createTime;
-    }
+
 
     @Data
     @Builder
@@ -202,10 +176,7 @@ public abstract class ContainerServer {
      */
     public Map<String, Disposable> localSubscriptions = new ConcurrentHashMap<>();
 
-    /**
-     * Agent 列表查询聚合收集器缓存：requestId 对应 ListQueryCollector
-     */
-    public Map<String, ListQueryCollector> listQueryCollectors = new ConcurrentHashMap<>();
+
 
     /**
      * 本地 Team 缓存
@@ -226,6 +197,11 @@ public abstract class ContainerServer {
      * 关闭状态标志
      */
     public volatile boolean isShuttingDown = false;
+
+    /**
+     * 持久化实现，用于全局搜索 Agent
+     */
+    public IPersistence persistence = Config.getInstance().getDefaultPersistence();
 
     /**
      * 构造通用传输容器
@@ -442,58 +418,20 @@ public abstract class ContainerServer {
     }
 
     /**
-     * 按照条件查找智能体，根据请求来源分三个分支处理：
-     * 1. 代理调用分支（非本节点请求）：直接返回本节点匹配的 Agent 列表
-     * 2. 单节点分支（本节点请求且无其他节点）：同步返回匹配结果
-     * 3. 多节点分支（本节点请求且有其他节点）：广播查询到其他节点，
-     * 通过 ListQueryCollector 异步聚合各节点结果后，由 transport 回传客户端
+     * 全局搜索 Agent（包含已停止的 Agent）
+     * 底层存储共享，单节点即可返回全局结果
      *
-     * @param context 上下文（含 transport、client、user、container）
-     * @param data    查询条件
-     * @return 分支1、2 返回包含 agents 数组的 ObjectNode；分支3 返回 null（异步回传）
+     * @param context 上下文（含 transport、client、user）
+     * @param data    查询条件（含 keyword）
+     * @return 包含 agents 数组的 ObjectNode
      */
     public ObjectNode handleAgentList(Context context, ObjectNode data) {
-        var agents = agentLifecycle.listAgent(context, data);
+        var keyword = data.path("keyword").asText();
+        var snapshots = persistence.search(keyword);
 
-        // region 代理调用：其他节点查询本节点Agent，直接返回结果
-        if (context.isInternal) {
-            var resultArray = JSONUtil.createArray();
-            agents.forEach(agent -> resultArray.add(agentLifecycle.serializeAgent(agent)));
-            return JSONUtil.create().set("agents", resultArray);
-        }
-        // endregion
-
-        var allNodes = metaData.getNodes();
-        var otherNodes = allNodes.stream()
-                .filter(node -> !this.id.equals(node.id))
-                .toList();
-
-        // region 本节点调用 + 无其他节点：直接同步返回
-        if (otherNodes.isEmpty()) {
-            var resultArray = JSONUtil.createArray();
-            agents.forEach(agent -> resultArray.add(agentLifecycle.serializeAgent(agent)));
-            return JSONUtil.create().set("agents", resultArray);
-        }
-        // endregion
-
-        // region 本节点调用 + 有其他节点：广播查询，异步聚合
-        var requestId = context.requestId;
-        var localResults = new ArrayList<ObjectNode>();
-        agents.forEach(agent -> localResults.add(agentLifecycle.serializeAgent(agent)));
-
-        var collector = ListQueryCollector.builder()
-                .requestId(requestId)
-                .originalContext(context)
-                .createTime(System.currentTimeMillis())
-                .build();
-        collector.expectedCount = new AtomicInteger(otherNodes.size());
-        collector.results = Collections.synchronizedList(new ArrayList<>(localResults));
-        listQueryCollectors.put(requestId, collector);
-        cleanupExpiredCollectors();
-
-        otherNodes.forEach(node -> sendToOtherNode(EVENT_AGENT_LIST, JSONUtil.stringify(data), node.id));
-        return null;
-        // endregion
+        var resultArray = JSONUtil.createArray();
+        snapshots.forEach(snapshot -> resultArray.add(agentLifecycle.serializeAgentSnapshot(snapshot)));
+        return JSONUtil.create().set("agents", resultArray);
     }
 
     /**
@@ -556,58 +494,18 @@ public abstract class ContainerServer {
     }
 
     /**
-     * 按照条件查找 Team，根据请求来源分三个分支处理：
-     * 1. 代理调用分支（非本节点请求）：直接返回本节点匹配的 Team 列表
-     * 2. 单节点分支（本节点请求且无其他节点）：同步返回匹配结果
-     * 3. 多节点分支（本节点请求且有其他节点）：广播查询到其他节点，
-     * 通过 ListQueryCollector 异步聚合各节点结果后，由 transport 回传客户端
+     * 按照条件查找 Team
      *
-     * @param context 上下文（含 transport、client、user、container）
+     * @param context 上下文（含 transport、client、user）
      * @param data    查询条件
-     * @return 分支1、2 返回包含 teams 数组的 ObjectNode；分支3 返回 null（异步回传）
+     * @return 包含 teams 数组的 ObjectNode
      */
     public ObjectNode handleTeamList(Context context, ObjectNode data) {
         var teams = teamLifecycle.listTeam(context, data);
 
-        // region 代理调用：其他节点查询本节点Team，直接返回结果
-        if (context.isInternal) {
-            var resultArray = JSONUtil.createArray();
-            teams.forEach(team -> resultArray.add(teamLifecycle.serializeTeam(team)));
-            return JSONUtil.create().set("teams", resultArray);
-        }
-        // endregion
-
-        var allNodes = metaData.getNodes();
-        var otherNodes = allNodes.stream()
-                .filter(node -> !this.id.equals(node.id))
-                .toList();
-
-        // region 本节点调用 + 无其他节点：直接同步返回
-        if (otherNodes.isEmpty()) {
-            var resultArray = JSONUtil.createArray();
-            teams.forEach(team -> resultArray.add(teamLifecycle.serializeTeam(team)));
-            return JSONUtil.create().set("teams", resultArray);
-        }
-        // endregion
-
-        // region 本节点调用 + 有其他节点：广播查询，异步聚合
-        var requestId = context.requestId;
-        var localResults = new ArrayList<ObjectNode>();
-        teams.forEach(team -> localResults.add(teamLifecycle.serializeTeam(team)));
-
-        var collector = ListQueryCollector.builder()
-                .requestId(requestId)
-                .originalContext(context)
-                .createTime(System.currentTimeMillis())
-                .build();
-        collector.expectedCount = new AtomicInteger(otherNodes.size());
-        collector.results = Collections.synchronizedList(new ArrayList<>(localResults));
-        listQueryCollectors.put(requestId, collector);
-        cleanupExpiredCollectors();
-
-        otherNodes.forEach(node -> sendToOtherNode(EVENT_TEAM_LIST, JSONUtil.stringify(data), node.id));
-        return null;
-        // endregion
+        var resultArray = JSONUtil.createArray();
+        teams.forEach(team -> resultArray.add(teamLifecycle.serializeTeam(team)));
+        return JSONUtil.create().set("teams", resultArray);
     }
 
     /**
@@ -754,17 +652,7 @@ public abstract class ContainerServer {
 
     // ======================== 集群通信 ========================
 
-    /**
-     * 概率清理过期的 listQueryCollectors（10% 概率触发，超时60秒移除）
-     */
-    private void cleanupExpiredCollectors() {
-        if (Math.random() < 0.1) {
-            var now = System.currentTimeMillis();
-            listQueryCollectors.entrySet().removeIf(entry ->
-                    now - entry.getValue().getCreateTime() > 60000
-            );
-        }
-    }
+
 
     /**
      * 构建成功响应 JSON 字符串
@@ -813,8 +701,7 @@ public abstract class ContainerServer {
      * 消息数据结构为 JSON 数组：[sourceNodeId, type, event, body]。
      * <p>
      * proxy 模式：接收其他节点的代理请求，调用 handleUserEvent 处理并将结果反向回传。
-     * reverse 模式：接收反向响应，其中 agent.list 事件走 ListQueryCollector 聚合逻辑，
-     * 其他事件通过 agentClient 查找对应传输通道推送给客户端。
+     * reverse 模式：接收反向响应，通过 agentClient/teamClient 查找对应传输通道推送给客户端。
      */
     public void listenMessage() {
         messageBus.subscribe("%s-message".formatted(this.id), (message) -> {
@@ -843,61 +730,7 @@ public abstract class ContainerServer {
                     }
                     case "reverse" -> {
 
-                        if (EVENT_AGENT_LIST.equals(event)) {
-                            // region 聚合 agent.list 各节点查询结果
-                            var ackData = JSONUtil.parse(bodyJson);
-                            var wrappedData = ackData.path("data");
-                            if (!wrappedData.isMissingNode() && wrappedData.has("agents")) {
-                                var ackRequestId = ackData.path("requestId").asText();
-                                var collector = listQueryCollectors.get(ackRequestId);
-                                if (collector != null) {
-                                    var agentsArray = wrappedData.path("agents");
-                                    if (agentsArray.isArray()) {
-                                        agentsArray.forEach(item ->
-                                                collector.results.add((ObjectNode) item));
-                                    }
-                                    var remaining = collector.expectedCount.decrementAndGet();
-                                    if (remaining <= 0) {
-                                        listQueryCollectors.remove(ackRequestId);
-                                        var mergedArray = JSONUtil.createArray();
-                                        collector.results.forEach(mergedArray::add);
-                                        var combined = JSONUtil.create()
-                                                .put("requestId", ackRequestId)
-                                                .set("data", mergedArray);
-                                        var ctx = collector.originalContext;
-                                        ctx.transport.sendToClient(ctx.client, event, JSONUtil.stringify(combined));
-                                    }
-                                }
-                            }
-                            // endregion
-                        } else if (EVENT_TEAM_LIST.equals(event)) {
-                            // region 聚合 team.list 各节点查询结果
-                            var ackData = JSONUtil.parse(bodyJson);
-                            var wrappedData = ackData.path("data");
-                            if (!wrappedData.isMissingNode() && wrappedData.has("teams")) {
-                                var ackRequestId = ackData.path("requestId").asText();
-                                var collector = listQueryCollectors.get(ackRequestId);
-                                if (collector != null) {
-                                    var teamsArray = wrappedData.path("teams");
-                                    if (teamsArray.isArray()) {
-                                        teamsArray.forEach(item ->
-                                                collector.results.add((ObjectNode) item));
-                                    }
-                                    var remaining = collector.expectedCount.decrementAndGet();
-                                    if (remaining <= 0) {
-                                        listQueryCollectors.remove(ackRequestId);
-                                        var mergedArray = JSONUtil.createArray();
-                                        collector.results.forEach(mergedArray::add);
-                                        var combined = JSONUtil.create()
-                                                .put("requestId", ackRequestId)
-                                                .set("data", mergedArray);
-                                        var ctx = collector.originalContext;
-                                        ctx.transport.sendToClient(ctx.client, event, JSONUtil.stringify(combined));
-                                    }
-                                }
-                            }
-                            // endregion
-                        } else if (EVENT_AGENT_DETAIL.equals(event)) {
+                        if (EVENT_AGENT_DETAIL.equals(event)) {
                             // region 处理 agent.detail 反向回调：从 agentClient 查找传输通道并转发
                             var parsed = JSONUtil.parse(bodyJson);
                             var dataNode = parsed.path("body").path("data");

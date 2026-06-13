@@ -438,5 +438,62 @@ public class NfsPersistence implements IPersistence {
         }
     }
 
+    @Override
+    @SneakyThrows
+    public List<AgentSnapshot> search(String keyword) {
+        var result = new ArrayList<AgentSnapshot>();
+        var basePath = Paths.get(baseDir);
+
+        if (!Files.exists(basePath)) {
+            return result;
+        }
+
+        var lowerKeyword = keyword != null ? keyword.toLowerCase() : "";
+
+        // 遍历 orgId 目录
+        try (var orgStream = Files.list(basePath)) {
+            orgStream.filter(Files::isDirectory)
+                    .forEach(orgPath -> {
+                        var orgId = orgPath.getFileName().toString();
+
+                        // 遍历 userId 目录
+                        try (var userStream = Files.list(orgPath)) {
+                            userStream.filter(Files::isDirectory)
+                                    .forEach(userPath -> {
+                                        var userId = userPath.getFileName().toString();
+
+                                        // 遍历 agentId 目录
+                                        try (var agentStream = Files.list(userPath)) {
+                                            agentStream.filter(Files::isDirectory)
+                                                    .forEach(agentPath -> {
+                                                        var agentId = agentPath.getFileName().toString();
+
+                                                        // 匹配关键字
+                                                        if (lowerKeyword.isEmpty()
+                                                                || orgId.toLowerCase().contains(lowerKeyword)
+                                                                || userId.toLowerCase().contains(lowerKeyword)
+                                                                || agentId.toLowerCase().contains(lowerKeyword)) {
+                                                            var metadata = AgentMetadata.builder()
+                                                                    .id(agentId)
+                                                                    .orgId(orgId)
+                                                                    .userId(userId)
+                                                                    .build();
+                                                            result.add(load(metadata));
+                                                        }
+                                                    });
+                                        } catch (Exception e) {
+                                            log.error("search failed at agent level: {}", userPath, e);
+                                        }
+                                    });
+                        } catch (Exception e) {
+                            log.error("search failed at user level: {}", orgPath, e);
+                        }
+                    });
+        }
+
+        log.debug("search keyword: {} found {} agents", keyword, result.size());
+        return result;
+    }
+
     // endregion
 }
