@@ -2,12 +2,9 @@ package me.karboom.java.iSerf.server;
 
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
-import me.karboom.java.iSerf.agent.persistence.AgentSnapshot;
+
 import me.karboom.java.iSerf.llm.text.OpenAI;
-import me.karboom.java.iSerf.llm.text.OpenAI;
-import me.karboom.java.iSerf.server.ContainerServer;
-import me.karboom.java.iSerf.server.messageBus.Pulsar;
-import me.karboom.java.iSerf.server.metaData.RedisSingle;
+import me.karboom.java.iSerf.server.lifecycle.AgentLifecycle;
 import me.karboom.java.iSerf.util.JSONUtil;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -22,7 +19,7 @@ import java.util.UUID;
 public class TestContainer extends AgentLifecycle {
 
     @Override
-    public Agent createAgent(ContainerServer.Context ctx, ObjectNode params) {
+    public Agent createAgent(Server.Context ctx, ObjectNode params) {
         var llm = new OpenAI("qwen-plus", new HashMap<>(), System.getenv("OPENAI_API_KEY"),
                 "https://dashscope.aliyuncs.com/compatible-mode/v1", 3);
         var provider = new FixedLlmProvider(llm);
@@ -31,22 +28,22 @@ public class TestContainer extends AgentLifecycle {
     }
 
     @Override
-    public List<Agent> listAgent(ContainerServer.Context ctx, ObjectNode params) {
+    public List<Agent> listAgent(Server.Context ctx, ObjectNode params) {
         return new ArrayList<>();
     }
 
     @Override
-    public Agent removeAgent(ContainerServer.Context ctx, ObjectNode params) {
+    public Agent removeAgent(Server.Context ctx, ObjectNode params) {
         return null;
     }
 
     @Override
-    public Agent editAgent(ContainerServer.Context ctx, ObjectNode params) {
+    public Agent editAgent(Server.Context ctx, ObjectNode params) {
         return null;
     }
 
     @Override
-    public Agent detailAgent(ContainerServer.Context ctx, ObjectNode params) {
+    public Agent detailAgent(Server.Context ctx, ObjectNode params) {
         return null;
     }
 
@@ -55,8 +52,5 @@ public class TestContainer extends AgentLifecycle {
         return JSONUtil.convert(agent);
     }
 
-    @Override
-    public ObjectNode serializeAgentSnapshot(AgentSnapshot snapshot) {
-        return JSONUtil.convert(snapshot);
-    }
+
 }

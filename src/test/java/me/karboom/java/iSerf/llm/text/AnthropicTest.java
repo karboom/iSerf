@@ -1,6 +1,6 @@
 package me.karboom.java.iSerf.llm.text;
 
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.tool.Tool;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -56,15 +56,15 @@ public class AnthropicTest {
     @Test
     @Timeout(30)
     void testBasicText() throws InterruptedException {
-        var messages = new ArrayList<Message>();
-        messages.add(Message.builder()
-                .role(Message.ROLE.SYSTEM)
-                .type(Message.TYPE.TEXT)
+        var messages = new ArrayList<AgentMessage>();
+        messages.add(AgentMessage.builder()
+                .role(AgentMessage.ROLE.SYSTEM)
+                .type(AgentMessage.TYPE.TEXT)
                 .text("You are a helpful assistant.")
                 .build());
-        messages.add(Message.builder()
-                .role(Message.ROLE.USER)
-                .type(Message.TYPE.TEXT)
+        messages.add(AgentMessage.builder()
+                .role(AgentMessage.ROLE.USER)
+                .type(AgentMessage.TYPE.TEXT)
                 .text("What is the capital of France?")
                 .build());
 
@@ -101,15 +101,15 @@ public class AnthropicTest {
     @Test
     @Timeout(30)
     void testStructuredOutput() throws InterruptedException {
-        var messages = new ArrayList<Message>();
-        messages.add(Message.builder()
-                .role(Message.ROLE.SYSTEM)
-                .type(Message.TYPE.TEXT)
+        var messages = new ArrayList<AgentMessage>();
+        messages.add(AgentMessage.builder()
+                .role(AgentMessage.ROLE.SYSTEM)
+                .type(AgentMessage.TYPE.TEXT)
                 .text("You are a helpful assistant.")
                 .build());
-        messages.add(Message.builder()
-                .role(Message.ROLE.USER)
-                .type(Message.TYPE.TEXT)
+        messages.add(AgentMessage.builder()
+                .role(AgentMessage.ROLE.USER)
+                .type(AgentMessage.TYPE.TEXT)
                 .text("What is the weather in Paris? Give me a random temperature.")
                 .build());
 
@@ -148,15 +148,15 @@ public class AnthropicTest {
     @Test
     @Timeout(30)
     void testToolCall() throws InterruptedException {
-        var messages = new ArrayList<Message>();
-        messages.add(Message.builder()
-                .role(Message.ROLE.SYSTEM)
-                .type(Message.TYPE.TEXT)
+        var messages = new ArrayList<AgentMessage>();
+        messages.add(AgentMessage.builder()
+                .role(AgentMessage.ROLE.SYSTEM)
+                .type(AgentMessage.TYPE.TEXT)
                 .text("You are a helpful assistant. Use the weather query tool when asked about weather.")
                 .build());
-        messages.add(Message.builder()
-                .role(Message.ROLE.USER)
-                .type(Message.TYPE.TEXT)
+        messages.add(AgentMessage.builder()
+                .role(AgentMessage.ROLE.USER)
+                .type(AgentMessage.TYPE.TEXT)
                 .text("What is the weather in Berlin and Beijing?")
                 .build());
 
@@ -211,9 +211,9 @@ public class AnthropicTest {
                 1
         );
 
-        var messages = new ArrayList<Message>();
-        messages.add(Message.builder()
-                .role(Message.ROLE.USER)
+        var messages = new ArrayList<AgentMessage>();
+        messages.add(AgentMessage.builder()
+                .role(AgentMessage.ROLE.USER)
                 .text("Solve this math problem: If a train travels 120 km in 2 hours, what is its average speed? Explain your reasoning.")
                 .build());
 
@@ -254,10 +254,10 @@ public class AnthropicTest {
     @Test
     @Timeout(30)
     void testImageInput() throws InterruptedException {
-        var messages = new ArrayList<Message>();
-        messages.add(Message.builder()
-                .role(Message.ROLE.USER)
-                .type(Message.TYPE.IMAGE)
+        var messages = new ArrayList<AgentMessage>();
+        messages.add(AgentMessage.builder()
+                .role(AgentMessage.ROLE.USER)
+                .type(AgentMessage.TYPE.IMAGE)
                 .files(List.of(
                         "https://karboom-blog.oss-cn-hangzhou.aliyuncs.com/iSlogger/file_example_PNG_500kB.png"
                 ))
@@ -297,15 +297,15 @@ public class AnthropicTest {
     @Test
     @Timeout(30)
     void testQuery() {
-        var messages = new ArrayList<Message>();
-        messages.add(Message.builder()
-                .role(Message.ROLE.SYSTEM)
-                .type(Message.TYPE.TEXT)
+        var messages = new ArrayList<AgentMessage>();
+        messages.add(AgentMessage.builder()
+                .role(AgentMessage.ROLE.SYSTEM)
+                .type(AgentMessage.TYPE.TEXT)
                 .text("You are a helpful assistant.")
                 .build());
-        messages.add(Message.builder()
-                .role(Message.ROLE.USER)
-                .type(Message.TYPE.TEXT)
+        messages.add(AgentMessage.builder()
+                .role(AgentMessage.ROLE.USER)
+                .type(AgentMessage.TYPE.TEXT)
                 .text("What is 1+1?")
                 .build());
 
@@ -324,11 +324,11 @@ public class AnthropicTest {
 
     @Test
     void testBatchUnsupported() {
-        var messageBatch = new ArrayList<List<Message>>();
-        var messages = new ArrayList<Message>();
-        messages.add(Message.builder()
-                .role(Message.ROLE.USER)
-                .type(Message.TYPE.TEXT)
+        var messageBatch = new ArrayList<List<AgentMessage>>();
+        var messages = new ArrayList<AgentMessage>();
+        messages.add(AgentMessage.builder()
+                .role(AgentMessage.ROLE.USER)
+                .type(AgentMessage.TYPE.TEXT)
                 .text("Hello")
                 .build());
         messageBatch.add(messages);

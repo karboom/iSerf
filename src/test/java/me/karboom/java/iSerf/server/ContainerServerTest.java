@@ -2,15 +2,16 @@ package me.karboom.java.iSerf.server;
 
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
-import me.karboom.java.iSerf.agent.Event;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentEvent;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
-import me.karboom.java.iSerf.agent.persistence.AgentSnapshot;
-import me.karboom.java.iSerf.agent.persistence.NonePersistence;
+
 import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.llm.text.BatchTaskInfo;
 import me.karboom.java.iSerf.llm.text.IText;
 import me.karboom.java.iSerf.llm.text.Output;
+import me.karboom.java.iSerf.server.lifecycle.AgentLifecycle;
+import me.karboom.java.iSerf.server.lifecycle.TeamLifecycle;
 import me.karboom.java.iSerf.server.messageBus.MemoryMessageBus;
 import me.karboom.java.iSerf.server.metaData.MemoryMetaData;
 import me.karboom.java.iSerf.server.transport.NoneTransport;
@@ -34,11 +35,11 @@ class ContainerServerTest {
             public IText get(List<Tool<?>> tools, Class<?> outputFormat, Integer retryTimes) {
                 return new IText() {
                     @Override
-                    public Flux<Output> send(List<Message> memory, Class<?> of, List<Tool<?>> t) { return Flux.empty(); }
+                    public Flux<Output> send(List<AgentMessage> memory, Class<?> of, List<Tool<?>> t) { return Flux.empty(); }
                     @Override
-                    public Output query(List<Message> messages, Class<?> of) { return null; }
+                    public Output query(List<AgentMessage> messages, Class<?> of) { return null; }
                     @Override
-                    public String batch(List<List<Message>> mb, Class<?> of) { return null; }
+                    public String batch(List<List<AgentMessage>> mb, Class<?> of) { return null; }
                     @Override
                     public BatchTaskInfo taskStatus(String taskId) { return null; }
                     @Override
@@ -49,38 +50,41 @@ class ContainerServerTest {
         return new Agent(UUID.randomUUID().toString(), "test", provider, List.of()) {
             @Override
             public void recovery() {
-                this.trigger(Event.builder().type(Event.Type.RECOVERY).priority(0).build());
+                this.trigger(AgentEvent.builder().type(AgentEvent.Type.RECOVERY).priority(0).build());
             }
         };
     }
 
     // ======================== 被测对象 & 依赖 ========================
 
-    ContainerServer container;
+    Server container;
     MemoryMessageBus messageBus;
     MemoryMetaData metaData;
     NoneTransport transport;
-    NonePersistence persistence;
 
     @BeforeEach
     void setUp() {
         messageBus = new MemoryMessageBus();
         metaData = new MemoryMetaData();
         transport = new NoneTransport();
-        persistence = new NonePersistence();
 
-        container = new ContainerServer("127.0.0.1", messageBus, metaData,
+        container = new Server("127.0.0.1", messageBus, metaData,
                 new AgentLifecycle() {
                     @Override
-                    public Agent createAgent(ContainerServer.Context ctx, ObjectNode params) { return makeAgent(); }
+                    public Agent createAgent(Server.Context ctx, ObjectNode params) { return makeAgent(); }
                     @Override
-                    public List<Agent> listAgent(ContainerServer.Context ctx, ObjectNode params) { return List.of(); }
+                    public List<Agent> listAgent(Server.Context ctx, ObjectNode params) {
+                        var keyword = params.path("keyword").asText();
+                        return container.localAgents.values().stream()
+                                .filter(a -> keyword.isEmpty() || a.metadata.getId().contains(keyword))
+                                .toList();
+                    }
                     @Override
-                    public Agent removeAgent(ContainerServer.Context ctx, ObjectNode params) { return null; }
+                    public Agent removeAgent(Server.Context ctx, ObjectNode params) { return null; }
                     @Override
-                    public Agent editAgent(ContainerServer.Context ctx, ObjectNode params) { return null; }
+                    public Agent editAgent(Server.Context ctx, ObjectNode params) { return null; }
                     @Override
-                    public Agent detailAgent(ContainerServer.Context ctx, ObjectNode params) {
+                    public Agent detailAgent(Server.Context ctx, ObjectNode params) {
                         var id = params.path("agentId").asText();
                         return container.localAgents.get(id);
                     }
@@ -88,29 +92,26 @@ class ContainerServerTest {
                     public ObjectNode serializeAgent(Agent agent) {
                         return JSONUtil.create().put("id", agent.metadata.getId());
                     }
-                    @Override
-                    public ObjectNode serializeAgentSnapshot(AgentSnapshot snapshot) {
-                        return JSONUtil.convert(snapshot);
-                    }
+
                 },
                 new TeamLifecycle() {
                     @Override
-                    public Team createTeam(ContainerServer.Context ctx, ObjectNode params) {
+                    public Team createTeam(Server.Context ctx, ObjectNode params) {
                         return new Team(makeAgent(), List.of()) {};
                     }
                     @Override
-                    public List<Team> listTeam(ContainerServer.Context ctx, ObjectNode params) { return List.of(); }
+                    public List<Team> listTeam(Server.Context ctx, ObjectNode params) { return List.of(); }
                     @Override
-                    public Team removeTeam(ContainerServer.Context ctx, ObjectNode params) {
+                    public Team removeTeam(Server.Context ctx, ObjectNode params) {
                         var teamId = params.path("teamId").asText();
                         return container.localTeams.get(teamId);
                     }
                     @Override
-                    public Team editTeam(ContainerServer.Context ctx, ObjectNode params) {
+                    public Team editTeam(Server.Context ctx, ObjectNode params) {
                         return new Team(makeAgent(), List.of()) {};
                     }
                     @Override
-                    public Team detailTeam(ContainerServer.Context ctx, ObjectNode params) {
+                    public Team detailTeam(Server.Context ctx, ObjectNode params) {
                         var id = params.path("teamId").asText();
                         return container.localTeams.get(id);
                     }
@@ -122,12 +123,11 @@ class ContainerServerTest {
             @Override
             public void eventInterceptor(Context ctx, String event, String dataJson) {}
         };
-        container.persistence = persistence;
         container.addTransport(transport);
     }
 
-    private ContainerServer.Context buildContext(boolean isInternal) {
-        return ContainerServer.Context.builder()
+    private Server.Context buildContext(boolean isInternal) {
+        return Server.Context.builder()
                 .transport(transport)
                 .client("test-client")
                 .requestId("req-123")
@@ -236,10 +236,10 @@ class ContainerServerTest {
             var agentId = agent.metadata.getId();
             container.localAgents.put(agentId, agent);
 
-            var userMsg = Message.builder()
-                    .role(Message.ROLE.USER).type(Message.TYPE.TEXT).text("hello").build();
+            var userMsg = AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER).type(AgentMessage.TYPE.TEXT).text("hello").build();
             var eventNode = JSONUtil.convert(
-                    Event.builder().type(Event.Type.MESSAGE).priority(1).message(userMsg).build());
+                    AgentEvent.builder().type(AgentEvent.Type.MESSAGE).priority(1).message(userMsg).build());
 
             var ctx = buildContext(false);
             var sendData = JSONUtil.create().put("agentId", agentId).set("event", eventNode);
@@ -254,12 +254,12 @@ class ContainerServerTest {
             var nonExistentId = "non-existent-agent-send";
             metaData.setAgentStay(nonExistentId, "remote-node-1");
 
-            var userMsg = Message.builder()
-                    .role(Message.ROLE.USER).type(Message.TYPE.TEXT).text("hello").build();
+            var userMsg = AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER).type(AgentMessage.TYPE.TEXT).text("hello").build();
             var data = JSONUtil.create()
                     .put("agentId", nonExistentId)
                     .set("event", JSONUtil.convert(
-                            Event.builder().type(Event.Type.MESSAGE).priority(1).message(userMsg).build()));
+                            AgentEvent.builder().type(AgentEvent.Type.MESSAGE).priority(1).message(userMsg).build()));
 
             var result = container.handleAgentSend(ctx, data);
             assertNull(result);
@@ -357,8 +357,25 @@ class ContainerServerTest {
     class HandleAgentList {
         @Test @Timeout(5)
         void testHandleAgentList() {
+            var agent = makeAgent();
+            container.localAgents.put(agent.metadata.getId(), agent);
+
             var ctx = buildContext(false);
-            var data = JSONUtil.create().put("keyword", "test");
+            var data = JSONUtil.create().put("keyword", agent.metadata.getId());
+            var result = container.handleAgentList(ctx, data);
+
+            assertNotNull(result);
+            var agents = result.path("agents");
+            assertFalse(agents.isMissingNode());
+            assertTrue(agents.isArray());
+            assertEquals(1, agents.size());
+            assertEquals(agent.metadata.getId(), agents.get(0).path("id").asText());
+        }
+
+        @Test @Timeout(5)
+        void testHandleAgentListNoMatch() {
+            var ctx = buildContext(false);
+            var data = JSONUtil.create().put("keyword", "nonexistent");
             var result = container.handleAgentList(ctx, data);
 
             assertNotNull(result);
@@ -397,16 +414,12 @@ class ContainerServerTest {
         }
 
         @Test @Timeout(5)
-        void testHandleAgentDetailRemote() {
+        void testHandleAgentDetailNotFound() {
             var ctx = buildContext(false);
-            var remoteAgentId = "remote-agent-detail-2";
-            metaData.setAgentStay(remoteAgentId, "remote-node-5");
-
-            var data = JSONUtil.create().put("agentId", remoteAgentId);
+            var data = JSONUtil.create().put("agentId", "nonexistent");
             var result = container.handleAgentDetail(ctx, data);
 
             assertNull(result);
-            assertTrue(container.agentClient.containsKey(remoteAgentId));
         }
     }
 
@@ -513,7 +526,7 @@ class ContainerServerTest {
             var ctx = buildContext(false);
             var dataJson = "{\"msgId\":\"msg-1\",\"body\":{}}";
 
-            var result = container.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_CREATE, dataJson);
+            var result = container.handleUserEvent(ctx, Server.EVENT_AGENT_CREATE, dataJson);
 
             assertNotNull(result);
             assertTrue(result.contains("\"error\""));
@@ -524,7 +537,7 @@ class ContainerServerTest {
             var ctx = buildContext(false);
             var dataJson = "{\"body\":{}}";
 
-            var result = container.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_CREATE, dataJson);
+            var result = container.handleUserEvent(ctx, Server.EVENT_AGENT_CREATE, dataJson);
             assertNotNull(result);
             assertTrue(result.contains("\"error\""));
         }
@@ -534,7 +547,7 @@ class ContainerServerTest {
             var ctx = buildContext(false);
             var dataJson = "{\"msgId\":\"msg-dispatch\",\"body\":{}}";
 
-            var result = container.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_CREATE, dataJson);
+            var result = container.handleUserEvent(ctx, Server.EVENT_AGENT_CREATE, dataJson);
 
             assertNotNull(result);
             assertTrue(result.contains("agentId"));
@@ -545,7 +558,7 @@ class ContainerServerTest {
             var ctx = buildContext(false);
             var dataJson = "{\"msgId\":\"msg-non-internal\",\"body\":{}}";
 
-            var result = container.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_CREATE, dataJson);
+            var result = container.handleUserEvent(ctx, Server.EVENT_AGENT_CREATE, dataJson);
 
             assertNotNull(result);
             assertTrue(result.contains("agentId"));
@@ -559,12 +572,12 @@ class ContainerServerTest {
 
             var ctx = buildContext(false);
             var data = JSONUtil.create().put("agentId", agentId).put("toolCallId", "non-existent");
-            var body = new ContainerServer.Message<ObjectNode>() {};
+            var body = new Server.Message<ObjectNode>() {};
             body.msgId = "msg-err";
             body.body = data;
             var dataJson = JSONUtil.stringify(body);
 
-            var result = container.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_TOOL_CALL, dataJson);
+            var result = container.handleUserEvent(ctx, Server.EVENT_AGENT_TOOL_CALL, dataJson);
 
             assertNotNull(result);
             assertTrue(result.contains("\"error\""));
@@ -587,7 +600,7 @@ class ContainerServerTest {
             var requestBody = "{\"msgId\":\"proxy-msg\",\"body\":{}}";
             var proxyArray = JSONUtil.createArray();
             proxyArray.add(sourceNodeId).add("proxy")
-                    .add(ContainerServer.EVENT_AGENT_CREATE).add(requestBody);
+                    .add(Server.EVENT_AGENT_CREATE).add(requestBody);
 
             messageBus.publish("%s-message".formatted(container.id), JSONUtil.stringify(proxyArray));
 
@@ -598,17 +611,17 @@ class ContainerServerTest {
         void testReverseAgentMessage() {
             var agentId = "reverse-agent";
             container.agentClient.put(agentId,
-                    ContainerServer.TransportClientRecord.builder()
+                    Server.TransportClientRecord.builder()
                             .transportId(transport.getTransportId()).clientHandle("client-123").build());
 
             var dataNode = JSONUtil.create().put("agentId", agentId);
-            var bodyObj = new ContainerServer.OutMessageBody() {};
+            var bodyObj = new Server.OutMessageBody() {};
             bodyObj.setData(dataNode);
             var bodyJson = JSONUtil.stringify(bodyObj);
 
             var reverseArray = JSONUtil.createArray();
             reverseArray.add("remote-node").add("reverse")
-                    .add(ContainerServer.EVENT_AGENT_MESSAGE).add(bodyJson);
+                    .add(Server.EVENT_AGENT_MESSAGE).add(bodyJson);
 
             messageBus.publish("%s-message".formatted(container.id), JSONUtil.stringify(reverseArray));
 
@@ -616,30 +629,10 @@ class ContainerServerTest {
         }
 
         @Test @Timeout(5)
-        void testReverseAgentDetail() {
-            var agentId = "detail-agent-reverse";
-            container.agentClient.put(agentId,
-                    ContainerServer.TransportClientRecord.builder()
-                            .transportId(transport.getTransportId()).clientHandle("detail-client").build());
-
-            var dataNode = JSONUtil.create().set("metadata", JSONUtil.create().put("id", agentId));
-            var bodyNode = JSONUtil.create().set("data", dataNode);
-            var fullResponse = JSONUtil.create().set("body", bodyNode);
-
-            var reverseArray = JSONUtil.createArray();
-            reverseArray.add("remote-node").add("reverse")
-                    .add(ContainerServer.EVENT_AGENT_DETAIL).add(JSONUtil.stringify(fullResponse));
-
-            messageBus.publish("%s-message".formatted(container.id), JSONUtil.stringify(reverseArray));
-
-            assertFalse(container.agentClient.containsKey(agentId), "推送后应从 agentClient 移除缓存");
-        }
-
-        @Test @Timeout(5)
         void testReverseTeamDetail() {
             var teamId = "detail-team-reverse";
             container.teamClient.put(teamId,
-                    ContainerServer.TransportClientRecord.builder()
+                    Server.TransportClientRecord.builder()
                             .transportId(transport.getTransportId()).clientHandle("team-detail-client").build());
 
             var dataNode = JSONUtil.create().set("metadata", JSONUtil.create().put("id", teamId));
@@ -648,7 +641,7 @@ class ContainerServerTest {
 
             var reverseArray = JSONUtil.createArray();
             reverseArray.add("remote-node").add("reverse")
-                    .add(ContainerServer.EVENT_TEAM_DETAIL).add(JSONUtil.stringify(fullResponse));
+                    .add(Server.EVENT_TEAM_DETAIL).add(JSONUtil.stringify(fullResponse));
 
             messageBus.publish("%s-message".formatted(container.id), JSONUtil.stringify(reverseArray));
 

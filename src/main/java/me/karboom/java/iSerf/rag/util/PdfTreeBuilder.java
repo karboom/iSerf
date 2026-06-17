@@ -9,7 +9,7 @@ import lombok.Builder;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.llm.text.OpenAI;
 import me.karboom.java.iSerf.rag.store.IStructStore;
 import me.karboom.java.iSerf.util.DataUtil;
@@ -409,9 +409,9 @@ public class PdfTreeBuilder {
                 Directly return the JSON structure, do not output anything else.
                 """.formatted(page.getContent());
 
-        var messages = List.of(Message.builder()
-                .role(Message.ROLE.USER)
-                .type(Message.TYPE.TEXT)
+        var messages = List.of(AgentMessage.builder()
+                .role(AgentMessage.ROLE.USER)
+                .type(AgentMessage.TYPE.TEXT)
                 .text(prompt)
                 .build());
 
@@ -679,9 +679,9 @@ public class PdfTreeBuilder {
                 Directly return the description, do not include any other text.
                 """.formatted(text);
 
-        var messages = List.of(Message.builder()
-                .role(Message.ROLE.USER)
-                .type(Message.TYPE.TEXT)
+        var messages = List.of(AgentMessage.builder()
+                .role(AgentMessage.ROLE.USER)
+                .type(AgentMessage.TYPE.TEXT)
                 .text(prompt)
                 .build());
 
@@ -726,9 +726,9 @@ public class PdfTreeBuilder {
                 Directly return the description, do not include any other text.
                 """.formatted(JSONUtil.stringify(cleanStructure));
 
-        var messages = List.of(Message.builder()
-                .role(Message.ROLE.USER)
-                .type(Message.TYPE.TEXT)
+        var messages = List.of(AgentMessage.builder()
+                .role(AgentMessage.ROLE.USER)
+                .type(AgentMessage.TYPE.TEXT)
                 .text(prompt)
                 .build());
 

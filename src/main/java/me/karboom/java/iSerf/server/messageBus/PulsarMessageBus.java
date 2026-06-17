@@ -11,13 +11,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 @Slf4j
-public class Pulsar implements IMessageBus {
+public class PulsarMessageBus implements IMessageBus {
 
     private final PulsarClient client;
     private final Map<String, Producer<String>> producerCache = new ConcurrentHashMap<>();
     private final Map<String, org.apache.pulsar.client.api.Consumer<String>> consumerCache = new ConcurrentHashMap<>();
 
-    public Pulsar(String serviceUrl) {
+    public PulsarMessageBus(String serviceUrl) {
         try {
             this.client = PulsarClient.builder()
                     .serviceUrl(serviceUrl)

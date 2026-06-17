@@ -4,7 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.llm.text.Output;
 import me.karboom.java.iSerf.util.*;
 import okhttp3.MediaType;
@@ -14,7 +14,6 @@ import reactor.core.publisher.Mono;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.io.File;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.*;
@@ -61,7 +60,7 @@ public class ToolHandler {
      * @param calls 工具调用列表
      * @return 带有调用结果的工具调用列表
      */
-    public List<Message.ToolCall> invoke(Agent agent, List<Message.ToolCall> calls) {
+    public List<AgentMessage.ToolCall> invoke(Agent agent, List<AgentMessage.ToolCall> calls) {
 
         for (var call : calls) {
             // 根据 name 匹配对应的 Tool
@@ -203,12 +202,12 @@ public class ToolHandler {
      * @param chunks 流式响应块列表
      * @return 合并后的工具调用列表，每个choice对应一组ToolCall
      */
-    public List<List<Message.ToolCall>> merge(List<Output> chunks) {
+    public List<List<AgentMessage.ToolCall>> merge(List<Output> chunks) {
         if (chunks.isEmpty()) {
             return new ArrayList<>();
         }
 
-        var result = new ArrayList<List<Message.ToolCall>>();
+        var result = new ArrayList<List<AgentMessage.ToolCall>>();
 
         var mergedToolCalls = new HashMap<Integer, Output.ToolCall>();
 
@@ -246,10 +245,10 @@ public class ToolHandler {
         }
 
         for (var entry : mergedToolCalls.entrySet()) {
-            var toolCallsForChoice = new ArrayList<Message.ToolCall>();
+            var toolCallsForChoice = new ArrayList<AgentMessage.ToolCall>();
             var outputToolCall = entry.getValue();
 
-            var itemToolCall = Message.ToolCall.builder()
+            var itemToolCall = AgentMessage.ToolCall.builder()
                     .id(outputToolCall.getId())
                     .name(outputToolCall.getName())
                     .arguments(JSONUtil.parse(outputToolCall.getArguments(), HashMap.class))
@@ -270,7 +269,7 @@ public class ToolHandler {
      * 根据错误反馈更新工具内容
      * @deprecated
      */
-    public Mono<Void> update(Agent agent, Message.ToolCall toolCall) {
+    public Mono<Void> update(Agent agent, AgentMessage.ToolCall toolCall) {
         // 1. 根据ToolCall 匹配tool
         var matchedTool = tools.stream()
                 .filter(tool -> tool.getName().equals(toolCall.getName()))
@@ -306,12 +305,12 @@ public class ToolHandler {
                         var prompt = "请根据以下错误信息更新代码:\n\n输入参数：\n\n%s\n\n错误信息: %s\n\n当前代码:\n%s\n\n 请修改runner里面的逻辑，仅需要告诉我最终的代码，不要带markdown标记"
                                 .formatted(toolCall.arguments.toString(), toolCall.getResult().toString(), currentCode);
 
-                        var userMessage = Message.builder()
+                        var userMessage = AgentMessage.builder()
                                 .role("user")
                                 .text(prompt)
                                 .build();
 
-                        var messages = new ArrayList<Message>();
+                        var messages = new ArrayList<AgentMessage>();
                         messages.add(userMessage);
 
                         // 调用LLM生成更新后的代码
@@ -362,7 +361,7 @@ public class ToolHandler {
     }
 
     @SneakyThrows
-    public Mono<Void> updateWithRetry(Agent agent, Message.ToolCall toolCall, Integer attempt) {
+    public Mono<Void> updateWithRetry(Agent agent, AgentMessage.ToolCall toolCall, Integer attempt) {
         var matchedTool = tools.stream()
                 .filter(tool -> tool.getName().equals(toolCall.getName()))
                 .findFirst()
@@ -384,8 +383,8 @@ public class ToolHandler {
         var prompt = "请根据以下错误信息更新代码:\n\n输入参数：\n\n%s\n\n错误信息: %s\n\n当前代码:\n%s\n\n 请修改runner里面的逻辑，仅需要告诉我最终的代码，不要带markdown标记"
                 .formatted(toolCall.arguments.toString(), toolCall.getResult().toString(), currentCode);
 
-        var userMessage = Message.builder()
-                .role(Message.ROLE.USER)
+        var userMessage = AgentMessage.builder()
+                .role(AgentMessage.ROLE.USER)
                 .text(prompt)
                 .build();
 

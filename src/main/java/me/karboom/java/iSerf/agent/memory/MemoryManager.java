@@ -3,7 +3,7 @@ package me.karboom.java.iSerf.agent.memory;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,7 +18,7 @@ import java.util.UUID;
 public class MemoryManager {
 
     private String systemPrompt;
-    private final List<Message> messages = new ArrayList<>();
+    private final List<AgentMessage> messages = new ArrayList<>();
 
     /**
      * @param systemPrompt  系统提示词
@@ -29,11 +29,11 @@ public class MemoryManager {
 
     // region ========== 基础操作 ==========
 
-    public void add(Message message) {
+    public void add(AgentMessage message) {
         messages.add(message);
     }
 
-    public void addAll(List<Message> list) {
+    public void addAll(List<AgentMessage> list) {
         messages.addAll(list);
     }
 
@@ -56,21 +56,21 @@ public class MemoryManager {
     /**
      * 获取全部对话消息（不含 systemPrompt），返回实际列表引用（用于计费等内部场景）
      */
-    public List<Message> getMessagesRaw() {
+    public List<AgentMessage> getMessagesRaw() {
         return messages;
     }
 
     /**
      * 获取全部对话消息的防御性副本（不含 systemPrompt）
      */
-    public List<Message> getMessages() {
+    public List<AgentMessage> getMessages() {
         return new ArrayList<>(messages);
     }
 
     /**
      * 获取未被遗忘的消息（不含 systemPrompt）
      */
-    public List<Message> getActiveMessages() {
+    public List<AgentMessage> getActiveMessages() {
         return messages.stream()
                 .filter(item -> item.getIsForgotten() == null || item.getIsForgotten() == 0)
                 .toList();
@@ -80,12 +80,12 @@ public class MemoryManager {
      * 获取用于发送给 LLM 的消息列表
      * 包含 systemPrompt（作为 SYSTEM 消息）和所有未遗忘的消息
      */
-    public List<Message> getMessagesForLLM() {
-        var result = new ArrayList<Message>();
+    public List<AgentMessage> getMessagesForLLM() {
+        var result = new ArrayList<AgentMessage>();
         if (systemPrompt != null && !systemPrompt.isEmpty()) {
-            result.add(Message.builder()
-                    .role(Message.ROLE.SYSTEM)
-                    .type(Message.TYPE.TEXT)
+            result.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.SYSTEM)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text(systemPrompt)
                     .isForgotten(0)
                     .build());
@@ -109,8 +109,8 @@ public class MemoryManager {
             return;
         }
 
-        var summaryPrompt = Message.builder()
-                .role(Message.ROLE.USER)
+        var summaryPrompt = AgentMessage.builder()
+                .role(AgentMessage.ROLE.USER)
                 .text("请将以上对话历史压缩为简洁的摘要，保留关键信息和上下文，用于后续对话参考。")
                 .build();
 
@@ -122,10 +122,10 @@ public class MemoryManager {
         if (result != null && result.getChoices() != null && !result.getChoices().isEmpty()) {
             var summaryText = result.getChoices().get(0).getText();
             if (summaryText != null && !summaryText.isEmpty()) {
-                var summaryItem = Message.builder()
+                var summaryItem = AgentMessage.builder()
                         .id(UUID.randomUUID().toString())
-                        .role(Message.ROLE.ASSISTANT)
-                        .type(Message.TYPE.TEXT)
+                        .role(AgentMessage.ROLE.ASSISTANT)
+                        .type(AgentMessage.TYPE.TEXT)
                         .text(summaryText)
                         .isForgotten(0)
                         .build();

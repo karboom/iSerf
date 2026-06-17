@@ -2,8 +2,7 @@ package me.karboom.java.iSerf.agent.persistence;
 
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.AgentMetadata;
-import me.karboom.java.iSerf.agent.Event;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.tool.CallCache;
 import org.junit.jupiter.api.Test;
 
@@ -66,10 +65,10 @@ class NfsPersistenceTest {
             var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
             agent.metadata = metadata;
 
-            var message1 = Message.builder()
+            var message1 = AgentMessage.builder()
                     .id(UUID.randomUUID().toString())
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.TEXT)
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("你好")
                     .build();
             agent.getMemoryManager().add(message1);
@@ -83,10 +82,10 @@ class NfsPersistenceTest {
             assertEquals("你好", result.getMemories().getFirst().getText());
 
             // 添加更多记忆并再次同步
-            var message2 = Message.builder()
+            var message2 = AgentMessage.builder()
                     .id(UUID.randomUUID().toString())
-                    .role(Message.ROLE.ASSISTANT)
-                    .type(Message.TYPE.TEXT)
+                    .role(AgentMessage.ROLE.ASSISTANT)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("你好，有什么可以帮助你的吗？")
                     .build();
             agent.getMemoryManager().add(message2);
@@ -115,20 +114,20 @@ class NfsPersistenceTest {
             agent.metadata = metadata;
 
             // 添加第一条记忆并追加
-            var message1 = Message.builder()
+            var message1 = AgentMessage.builder()
                     .id(UUID.randomUUID().toString())
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.TEXT)
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("第一条消息")
                     .build();
             agent.getMemoryManager().add(message1);
             persistence.addMemory(agent);
 
             // 添加第二条记忆并追加
-            var message2 = Message.builder()
+            var message2 = AgentMessage.builder()
                     .id(UUID.randomUUID().toString())
-                    .role(Message.ROLE.ASSISTANT)
-                    .type(Message.TYPE.TEXT)
+                    .role(AgentMessage.ROLE.ASSISTANT)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("第二条消息")
                     .build();
             agent.getMemoryManager().add(message2);
@@ -270,10 +269,10 @@ class NfsPersistenceTest {
             agent.metadata = metadata;
 
             // 添加一些数据
-            agent.getMemoryManager().add(Message.builder()
+            agent.getMemoryManager().add(AgentMessage.builder()
                     .id(UUID.randomUUID().toString())
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.TEXT)
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("测试消息")
                     .build());
             persistence.syncMemory(agent);

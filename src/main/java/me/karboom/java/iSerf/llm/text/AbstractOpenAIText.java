@@ -3,7 +3,7 @@ package me.karboom.java.iSerf.llm.text;
 import com.github.victools.jsonschema.generator.*;
 import com.github.victools.jsonschema.module.jackson.JacksonModule;
 import com.github.victools.jsonschema.module.jackson.JacksonOption;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.util.ErrorUtil;
 import me.karboom.java.iSerf.util.HttpUtil;
@@ -47,7 +47,7 @@ public abstract class AbstractOpenAIText implements IText {
     /**
      * 构建请求体
      */
-    protected abstract String buildRequestBody(List<Message> messages, Class<?> outputFormat, List<Tool<?>> tools);
+    protected abstract String buildRequestBody(List<AgentMessage> messages, Class<?> outputFormat, List<Tool<?>> tools);
 
     /**
      * 解析响应
@@ -69,7 +69,7 @@ public abstract class AbstractOpenAIText implements IText {
     // region batch api
 
     @Override
-    public String batch(List<List<Message>> messageBatch, Class<?> outputFormat) {
+    public String batch(List<List<AgentMessage>> messageBatch, Class<?> outputFormat) {
         var jsonlBuilder = new StringBuilder();
         for (var i = 0; i < messageBatch.size(); i++) {
             var messages = messageBatch.get(i);

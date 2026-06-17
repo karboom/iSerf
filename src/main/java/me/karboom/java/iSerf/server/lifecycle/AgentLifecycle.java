@@ -1,7 +1,8 @@
-package me.karboom.java.iSerf.server;
+package me.karboom.java.iSerf.server.lifecycle;
 
 import me.karboom.java.iSerf.agent.Agent;
-import me.karboom.java.iSerf.agent.persistence.AgentSnapshot;
+
+import me.karboom.java.iSerf.server.Server;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.util.List;
@@ -19,7 +20,7 @@ public abstract class AgentLifecycle {
      * @param params Agent 构造参数
      * @return Agent 实例
      */
-    public abstract Agent createAgent(ContainerServer.Context ctx, ObjectNode params);
+    public abstract Agent createAgent(Server.Context ctx, ObjectNode params);
 
     /**
      * 按照条件查找智能体列表
@@ -28,7 +29,7 @@ public abstract class AgentLifecycle {
      * @param params 查询条件
      * @return 匹配的 Agent 列表
      */
-    public abstract List<Agent> listAgent(ContainerServer.Context ctx, ObjectNode params);
+    public abstract List<Agent> listAgent(Server.Context ctx, ObjectNode params);
 
     /**
      * 删除 Agent
@@ -37,7 +38,7 @@ public abstract class AgentLifecycle {
      * @param params 删除参数（含 target agent ID）
      * @return 被删除的 Agent 实例，若不存在则返回 null
      */
-    public abstract Agent removeAgent(ContainerServer.Context ctx, ObjectNode params);
+    public abstract Agent removeAgent(Server.Context ctx, ObjectNode params);
 
     /**
      * 编辑 Agent
@@ -46,7 +47,7 @@ public abstract class AgentLifecycle {
      * @param params 编辑参数（含 target agent ID 及要修改的字段）
      * @return 编辑后的 Agent 实例，若不存在则返回 null
      */
-    public abstract Agent editAgent(ContainerServer.Context ctx, ObjectNode params);
+    public abstract Agent editAgent(Server.Context ctx, ObjectNode params);
 
     /**
      * 获取 Agent 详情
@@ -55,7 +56,7 @@ public abstract class AgentLifecycle {
      * @param params 查询参数（含 target agent ID）
      * @return Agent 实例，若不存在则返回 null
      */
-    public abstract Agent detailAgent(ContainerServer.Context ctx, ObjectNode params);
+    public abstract Agent detailAgent(Server.Context ctx, ObjectNode params);
 
     // region 序列化
 
@@ -66,14 +67,6 @@ public abstract class AgentLifecycle {
      * @return Agent 对应的 ObjectNode
      */
     public abstract ObjectNode serializeAgent(Agent agent);
-
-    /**
-     * 将 AgentSnapshot 序列化为 ObjectNode
-     *
-     * @param snapshot Agent 快照
-     * @return AgentSnapshot 对应的 ObjectNode
-     */
-    public abstract ObjectNode serializeAgentSnapshot(AgentSnapshot snapshot);
 
     // endregion
 }

@@ -1,11 +1,10 @@
 package me.karboom.java.iSerf.llm.text;
 
 import me.karboom.java.iSerf.agent.tool.Tool;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * 文本大模型接口
@@ -14,18 +13,18 @@ public interface IText {
     /**
      * 用于持续交流
      */
-    Flux<Output> send(List<Message> messages, Class<?> outputFormat, List<Tool<?>> tools);
+    Flux<Output> send(List<AgentMessage> messages, Class<?> outputFormat, List<Tool<?>> tools);
 
     /**
      * 用于工具查询
      */
-    Output query(List<Message> messages, Class<?> outputFormat);
+    Output query(List<AgentMessage> messages, Class<?> outputFormat);
 
     /**
      * 批量工具查询
      * @return 批量任务 ID
      */
-    String batch(List<List<Message>> messageBatch, Class<?> outputFormat);
+    String batch(List<List<AgentMessage>> messageBatch, Class<?> outputFormat);
 
     /**
      * 查看批量任务状态

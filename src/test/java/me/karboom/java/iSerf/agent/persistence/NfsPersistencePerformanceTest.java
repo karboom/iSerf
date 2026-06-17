@@ -2,12 +2,11 @@ package me.karboom.java.iSerf.agent.persistence;
 
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.AgentMetadata;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.util.DataUtil;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -94,10 +93,10 @@ class NfsPersistencePerformanceTest {
                             var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
                             agent.metadata = metadata;
 
-                            agent.getMemoryManager().add(Message.builder()
+                            agent.getMemoryManager().add(AgentMessage.builder()
                                     .id(UUID.randomUUID().toString())
-                                    .role(Message.ROLE.USER)
-                                    .type(Message.TYPE.TEXT)
+                                    .role(AgentMessage.ROLE.USER)
+                                    .type(AgentMessage.TYPE.TEXT)
                                     .text("测试消息 " + finalI)
                                     .build());
 
@@ -179,18 +178,18 @@ class NfsPersistencePerformanceTest {
             var userText = generateSimulatedText(templates, round, charsPerRound / 2);
             var assistantText = generateSimulatedText(templates, round + 1000, charsPerRound / 2);
 
-            var userItem = Message.builder()
+            var userItem = AgentMessage.builder()
                     .id(DataUtil.getFlakeId())
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.TEXT)
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text(userText)
                     .build();
             agent.getMemoryManager().add(userItem);
 
-            var assistantItem = Message.builder()
+            var assistantItem = AgentMessage.builder()
                     .id(DataUtil.getFlakeId())
-                    .role(Message.ROLE.ASSISTANT)
-                    .type(Message.TYPE.TEXT)
+                    .role(AgentMessage.ROLE.ASSISTANT)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text(assistantText)
                     .build();
             agent.getMemoryManager().add(assistantItem);

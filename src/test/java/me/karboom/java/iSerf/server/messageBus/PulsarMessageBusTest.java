@@ -13,14 +13,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class PulsarTest {
+class PulsarMessageBusTest {
 
-    private static Pulsar pulsar;
+    private static PulsarMessageBus pulsar;
     private static final String PULSAR_URL = "pulsar://localhost:6650";
 
     @BeforeAll
     static void setUp() {
-        pulsar = new Pulsar(PULSAR_URL);
+        pulsar = new PulsarMessageBus(PULSAR_URL);
     }
 
     @AfterAll

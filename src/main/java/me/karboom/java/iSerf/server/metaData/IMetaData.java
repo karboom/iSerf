@@ -37,6 +37,11 @@ public interface IMetaData {
     void setAgentStay(String agentId, String nodeId);
 
     /**
+     * 删除Agent驻留节点
+     */
+    void removeAgentStay(String agentId);
+
+    /**
      * 查询Team驻留节点
      */
     String getTeamStay(String id);

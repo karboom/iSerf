@@ -15,12 +15,10 @@ import org.junit.jupiter.api.Timeout;
 import tech.tablesaw.api.StringColumn;
 import tech.tablesaw.api.Table;
 
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -227,7 +225,7 @@ class AgentTest {
             var agent = new Agent("test-agent", prompt, llmProvider, tools) {}.run();
 
             // 创建一个列表来收集广播的消息
-            var receivedMessages = new ArrayList<Message>();
+            var receivedMessages = new ArrayList<AgentMessage>();
 
             // 订阅 broadcast 流
             agent.broadcast
@@ -275,14 +273,14 @@ class AgentTest {
     void testMessageEvent() {
             var agent = new Agent("test-message-agent", "请你做一个自我介绍", llmProvider, tools) {}.run();
 
-            var receivedItems = new ArrayList<Message>();
+            var receivedItems = new ArrayList<AgentMessage>();
             var latch = new CountDownLatch(1);
 
             agent.subscribe(item -> {
                 System.out.println(item);
                 receivedItems.add(item);
                 if (Integer.valueOf(0).equals(item.getIsSegment())
-                    && Message.TYPE.TEXT.equals(item.getType())) {
+                    && AgentMessage.TYPE.TEXT.equals(item.getType())) {
                     latch.countDown();
                 }
             });
@@ -293,11 +291,11 @@ class AgentTest {
 
             assertFalse(receivedItems.isEmpty(), "应收到响应消息");
             var textItems = receivedItems.stream()
-                    .filter(item -> item.getType().equals(Message.TYPE.TEXT))
+                    .filter(item -> item.getType().equals(AgentMessage.TYPE.TEXT))
                     .toList();
             assertFalse(textItems.isEmpty(), "应包含文本类型的响应");
             var thinkingItems = receivedItems.stream()
-                    .filter(item -> item.getType().equals(Message.TYPE.THINKING))
+                    .filter(item -> item.getType().equals(AgentMessage.TYPE.THINKING))
                     .toList();
             assertFalse(thinkingItems.isEmpty(), "应包含思考类型的响应");
             var textSegmentZeroCount = textItems.stream()
@@ -332,18 +330,18 @@ class AgentTest {
             );
 
             for (var i = 0; i < messages.size(); i++) {
-                var userItem = Message.builder()
+                var userItem = AgentMessage.builder()
                         .id(UUID.randomUUID().toString())
-                        .role(Message.ROLE.USER)
-                        .type(Message.TYPE.TEXT)
+                        .role(AgentMessage.ROLE.USER)
+                        .type(AgentMessage.TYPE.TEXT)
                         .text(messages.get(i))
                         .build();
                 agent.getMemoryManager().add(userItem);
 
-                var assistantItem = Message.builder()
+                var assistantItem = AgentMessage.builder()
                         .id(UUID.randomUUID().toString())
-                        .role(Message.ROLE.ASSISTANT)
-                        .type(Message.TYPE.TEXT)
+                        .role(AgentMessage.ROLE.ASSISTANT)
+                        .type(AgentMessage.TYPE.TEXT)
                         .text("这是一个回复")
                         .build();
                 agent.getMemoryManager().add(assistantItem);
@@ -356,8 +354,8 @@ class AgentTest {
             System.out.println("压缩前记忆数量: " + countBefore);
             assertTrue(countBefore > 20, "压缩前应有超过20条记忆");
 
-            var event = Event.builder()
-                    .type(Event.Type.ORGANIZE_MEMORY)
+            var event = AgentEvent.builder()
+                    .type(AgentEvent.Type.ORGANIZE_MEMORY)
                     .priority(1)
                     .build();
 
@@ -451,18 +449,18 @@ class AgentTest {
             var agent = new Agent("test-billing-agent", "你是一个有用的助手", llmProvider, tools) {}.run();
 
             // 添加一些测试记忆
-            agent.getMemoryManager().add(Message.builder()
+            agent.getMemoryManager().add(AgentMessage.builder()
                     .id(UUID.randomUUID().toString())
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.TEXT)
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("你好")
                     .isForgotten(0)
                     .build());
 
-            agent.getMemoryManager().add(Message.builder()
+            agent.getMemoryManager().add(AgentMessage.builder()
                     .id(UUID.randomUUID().toString())
-                    .role(Message.ROLE.ASSISTANT)
-                    .type(Message.TYPE.TEXT)
+                    .role(AgentMessage.ROLE.ASSISTANT)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("你好，有什么可以帮助你的吗？")
                     .isForgotten(0)
                     .build());
@@ -483,7 +481,7 @@ class AgentTest {
         assertTimeoutPreemptively(Duration.ofSeconds(60), () -> {
             var agent = new Agent("test-interrupt-agent", "你是一个有用的助手", llmProvider, tools) {}.run();
 
-            var receivedItems = new ArrayList<Message>();
+            var receivedItems = new ArrayList<AgentMessage>();
             agent.subscribe(item -> {
                 System.out.println("收到消息：" + item);
                 receivedItems.add(item);
@@ -517,7 +515,7 @@ class AgentTest {
 
             System.out.println("做诗词后收到消息总数：" + receivedItems.size());
             var textItems = receivedItems.stream()
-                    .filter(item -> item.getType().equals(Message.TYPE.TEXT))
+                    .filter(item -> item.getType().equals(AgentMessage.TYPE.TEXT))
                     .toList();
             assertFalse(textItems.isEmpty(), "应包含文本类型的响应");
 
@@ -553,16 +551,16 @@ class AgentTest {
 
             var memorySizeBefore = agent.getMemoryManager().size();
 
-            var userMessage = Message.builder()
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.TEXT)
+            var userMessage = AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("你好，请用一句话介绍你自己")
                     .build();
 
             var result = agent.call(userMessage, null);
 
             assertNotNull(result, "call 返回结果不应为空");
-            assertEquals(Message.ROLE.ASSISTANT, result.getRole(), "返回消息的角色应为 ASSISTANT");
+            assertEquals(AgentMessage.ROLE.ASSISTANT, result.getRole(), "返回消息的角色应为 ASSISTANT");
             assertNotNull(result.getText(), "返回消息的文本不应为空");
             assertTrue(result.getText().length() > 0, "返回消息的文本长度应大于0");
             assertEquals(memorySizeBefore, agent.getMemoryManager().size(), "call 不应新增记忆");

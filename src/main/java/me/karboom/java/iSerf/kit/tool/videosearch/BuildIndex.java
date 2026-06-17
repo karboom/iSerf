@@ -10,7 +10,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.tool.CallResult;
 import me.karboom.java.iSerf.agent.tool.Context;
 import me.karboom.java.iSerf.agent.tool.FunctionWrapper;
@@ -164,9 +164,9 @@ public class BuildIndex implements FunctionWrapper<BuildIndex.Parameter> {
         var base64Str = Base64.getEncoder().encodeToString(imageBase64);
         var imageUrl = "data:image/jpeg;base64,%s".formatted(base64Str);
 
-        var item = Message.builder()
-                .role(Message.ROLE.USER)
-                .type(Message.TYPE.IMAGE)
+        var item = AgentMessage.builder()
+                .role(AgentMessage.ROLE.USER)
+                .type(AgentMessage.TYPE.IMAGE)
                 .files(List.of(imageUrl))
                 .text("请描述这张图片的内容，提取关键信息，必须是中文结果")
                 .build();

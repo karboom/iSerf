@@ -18,7 +18,7 @@ import java.util.List;
  * TS:id 存储 Team 和驻留节点关系，Value。数据结构：stayNodeId
  */
 @Slf4j
-public class RedisSingle implements IMetaData{
+public class RedisSingleMetaData implements IMetaData{
     public RedisClient client;
     public StatefulRedisConnection<String, String> connection;
     public RedisCommands<String, String> commands;
@@ -27,7 +27,7 @@ public class RedisSingle implements IMetaData{
     private static final String AGENT_SUBSCRIBE_TEMPLATE = "AN:%s";
     private static final String TEAM_STAY_TEMPLATE = "TS:%s";
 
-    public RedisSingle(String url) {
+    public RedisSingleMetaData(String url) {
         this.client = RedisClient.create(url);
         this.connection = client.connect();
         this.commands = connection.sync();
@@ -100,6 +100,12 @@ public class RedisSingle implements IMetaData{
     public void setTeamStay(String teamId, String nodeId) {
         var key = TEAM_STAY_TEMPLATE.formatted(teamId);
         commands.set(key, nodeId);
+    }
+
+    @Override
+    public void removeAgentStay(String agentId) {
+        var key = AGENT_STAY_TEMPLATE.formatted(agentId);
+        commands.del(key);
     }
 
     @Override

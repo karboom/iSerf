@@ -4,8 +4,8 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.AgentMetadata;
-import me.karboom.java.iSerf.agent.Event;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentEvent;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.tool.CallCache;
 import me.karboom.java.iSerf.schedule.Plan;
 import me.karboom.java.iSerf.util.CBORUtil;
@@ -300,8 +300,8 @@ public class NfsPersistence implements IPersistence {
     @Override
     @SneakyThrows
     public AgentSnapshot load(AgentMetadata metadata) {
-        var memories = readDir(getMemoryDir(metadata), Message.class);
-        var events = readList(getEventPath(metadata), Event.class);
+        var memories = readDir(getMemoryDir(metadata), AgentMessage.class);
+        var events = readList(getEventPath(metadata), AgentEvent.class);
         var toolCalls = readDir(getToolCallDir(metadata), CallCache.class);
         var plans = readList(getPlanPath(metadata), Plan.class);
 
@@ -364,7 +364,7 @@ public class NfsPersistence implements IPersistence {
         
         // 写入合并后的数据
         if (!messages.isEmpty()) {
-            appendToDir(dir, messages, Message.class);
+            appendToDir(dir, messages, AgentMessage.class);
         }
     }
 
@@ -376,7 +376,7 @@ public class NfsPersistence implements IPersistence {
         }
         // 追加最后一条（新增的消息）
         var lastMessage = messages.getLast();
-        appendToDir(getMemoryDir(agent.metadata), List.of(lastMessage), Message.class);
+        appendToDir(getMemoryDir(agent.metadata), List.of(lastMessage), AgentMessage.class);
     }
 
     @Override

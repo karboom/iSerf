@@ -5,7 +5,7 @@ import com.github.victools.jsonschema.generator.SchemaGenerator;
 import com.github.victools.jsonschema.generator.SchemaGeneratorConfigBuilder;
 import com.github.victools.jsonschema.generator.SchemaVersion;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.util.HttpUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
@@ -46,7 +46,7 @@ public class Ollama implements IText {
     }
 
     @Override
-    public Flux<Output> send(List<Message> messages, Class<?> outputFormat, List<Tool<?>> tools) {
+    public Flux<Output> send(List<AgentMessage> messages, Class<?> outputFormat, List<Tool<?>> tools) {
         return Flux.create(sink -> {
             var requestBody = buildRequestBody(messages, outputFormat, tools, true);
 
@@ -106,7 +106,7 @@ public class Ollama implements IText {
     }
 
     @Override
-    public Output query(List<Message> messages, Class<?> outputFormat) {
+    public Output query(List<AgentMessage> messages, Class<?> outputFormat) {
         var requestBody = buildRequestBody(messages, outputFormat, null, false);
 
         var request = new Request.Builder()
@@ -131,7 +131,7 @@ public class Ollama implements IText {
     }
 
     @Override
-    public String batch(List<List<Message>> messageBatch, Class<?> outputFormat) {
+    public String batch(List<List<AgentMessage>> messageBatch, Class<?> outputFormat) {
         throw new UnsupportedOperationException("Ollama does not support batch API");
     }
 
@@ -145,7 +145,7 @@ public class Ollama implements IText {
         throw new UnsupportedOperationException("Ollama does not support batch API");
     }
 
-    private String buildRequestBody(List<Message> messages, Class<?> outputFormat, List<Tool<?>> tools, boolean stream) {
+    private String buildRequestBody(List<AgentMessage> messages, Class<?> outputFormat, List<Tool<?>> tools, boolean stream) {
         var body = JSONUtil.create();
         body.put("model", llmType);
         body.put("stream", stream);
@@ -157,28 +157,28 @@ public class Ollama implements IText {
         var messagesArray = JSONUtil.createArray();
         for (var item : messages) {
             switch (item.role) {
-                case Message.ROLE.USER:
+                case AgentMessage.ROLE.USER:
                     var userMessage = JSONUtil.create();
                     userMessage.put("role", "user");
                     userMessage.put("content", item.text);
                     messagesArray.add(userMessage);
                     break;
 
-                case Message.ROLE.ASSISTANT:
+                case AgentMessage.ROLE.ASSISTANT:
                     var assistantMessage = JSONUtil.create();
                     assistantMessage.put("role", "assistant");
                     assistantMessage.put("content", item.text);
                     messagesArray.add(assistantMessage);
                     break;
 
-                case Message.ROLE.SYSTEM:
+                case AgentMessage.ROLE.SYSTEM:
                     var systemMessage = JSONUtil.create();
                     systemMessage.put("role", "system");
                     systemMessage.put("content", item.text);
                     messagesArray.add(systemMessage);
                     break;
 
-                case Message.ROLE.TOOL:
+                case AgentMessage.ROLE.TOOL:
                     if (item.toolCalls != null) {
                         for (var toolCall : item.toolCalls) {
                             var toolMessage = JSONUtil.create();

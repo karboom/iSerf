@@ -1,9 +1,8 @@
 package me.karboom.java.iSerf.server.transport;
 
 import com.corundumstudio.socketio.*;
-import com.corundumstudio.socketio.listener.EventInterceptor;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.server.ContainerServer;
+import me.karboom.java.iSerf.server.Server;
 import me.karboom.java.iSerf.util.DataUtil;
 
 import java.util.Set;
@@ -23,7 +22,7 @@ public abstract class WebsocketTransport implements ITransport {
     /**
      * 所属的传输容器，承载协议无关的业务逻辑
      */
-    protected ContainerServer container;
+    protected Server container;
 
     /**
      * 监听端口
@@ -41,7 +40,7 @@ public abstract class WebsocketTransport implements ITransport {
      * @param port      监听端口
      * @param container 所属容器
      */
-    public WebsocketTransport(ContainerServer container, Integer port) {
+    public WebsocketTransport(Server container, Integer port) {
         this.port = port;
         this.container = container;
         this.transportId = DataUtil.getFlakeId();
@@ -137,19 +136,19 @@ public abstract class WebsocketTransport implements ITransport {
     protected void setupUserNS(SocketIONamespace userNS) {
         // 已知事件白名单
         var knownEvents = Set.of(
-                ContainerServer.EVENT_AGENT_CREATE,
-                ContainerServer.EVENT_AGENT_SEND,
-                ContainerServer.EVENT_AGENT_SUBSCRIBE,
-                ContainerServer.EVENT_AGENT_UNSUBSCRIBE,
-                ContainerServer.EVENT_AGENT_TOOL_CALL,
-                ContainerServer.EVENT_AGENT_LIST,
-                ContainerServer.EVENT_AGENT_EDIT,
-                ContainerServer.EVENT_AGENT_DETAIL,
-                ContainerServer.EVENT_TEAM_CREATE,
-                ContainerServer.EVENT_TEAM_LIST,
-                ContainerServer.EVENT_TEAM_REMOVE,
-                ContainerServer.EVENT_TEAM_EDIT,
-                ContainerServer.EVENT_TEAM_DETAIL
+                Server.EVENT_AGENT_CREATE,
+                Server.EVENT_AGENT_SEND,
+                Server.EVENT_AGENT_SUBSCRIBE,
+                Server.EVENT_AGENT_UNSUBSCRIBE,
+                Server.EVENT_AGENT_TOOL_CALL,
+                Server.EVENT_AGENT_LIST,
+                Server.EVENT_AGENT_EDIT,
+                Server.EVENT_AGENT_DETAIL,
+                Server.EVENT_TEAM_CREATE,
+                Server.EVENT_TEAM_LIST,
+                Server.EVENT_TEAM_REMOVE,
+                Server.EVENT_TEAM_EDIT,
+                Server.EVENT_TEAM_DETAIL
         );
 
         // 连接鉴权，子类自行处理通过/断开
@@ -174,7 +173,7 @@ public abstract class WebsocketTransport implements ITransport {
      */
     private void registerUserEvent(SocketIONamespace ns, String event) {
         ns.addEventListener(event, String.class, (client, dataJson, ackSender) -> {
-            var ctx = ContainerServer.Context.builder()
+            var ctx = Server.Context.builder()
                     .transport(this)
                     .client(client)
                     .serverId(container.id)

@@ -1,7 +1,7 @@
 package me.karboom.java.iSerf.agent.tool;
 
 import me.karboom.java.iSerf.agent.Agent;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
 import me.karboom.java.iSerf.llm.text.Output;
@@ -47,7 +47,7 @@ class ToolHandlerTest {
 
     @Test
     void testUpdate() {
-        var toolCall = Message.ToolCall.builder()
+        var toolCall = AgentMessage.ToolCall.builder()
                 .name("getWeather")
                 .arguments(new HashMap<>(){{
                     put("location", "伦敦");
@@ -63,7 +63,7 @@ class ToolHandlerTest {
 
     @Test
     void testUpdateWithNonExistentTool() {
-        var nonExistentToolCall = Message.ToolCall.builder()
+        var nonExistentToolCall = AgentMessage.ToolCall.builder()
                 .name("non-existent-tool")
                 .arguments(new HashMap<>())
                 .result(CallResult.builder()

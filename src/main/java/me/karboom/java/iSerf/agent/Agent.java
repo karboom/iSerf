@@ -52,11 +52,11 @@ public class Agent {
     public IPersistence persistence;
     protected ILlmProvider llmProvider;
 
-    protected PriorityBlockingQueue<Event> queue;
-    public Flux<Message> itemBroadcast;
+    public PriorityBlockingQueue<AgentEvent> queue;
+    public Flux<AgentMessage> itemBroadcast;
 
-    protected Sinks.Many<Message> sink;
-    public Flux<Message> broadcast;
+    protected Sinks.Many<AgentMessage> sink;
+    public Flux<AgentMessage> broadcast;
 
     private ExecutorService eventPool;
     private ExecutorService broadcastPool;
@@ -100,7 +100,7 @@ public class Agent {
     public Agent(AgentMetadata metadata, String prompt, ILlmProvider llm, List<Tool<?>> tools,
                  IPersistence persistence, ILedger ledger, Path workDir, ISchedule schedule) {
         this.metadata = metadata;
-        this.queue = new PriorityBlockingQueue<>(100, Comparator.comparing(Event::getPriority));
+        this.queue = new PriorityBlockingQueue<>(100, Comparator.comparing(AgentEvent::getPriority));
 
         this.llmProvider = llm;
         this.persistence = persistence != null ? persistence : new NonePersistence();
@@ -163,7 +163,7 @@ public class Agent {
         eventDisposable = Schedulers.fromExecutor(eventPool).schedule(() -> {
             while (true) {
 
-                Event event = null;
+                AgentEvent event = null;
                 long cpuStart = 0;
                 try {
                     event = queue.take();
@@ -172,17 +172,17 @@ public class Agent {
 
                     this.eventInterceptor(event);
                     switch (event.getType()) {
-                        case Event.Type.MESSAGE -> {
+                        case AgentEvent.Type.MESSAGE -> {
                             handleMessage(event);
                         }
 
-                        case Event.Type.ORGANIZE_MEMORY -> {
+                        case AgentEvent.Type.ORGANIZE_MEMORY -> {
                             memoryManager.organizeMemory(this);
                             // 记忆压缩后全量刷盘
                             persistence.syncMemory(this);
                         }
 
-                        case Event.Type.RECOVERY -> {
+                        case AgentEvent.Type.RECOVERY -> {
                             handleRecovery(event);
                         }
                     }
@@ -195,7 +195,7 @@ public class Agent {
 
                         var eventId = event.getId();
                         switch (event.getType()) {
-                            case Event.Type.MESSAGE -> {
+                            case AgentEvent.Type.MESSAGE -> {
                                 // 清理中间状态的 memory
                                 memoryManager.removeByEventId(eventId);
                             }
@@ -224,7 +224,7 @@ public class Agent {
     }
 
     public void recovery () {
-        this.trigger(Event.builder().type(Event.Type.RECOVERY).build());
+        this.trigger(AgentEvent.builder().type(AgentEvent.Type.RECOVERY).build());
     }
 
     public MemoryManager getMemoryManager() {
@@ -239,30 +239,30 @@ public class Agent {
         return llmProvider;
     }
 
-    public void eventInterceptor(Event event) {
+    public void eventInterceptor(AgentEvent event) {
     }
     /**
      * 事件统一入口，需要对字段进行校验
      */
-    public void trigger(Event event) {
+    public void trigger(AgentEvent event) {
         if (event == null) {
             throw ErrorUtil.make("trigger event is null");
         }
 
         var type = event.getType();
-        var validTypes = Set.of(Event.Type.ORGANIZE_MEMORY, Event.Type.MESSAGE, Event.Type.RECOVERY);
+        var validTypes = Set.of(AgentEvent.Type.ORGANIZE_MEMORY, AgentEvent.Type.MESSAGE, AgentEvent.Type.RECOVERY);
         if (!validTypes.contains(type)) {
             throw ErrorUtil.make("trigger invalid event type: %s".formatted(type));
         }
 
-        if (Event.Type.MESSAGE.equals(type) ) {
+        if (AgentEvent.Type.MESSAGE.equals(type) ) {
             if (event.getMessage() == null) {
                 throw ErrorUtil.make("trigger MESSAGE event missing message field");
             }
 
             var message = event.getMessage();
 
-            message.setRole(Message.ROLE.USER);
+            message.setRole(AgentMessage.ROLE.USER);
             message.setId(DataUtil.getFlakeId());
             message.setIsForgotten(0);
         }
@@ -273,23 +273,23 @@ public class Agent {
     }
 
     @SneakyThrows
-    public void send(Message message, Class<?> cls) {
+    public void send(AgentMessage message, Class<?> cls) {
         if (cls != null) {
             message.setFormatted(cls.getConstructors()[0].newInstance());
         }
 
-        this.trigger(Event.builder()
+        this.trigger(AgentEvent.builder()
                 .priority(1)
-                .type(Event.Type.MESSAGE)
+                .type(AgentEvent.Type.MESSAGE)
                 .message(message)
                 .build());
     }
 
     @SneakyThrows
     public void send(String message, Class<?> cls) {
-        var item = Message
+        var item = AgentMessage
                 .builder()
-                .type(me.karboom.java.iSerf.agent.Message.TYPE.TEXT)
+                .type(AgentMessage.TYPE.TEXT)
                 .text(message).build();
 
         this.send(item, cls);
@@ -300,17 +300,17 @@ public class Agent {
     }
 
     // Todo 支持3个入参的版本
-    public Disposable subscribe(Consumer<Message> consumer) {
+    public Disposable subscribe(Consumer<AgentMessage> consumer) {
         return broadcast.subscribe(consumer);
     }
 
-    private Mono<Tuple3<Message, List<Output>, Message>> fluxHandle(Flux<Output> flux, Class format, Event event) {
+    private Mono<Tuple3<AgentMessage, List<Output>, AgentMessage>> fluxHandle(Flux<Output> flux, Class format, AgentEvent event) {
         return flux
                 .publishOn(Schedulers.fromExecutor(this.eventPool))
                 .reduce(Tuples.of(
-                        Message.builder().type(Message.TYPE.THINKING).text("").isSegment(0).build(),
+                        AgentMessage.builder().type(AgentMessage.TYPE.THINKING).text("").isSegment(0).build(),
                         new ArrayList<>(),
-                        Message.builder().role(Message.ROLE.ASSISTANT).type(Message.TYPE.TEXT).text("").isSegment(0).isForgotten(0).eventId(event.getId()).build()
+                        AgentMessage.builder().role(AgentMessage.ROLE.ASSISTANT).type(AgentMessage.TYPE.TEXT).text("").isSegment(0).isForgotten(0).eventId(event.getId()).build()
                 ), (acc, chunk) -> {
                     var thinkingItem = acc.getT1();
                     var toolCall = acc.getT2();
@@ -330,7 +330,7 @@ public class Agent {
                             thinkingItem.setId(UUID.randomUUID().toString()); // 为thinkingItem设置ID
                             thinkingItem.setText(thinkingItem.getText() + thinking);
 
-                            var thinkingSegment = me.karboom.java.iSerf.agent.Message.builder().role(Message.ROLE.ASSISTANT).type(Message.TYPE.THINKING).text(thinking.toString()).isSegment(1).build();
+                            var thinkingSegment = AgentMessage.builder().role(AgentMessage.ROLE.ASSISTANT).type(AgentMessage.TYPE.THINKING).text(thinking.toString()).isSegment(1).build();
 
                             sink.tryEmitNext(thinkingSegment);
                         } else if (toolCalls != null) {
@@ -357,7 +357,7 @@ public class Agent {
 
 
                             if (format == null) {
-                                var contentItemSegment = me.karboom.java.iSerf.agent.Message.builder().id(UUID.randomUUID().toString()).role(contentItem.getRole()).type(me.karboom.java.iSerf.agent.Message.TYPE.TEXT).text(contentText).isSegment(1).build();
+                                var contentItemSegment = AgentMessage.builder().id(UUID.randomUUID().toString()).role(contentItem.getRole()).type(AgentMessage.TYPE.TEXT).text(contentText).isSegment(1).build();
                                 sink.tryEmitNext(contentItemSegment);
                             }
                         } else {
@@ -367,7 +367,7 @@ public class Agent {
 
                     } else if (usage != null) {
                         if (contentItem.getId() != null) {
-                            var usageBuilder = me.karboom.java.iSerf.agent.Message.Usage.builder()
+                            var usageBuilder = AgentMessage.Usage.builder()
                                     .total((int) usage.getTotalTokens())
                                     .promptTotal((int) usage.getPromptTokens())
                                     .completionTotal((int) usage.getCompletionTokens())
@@ -396,11 +396,11 @@ public class Agent {
      * - 调用llm.query，然后将结果转为Message
      */
     @SneakyThrows
-    public Message call(Message message, Class<?> format) {
+    public AgentMessage call(AgentMessage message, Class<?> format) {
         log.debug("call message text: %s".formatted(message.getText()));
 
-        var systemMessage = Message.builder()
-                .role(Message.ROLE.SYSTEM)
+        var systemMessage = AgentMessage.builder()
+                .role(AgentMessage.ROLE.SYSTEM)
                 .text(this.memoryManager.getSystemPrompt())
                 .build();
 
@@ -419,10 +419,10 @@ public class Agent {
 
         log.debug("call result text length: %s".formatted(text.length()));
 
-        var builder = Message.builder()
+        var builder = AgentMessage.builder()
                 .id(UUID.randomUUID().toString())
-                .role(Message.ROLE.ASSISTANT)
-                .type(Message.TYPE.TEXT)
+                .role(AgentMessage.ROLE.ASSISTANT)
+                .type(AgentMessage.TYPE.TEXT)
                 .text(text)
                 .isSegment(0);
 
@@ -454,7 +454,7 @@ public class Agent {
      * 处理信息输入
      * @param event
      */
-    private void handleMessage(Event event) {
+    private void handleMessage(AgentEvent event) {
         var userMessage = event.getMessage();
         userMessage.setEventId(event.getId());
 
@@ -477,9 +477,9 @@ public class Agent {
                         var callResult = toolHandler.invoke(this, calls.getFirst());
 
                         // 按结果类型分组处理
-                        var directCalls = new ArrayList<Message.ToolCall>();
-                        var errorCalls = new ArrayList<Message.ToolCall>();
-                        var llmCalls = new ArrayList<Message.ToolCall>();
+                        var directCalls = new ArrayList<AgentMessage.ToolCall>();
+                        var errorCalls = new ArrayList<AgentMessage.ToolCall>();
+                        var llmCalls = new ArrayList<AgentMessage.ToolCall>();
 
                         for (var call : callResult) {
                             if (call.result.getDirect() != null) {
@@ -495,7 +495,7 @@ public class Agent {
                         // 处理DIRECT类型
                         if (!directCalls.isEmpty()) {
 
-                            for (Message.ToolCall call : directCalls) {
+                            for (AgentMessage.ToolCall call : directCalls) {
                                 // 缓存工具调用参数，结果不管
                                 var cache = CallCache.builder()
                                         .callId(call.getId())
@@ -508,13 +508,13 @@ public class Agent {
                                 persistence.addToolCall(this);
 
                                 // 触发消息
-                                sink.tryEmitNext(Message.builder().toolCalls(List.of(call)).custom(call.getResult().getDirect()).type(Message.TYPE.CUSTOM).isSegment(0).build());
+                                sink.tryEmitNext(AgentMessage.builder().toolCalls(List.of(call)).custom(call.getResult().getDirect()).type(AgentMessage.TYPE.CUSTOM).isSegment(0).build());
                             }
                         }
 
                         // 处理ERROR类型
                         if (!errorCalls.isEmpty()) {
-                            sink.tryEmitNext(me.karboom.java.iSerf.agent.Message.builder().type(me.karboom.java.iSerf.agent.Message.TYPE.ERROR).text("我正在更新代码，请您稍后").build());
+                            sink.tryEmitNext(AgentMessage.builder().type(AgentMessage.TYPE.ERROR).text("我正在更新代码，请您稍后").build());
                             // Todo 判断IFunction
 
                             for (var toolCall : errorCalls) {
@@ -525,16 +525,16 @@ public class Agent {
 
                         // 处理LLM类型
                         if (!llmCalls.isEmpty()) {
-                            var messageInvoke = me.karboom.java.iSerf.agent.Message.builder()
-                                    .role(me.karboom.java.iSerf.agent.Message.ROLE.ASSISTANT)
-                                    .type(me.karboom.java.iSerf.agent.Message.TYPE.TEXT)
+                            var messageInvoke = AgentMessage.builder()
+                                    .role(AgentMessage.ROLE.ASSISTANT)
+                                    .type(AgentMessage.TYPE.TEXT)
                                     .toolCalls(llmCalls)
                                     .isForgotten(0)
                                     .eventId(event.getId())
                                     .build();
 
-                            var messageRes = me.karboom.java.iSerf.agent.Message.builder()
-                                    .role(me.karboom.java.iSerf.agent.Message.ROLE.TOOL)
+                            var messageRes = AgentMessage.builder()
+                                    .role(AgentMessage.ROLE.TOOL)
                                     .eventId(event.getId())
                                     .isForgotten(0)
                                     .toolCalls(llmCalls)
@@ -563,7 +563,7 @@ public class Agent {
         memoryManager.checkAndOrganize(this);
     }
 
-    private void handleRecovery(Event event) {
+    private void handleRecovery(AgentEvent event) {
         var snapshot = persistence.load(this.metadata);
 
         var items = snapshot.getMemories();
@@ -586,7 +586,7 @@ public class Agent {
 
         // 重新触发未处理的事件
         events.stream()
-                .filter(e -> e.getType() != Event.Type.RECOVERY)
+                .filter(e -> e.getType() != AgentEvent.Type.RECOVERY)
                 .forEach(queue::offer);
     }
 
@@ -631,7 +631,7 @@ public class Agent {
      * @deprecated
      * @see ToolHandler#update
      */
-    public Mono<Void> updateTool(Message.ToolCall toolCall) {
+    public Mono<Void> updateTool(AgentMessage.ToolCall toolCall) {
         return toolHandler.update(this, toolCall);
     }
 

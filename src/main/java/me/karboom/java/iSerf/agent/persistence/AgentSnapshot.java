@@ -4,8 +4,8 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import me.karboom.java.iSerf.agent.Event;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentEvent;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.tool.CallCache;
 import me.karboom.java.iSerf.schedule.Plan;
 
@@ -20,8 +20,8 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class AgentSnapshot {
-    public List<Message> memories;
-    public List<Event> events;
+    public List<AgentMessage> memories;
+    public List<AgentEvent> events;
     public List<CallCache> toolCalls;
     public List<Plan> plans;
 }

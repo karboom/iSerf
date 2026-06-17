@@ -6,7 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.llm.text.IText;
 import me.karboom.java.iSerf.rag.store.IStructStore;
 import me.karboom.java.iSerf.util.DataUtil;
@@ -209,9 +209,9 @@ public class Video {
             var imageBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(frameFile));
             var imageUrl = "data:image/jpeg;base64,%s".formatted(imageBase64);
 
-            var message = Message.builder()
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.IMAGE)
+            var message = AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.IMAGE)
                     .files(List.of(imageUrl))
                     .text("请描述这张图片的内容，提取关键信息")
                     .build();
@@ -290,9 +290,9 @@ public class Video {
             var audioBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(segment.path));
             var audioUrl = "data:audio/wav;base64,%s".formatted(audioBase64);
 
-            var message = Message.builder()
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.AUDIO)
+            var message = AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.AUDIO)
                     .audio((audioUrl))
                     .text("请分析这段音频内容，识别语音类型（如对话、音乐、噪音等）和文字内容")
                     .build();

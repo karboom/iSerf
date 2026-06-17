@@ -59,6 +59,12 @@ public class MemoryMetaData implements IMetaData {
     }
 
     @Override
+    public void removeAgentStay(String agentId) {
+        log.debug("removeAgentStay agentId=%s".formatted(agentId));
+        agentStay.remove(agentId);
+    }
+
+    @Override
     public void removeTeamStay(String teamId) {
         log.debug("removeTeamStay teamId=%s".formatted(teamId));
         teamStay.remove(teamId);

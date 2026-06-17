@@ -64,6 +64,9 @@ public class Loader {
         }
 
         var content = Files.readString(filePath);
+        if (StrUtil.isBlank(content)) {
+            return tools;
+        }
         ArrayNode arrayNode;
         if ("json".equals(extension)) {
             arrayNode = JSONUtil.parseArray(content);

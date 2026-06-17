@@ -4,7 +4,7 @@ import com.github.victools.jsonschema.generator.*;
 import com.github.victools.jsonschema.module.jackson.JacksonModule;
 import com.github.victools.jsonschema.module.jackson.JacksonOption;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.util.ErrorUtil;
 import me.karboom.java.iSerf.util.HttpUtil;
@@ -50,7 +50,7 @@ public class Anthropic implements IText {
      * 使用 Anthropic Messages API 进行流式对话
      */
     @Override
-    public Flux<Output> send(List<Message> memory, Class<?> outputFormat, List<Tool<?>> tools) {
+    public Flux<Output> send(List<AgentMessage> memory, Class<?> outputFormat, List<Tool<?>> tools) {
         return Flux.create(sink -> {
             var requestBody = buildRequestBody(memory, outputFormat, tools, true);
 
@@ -231,7 +231,7 @@ public class Anthropic implements IText {
      * 使用 Anthropic Messages API 进行非流式查询
      */
     @Override
-    public Output query(List<Message> messages, Class<?> outputFormat) {
+    public Output query(List<AgentMessage> messages, Class<?> outputFormat) {
         var requestBody = buildRequestBody(messages, outputFormat, null, false);
 
         var request = new Request.Builder()
@@ -264,7 +264,7 @@ public class Anthropic implements IText {
      * 批量查询（Anthropic 不支持 Batch API）
      */
     @Override
-    public String batch(List<List<Message>> messageBatch, Class<?> outputFormat) {
+    public String batch(List<List<AgentMessage>> messageBatch, Class<?> outputFormat) {
         throw ErrorUtil.make("Anthropic does not support batch API");
     }
 
@@ -287,7 +287,7 @@ public class Anthropic implements IText {
     /**
      * 构建请求体
      */
-    private String buildRequestBody(List<Message> memory, Class<?> outputFormat, List<Tool<?>> tools, boolean stream) {
+    private String buildRequestBody(List<AgentMessage> memory, Class<?> outputFormat, List<Tool<?>> tools, boolean stream) {
         var body = JSONUtil.create();
         body.put("model", llmType);
         body.put("stream", stream);
@@ -340,9 +340,9 @@ public class Anthropic implements IText {
     /**
      * 从 memory 列表中提取 system 角色的消息
      */
-    private String extractSystemPrompt(List<Message> memory) {
+    private String extractSystemPrompt(List<AgentMessage> memory) {
         for (var item : memory) {
-            if (Message.ROLE.SYSTEM.equals(item.role)) {
+            if (AgentMessage.ROLE.SYSTEM.equals(item.role)) {
                 return item.text;
             }
         }
@@ -376,19 +376,19 @@ public class Anthropic implements IText {
     /**
      * 构建消息数组（Anthropic 格式，不含 system 角色）
      */
-    private ArrayNode buildMessagesArray(List<Message> memory) {
+    private ArrayNode buildMessagesArray(List<AgentMessage> memory) {
         var messagesArray = JSONUtil.createArray();
 
         for (var item : memory) {
             switch (item.role) {
-                case Message.ROLE.USER:
+                case AgentMessage.ROLE.USER:
                     var userMessage = JSONUtil.create();
                     userMessage.put("role", "user");
                     userMessage.set("content", buildContentArray(item));
                     messagesArray.add(userMessage);
                     break;
 
-                case Message.ROLE.ASSISTANT:
+                case AgentMessage.ROLE.ASSISTANT:
                     var assistantMessage = JSONUtil.create();
                     assistantMessage.put("role", "assistant");
 
@@ -413,7 +413,7 @@ public class Anthropic implements IText {
                     messagesArray.add(assistantMessage);
                     break;
 
-                case Message.ROLE.TOOL:
+                case AgentMessage.ROLE.TOOL:
                     if (item.toolCalls != null) {
                         for (var toolCall : item.toolCalls) {
                             var toolMessage = JSONUtil.create();
@@ -432,7 +432,7 @@ public class Anthropic implements IText {
                     }
                     break;
 
-                case Message.ROLE.SYSTEM:
+                case AgentMessage.ROLE.SYSTEM:
                     break;
             }
         }
@@ -443,18 +443,18 @@ public class Anthropic implements IText {
     /**
      * 构建内容数组（Anthropic 格式）
      */
-    private ArrayNode buildContentArray(Message item) {
+    private ArrayNode buildContentArray(AgentMessage item) {
         var content = JSONUtil.createArray();
 
         switch (item.type) {
-            case Message.TYPE.TEXT:
+            case AgentMessage.TYPE.TEXT:
                 var textBlock = JSONUtil.create();
                 textBlock.put("type", "text");
                 textBlock.put("text", item.text);
                 content.add(textBlock);
                 break;
 
-            case Message.TYPE.IMAGE:
+            case AgentMessage.TYPE.IMAGE:
                 if (item.files != null) {
                     for (var image : item.files) {
                         if (image.startsWith("http")) {

@@ -1,6 +1,6 @@
 package me.karboom.java.iSerf.llm.text;
 
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.tool.Tool;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -62,15 +62,15 @@ public class OpenAIResponseTest {
     @Test
     void testOutputFormat() throws InterruptedException {
         assertTimeout(Duration.ofSeconds(30), () -> {
-            var messages = new ArrayList<Message>();
-            messages.add(Message.builder()
-                    .role(Message.ROLE.SYSTEM)
-                    .type(Message.TYPE.TEXT)
+            var messages = new ArrayList<AgentMessage>();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.SYSTEM)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("You are a helpful assistant.")
                     .build());
-            messages.add(Message.builder()
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.TEXT)
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("What is the weather in Paris? Give me a random temperature.")
                     .build());
 
@@ -107,25 +107,25 @@ public class OpenAIResponseTest {
     @Test
     void testToolCall() throws InterruptedException {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
-            var messages = new ArrayList<Message>();
-            messages.add(Message.builder()
-                    .role(Message.ROLE.SYSTEM)
-                    .type(Message.TYPE.TEXT)
+            var messages = new ArrayList<AgentMessage>();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.SYSTEM)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("You are a helpful assistant.")
                     .build());
-            messages.add(Message.builder()
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.TEXT)
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("What is the capital of France?")
                     .build());
-            messages.add(Message.builder()
-                    .role(Message.ROLE.ASSISTANT)
-                    .type(Message.TYPE.TEXT)
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.ASSISTANT)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("The capital of France is Paris.")
                     .build());
-            messages.add(Message.builder()
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.TEXT)
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("柏林天气如何，北京天气如何")
                     .build());
 
@@ -166,9 +166,9 @@ public class OpenAIResponseTest {
     @Test
     void testThinking() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
-            var messages = new ArrayList<Message>();
-            messages.add(Message.builder()
-                    .role(Message.ROLE.USER)
+            var messages = new ArrayList<AgentMessage>();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
                     .text("弄一幅对联")
                     .build());
 
@@ -211,11 +211,11 @@ public class OpenAIResponseTest {
     @Test
     void testImageInput() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
-            var messages = new ArrayList<Message>();
+            var messages = new ArrayList<AgentMessage>();
 
-            messages.add(Message.builder()
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.IMAGE)
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.IMAGE)
                     .files(List.of(
                             "https://karboom-blog.oss-cn-hangzhou.aliyuncs.com/iSlogger/file_example_PNG_500kB.png"
                     ))
@@ -253,10 +253,10 @@ public class OpenAIResponseTest {
     @Test
     void testVideoInput() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
-            var messages = new ArrayList<Message>();
-            messages.add(Message.builder()
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.VIDEO)
+            var messages = new ArrayList<AgentMessage>();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.VIDEO)
                     .video("https://karboom-blog.oss-cn-hangzhou.aliyuncs.com/iSlogger/file_example_MP4_480_1_5MG.mp4")
                     .fps("5")
                     .text("描述这个视频的内容")
@@ -293,10 +293,10 @@ public class OpenAIResponseTest {
     @Test
     void testAudioInput() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
-            var messages = new ArrayList<Message>();
-            messages.add(Message.builder()
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.AUDIO)
+            var messages = new ArrayList<AgentMessage>();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.AUDIO)
                     .audio("https://karboom-blog.oss-cn-hangzhou.aliyuncs.com/iSlogger/file_example_MP3_700KB.mp3")
                     .text("描述音频的内容")
                     .build());
@@ -329,33 +329,33 @@ public class OpenAIResponseTest {
         });
     }
 
-    private List<List<Message>> createWeatherMessageBatch() {
-        var messageBatch = new ArrayList<List<Message>>();
+    private List<List<AgentMessage>> createWeatherMessageBatch() {
+        var messageBatch = new ArrayList<List<AgentMessage>>();
         
         // 第一个批次：询问天气
-        var messages1 = new ArrayList<Message>();
-        messages1.add(Message.builder()
-                .role(Message.ROLE.SYSTEM)
-                .type(Message.TYPE.TEXT)
+        var messages1 = new ArrayList<AgentMessage>();
+        messages1.add(AgentMessage.builder()
+                .role(AgentMessage.ROLE.SYSTEM)
+                .type(AgentMessage.TYPE.TEXT)
                 .text("你是一个乐于助人的助手。")
                 .build());
-        messages1.add(Message.builder()
-                .role(Message.ROLE.USER)
-                .type(Message.TYPE.TEXT)
+        messages1.add(AgentMessage.builder()
+                .role(AgentMessage.ROLE.USER)
+                .type(AgentMessage.TYPE.TEXT)
                 .text("巴黎的天气怎么样？给出一个随机温度。")
                 .build());
         messageBatch.add(messages1);
         
         // 第二个批次：询问天气
-        var messages2 = new ArrayList<Message>();
-        messages2.add(Message.builder()
-                .role(Message.ROLE.SYSTEM)
-                .type(Message.TYPE.TEXT)
+        var messages2 = new ArrayList<AgentMessage>();
+        messages2.add(AgentMessage.builder()
+                .role(AgentMessage.ROLE.SYSTEM)
+                .type(AgentMessage.TYPE.TEXT)
                 .text("你是一个乐于助人的助手。")
                 .build());
-        messages2.add(Message.builder()
-                .role(Message.ROLE.USER)
-                .type(Message.TYPE.TEXT)
+        messages2.add(AgentMessage.builder()
+                .role(AgentMessage.ROLE.USER)
+                .type(AgentMessage.TYPE.TEXT)
                 .text("北京的天气怎么样？给出一个随机温度。")
                 .build());
         messageBatch.add(messages2);
@@ -468,15 +468,15 @@ public class OpenAIResponseTest {
     @Test
     void testQuery() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
-            var messages = new ArrayList<Message>();
-            messages.add(Message.builder()
-                    .role(Message.ROLE.SYSTEM)
-                    .type(Message.TYPE.TEXT)
+            var messages = new ArrayList<AgentMessage>();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.SYSTEM)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("你是一个乐于助人的助手。")
                     .build());
-            messages.add(Message.builder()
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.TEXT)
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("1+1等于几？")
                     .build());
 

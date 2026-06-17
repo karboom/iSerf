@@ -6,7 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.llm.embedding.IEmbedding;
 import me.karboom.java.iSerf.llm.embedding.Input;
 import me.karboom.java.iSerf.rag.store.IVectorStore;
@@ -142,9 +142,9 @@ public class Memory {
 
         // 调用 llm 提取记忆
         var messageList = List.of(
-                Message.builder()
-                        .role(Message.ROLE.USER)
-                        .type(Message.TYPE.TEXT)
+                AgentMessage.builder()
+                        .role(AgentMessage.ROLE.USER)
+                        .type(AgentMessage.TYPE.TEXT)
                         .text(fullPrompt)
                         .build()
         );

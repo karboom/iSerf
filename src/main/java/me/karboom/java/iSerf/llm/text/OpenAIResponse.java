@@ -1,7 +1,7 @@
 package me.karboom.java.iSerf.llm.text;
 
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.util.ErrorUtil;
 import me.karboom.java.iSerf.util.HttpUtil;
@@ -43,7 +43,7 @@ public class OpenAIResponse extends AbstractOpenAIText {
      * 使用 Responses API 进行流式对话
      */
     @Override
-    public Flux<Output> send(List<Message> memory, Class<?> outputFormat, List<Tool<?>> tools) {
+    public Flux<Output> send(List<AgentMessage> memory, Class<?> outputFormat, List<Tool<?>> tools) {
         return Flux.create(sink -> {
             var requestBody = buildRequestBody(memory, outputFormat, tools);
 
@@ -98,7 +98,7 @@ public class OpenAIResponse extends AbstractOpenAIText {
      * 使用 Responses API 进行非流式查询
      */
     @Override
-    public Output query(List<Message> messages, Class<?> outputFormat) {
+    public Output query(List<AgentMessage> messages, Class<?> outputFormat) {
         var requestBody = buildRequestBody(messages, outputFormat, null);
         var requestJson = JSONUtil.parse(requestBody);
         requestJson.remove("stream");
@@ -132,7 +132,7 @@ public class OpenAIResponse extends AbstractOpenAIText {
      * 构建请求体
      */
     @Override
-    protected String buildRequestBody(List<Message> memory, Class<?> outputFormat, List<Tool<?>> tools) {
+    protected String buildRequestBody(List<AgentMessage> memory, Class<?> outputFormat, List<Tool<?>> tools) {
         var body = JSONUtil.create();
         body.put("model", llmType);
         body.put("stream", true);
@@ -183,12 +183,12 @@ public class OpenAIResponse extends AbstractOpenAIText {
     /**
      * 将 Messages 转换为 Responses API 的 input 格式
      */
-    private ArrayNode convertMessagesToInput(List<Message> memory, List<Tool<?>> tools) {
+    private ArrayNode convertMessagesToInput(List<AgentMessage> memory, List<Tool<?>> tools) {
         var inputArray = JSONUtil.createArray();
 
         for (var item : memory) {
             switch (item.role) {
-                case Message.ROLE.USER:
+                case AgentMessage.ROLE.USER:
                     var userMessage = JSONUtil.create();
                     userMessage.put("type", "message");
                     userMessage.put("role", "user");
@@ -198,7 +198,7 @@ public class OpenAIResponse extends AbstractOpenAIText {
                     inputArray.add(userMessage);
                     break;
 
-                case Message.ROLE.ASSISTANT:
+                case AgentMessage.ROLE.ASSISTANT:
                     var assistantMessage = JSONUtil.create();
                     assistantMessage.put("type", "message");
                     assistantMessage.put("role", "assistant");
@@ -206,7 +206,7 @@ public class OpenAIResponse extends AbstractOpenAIText {
                     inputArray.add(assistantMessage);
                     break;
 
-                case Message.ROLE.SYSTEM:
+                case AgentMessage.ROLE.SYSTEM:
                     var systemMessage = JSONUtil.create();
                     systemMessage.put("type", "message");
                     systemMessage.put("role", "system");
@@ -214,7 +214,7 @@ public class OpenAIResponse extends AbstractOpenAIText {
                     inputArray.add(systemMessage);
                     break;
 
-                case Message.ROLE.TOOL:
+                case AgentMessage.ROLE.TOOL:
                     if (item.toolCalls != null) {
                         for (var toolCall : item.toolCalls) {
                             var toolOutput = JSONUtil.create();
@@ -234,14 +234,14 @@ public class OpenAIResponse extends AbstractOpenAIText {
     /**
      * 构建消息内容
      */
-    private JsonNode buildContent(Message item) {
+    private JsonNode buildContent(AgentMessage item) {
         var result = JSONUtil.create();
         switch (item.type) {
-            case Message.TYPE.TEXT:
+            case AgentMessage.TYPE.TEXT:
                 result.put("type", "input_text");
                 result.put("text", item.text);
                 break;
-            case Message.TYPE.IMAGE:
+            case AgentMessage.TYPE.IMAGE:
                 var content = JSONUtil.createArray();
                 if (item.files != null) {
                     for (var image : item.files) {
@@ -254,7 +254,7 @@ public class OpenAIResponse extends AbstractOpenAIText {
                     content.add(JSONUtil.create().put("type", "input_text").put("text", item.getText()));
                 }
                 return content;
-            case Message.TYPE.AUDIO:
+            case AgentMessage.TYPE.AUDIO:
                 var audioContent = JSONUtil.createArray();
                 if (item.audio != null) {
                     audioContent.add(JSONUtil.create()
@@ -265,7 +265,7 @@ public class OpenAIResponse extends AbstractOpenAIText {
                     audioContent.add(JSONUtil.create().put("type", "input_text").put("text", item.getText()));
                 }
                 return audioContent;
-            case Message.TYPE.VIDEO:
+            case AgentMessage.TYPE.VIDEO:
                 var videoContent = JSONUtil.createArray();
                 if (item.video != null) {
                     videoContent.add(JSONUtil.create()

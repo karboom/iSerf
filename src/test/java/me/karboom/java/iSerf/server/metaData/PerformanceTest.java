@@ -9,7 +9,7 @@ public class PerformanceTest {
      */
     @Test
     void testRedisMemorySize() {
-        var redis = new RedisSingle("redis://localhost:6379");
+        var redis = new RedisSingleMetaData("redis://localhost:6379");
         var count = 100_000;
         var createdKeys = new java.util.ArrayList<String>();
 

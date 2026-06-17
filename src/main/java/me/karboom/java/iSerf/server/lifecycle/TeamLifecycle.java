@@ -1,5 +1,6 @@
-package me.karboom.java.iSerf.server;
+package me.karboom.java.iSerf.server.lifecycle;
 
+import me.karboom.java.iSerf.server.Server;
 import me.karboom.java.iSerf.team.Team;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -18,7 +19,7 @@ public abstract class TeamLifecycle {
      * @param params Team 构造参数
      * @return Team 实例
      */
-    public abstract Team createTeam(ContainerServer.Context ctx, ObjectNode params);
+    public abstract Team createTeam(Server.Context ctx, ObjectNode params);
 
     /**
      * 按照条件查找 Team 列表
@@ -27,7 +28,7 @@ public abstract class TeamLifecycle {
      * @param params 查询条件
      * @return 匹配的 Team 列表
      */
-    public abstract List<Team> listTeam(ContainerServer.Context ctx, ObjectNode params);
+    public abstract List<Team> listTeam(Server.Context ctx, ObjectNode params);
 
     /**
      * 删除 Team
@@ -36,7 +37,7 @@ public abstract class TeamLifecycle {
      * @param params 删除参数（含 target team ID）
      * @return 被删除的 Team 实例，若不存在则返回 null
      */
-    public abstract Team removeTeam(ContainerServer.Context ctx, ObjectNode params);
+    public abstract Team removeTeam(Server.Context ctx, ObjectNode params);
 
     /**
      * 编辑 Team
@@ -45,7 +46,7 @@ public abstract class TeamLifecycle {
      * @param params 编辑参数（含 target team ID 及要修改的字段）
      * @return 编辑后的 Team 实例，若不存在则返回 null
      */
-    public abstract Team editTeam(ContainerServer.Context ctx, ObjectNode params);
+    public abstract Team editTeam(Server.Context ctx, ObjectNode params);
 
     /**
      * 获取 Team 详情
@@ -54,7 +55,7 @@ public abstract class TeamLifecycle {
      * @param params 查询参数（含 target team ID）
      * @return Team 实例，若不存在则返回 null
      */
-    public abstract Team detailTeam(ContainerServer.Context ctx, ObjectNode params);
+    public abstract Team detailTeam(Server.Context ctx, ObjectNode params);
 
     // region 序列化
 

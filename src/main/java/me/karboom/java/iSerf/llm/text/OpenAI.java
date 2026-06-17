@@ -1,7 +1,7 @@
 package me.karboom.java.iSerf.llm.text;
 
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.util.HttpUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
@@ -45,7 +45,7 @@ public class OpenAI extends AbstractOpenAIText {
      * @return 自定义数据结构
      */
     @Override
-    public Flux<Output> send(List<Message> memory, Class<?> outputFormat, List<Tool<?>> tools) {
+    public Flux<Output> send(List<AgentMessage> memory, Class<?> outputFormat, List<Tool<?>> tools) {
         return Flux.create(sink -> {
             var requestBody = buildRequestBody(memory, outputFormat, tools);
 
@@ -97,7 +97,7 @@ public class OpenAI extends AbstractOpenAIText {
     }
 
     @Override
-    public Output query(List<Message> messages, Class<?> outputFormat) {
+    public Output query(List<AgentMessage> messages, Class<?> outputFormat) {
         var requestBody = buildRequestBody(messages, outputFormat, null);
         var requestJson = JSONUtil.parse(requestBody);
         requestJson.remove("stream");
@@ -126,7 +126,7 @@ public class OpenAI extends AbstractOpenAIText {
     }
 
     @Override
-    protected String buildRequestBody(List<Message> memory, Class<?> outputFormat, List<Tool<?>> tools) {
+    protected String buildRequestBody(List<AgentMessage> memory, Class<?> outputFormat, List<Tool<?>> tools) {
         var body = JSONUtil.create();
         body.put("model", llmType);
         body.put("stream", true);
@@ -151,15 +151,15 @@ public class OpenAI extends AbstractOpenAIText {
         var messagesArray = JSONUtil.createArray();
         for (var item : memory) {
             switch (item.role) {
-                case Message.ROLE.USER:
+                case AgentMessage.ROLE.USER:
                     var userMessage = JSONUtil.create();
                     userMessage.put("role", "user");
 
                     switch (item.type) {
-                        case Message.TYPE.TEXT:
+                        case AgentMessage.TYPE.TEXT:
                             userMessage.put("content", item.text);
                             break;
-                        case Message.TYPE.IMAGE:
+                        case AgentMessage.TYPE.IMAGE:
                             var content = JSONUtil.createArray();
                             if (item.files != null) {
                                 for (var image : item.files) {
@@ -174,7 +174,7 @@ public class OpenAI extends AbstractOpenAIText {
                             userMessage.set("content", content);
                             break;
 
-                        case Message.TYPE.AUDIO:
+                        case AgentMessage.TYPE.AUDIO:
                             var audioContent = JSONUtil.createArray();
                             if (item.audio != null) {
                                     audioContent.add(JSONUtil.create()
@@ -188,7 +188,7 @@ public class OpenAI extends AbstractOpenAIText {
 
                             break;
 
-                        case Message.TYPE.VIDEO:
+                        case AgentMessage.TYPE.VIDEO:
                             var videoContent = JSONUtil.createArray();
                             if (item.video != null) {
                                 videoContent.add(JSONUtil.create()
@@ -207,7 +207,7 @@ public class OpenAI extends AbstractOpenAIText {
                     messagesArray.add(userMessage);
                     break;
 
-                case Message.ROLE.ASSISTANT:
+                case AgentMessage.ROLE.ASSISTANT:
                     var assistantMessage = JSONUtil.create();
                     assistantMessage.put("role", "assistant");
 
@@ -229,13 +229,13 @@ public class OpenAI extends AbstractOpenAIText {
                     messagesArray.add(assistantMessage);
                     break;
 
-                case Message.ROLE.SYSTEM:
+                case AgentMessage.ROLE.SYSTEM:
                     messagesArray.add(JSONUtil.create()
                             .put("role", "system")
                             .put("content", item.text));
                     break;
 
-                case Message.ROLE.TOOL:
+                case AgentMessage.ROLE.TOOL:
                     if (item.toolCalls != null) {
                         for (var toolCall : item.toolCalls) {
                             messagesArray.add(JSONUtil.create()

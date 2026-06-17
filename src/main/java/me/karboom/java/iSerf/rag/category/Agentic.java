@@ -2,7 +2,7 @@ package me.karboom.java.iSerf.rag.category;
 
 import lombok.*;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.llm.text.OpenAI;
 import io.lettuce.core.RedisClient;
 import me.karboom.java.iSerf.rag.store.IStructStore;
@@ -105,7 +105,7 @@ public class Agentic {
                 
                 """.formatted(query, indexContent);
 
-        var messages = List.of(Message.builder().text(prompt).role(Message.ROLE.USER).type(Message.TYPE.TEXT).build());
+        var messages = List.of(AgentMessage.builder().text(prompt).role(AgentMessage.ROLE.USER).type(AgentMessage.TYPE.TEXT).build());
         var output = llm.query(messages, Agentic.IndexHit.class);
 
         var content = output.getChoices().get(0).getText();

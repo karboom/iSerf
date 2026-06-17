@@ -4,6 +4,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.ErrorUtil;
 import reactor.core.Disposable;
@@ -189,9 +190,9 @@ public class Team {
                                                     """.formatted(task.getId(), task.getDesc());
 
                                             var result = targetAgent.call(
-                                                    me.karboom.java.iSerf.agent.Message.builder()
-                                                            .role(me.karboom.java.iSerf.agent.Message.ROLE.USER)
-                                                            .type(me.karboom.java.iSerf.agent.Message.TYPE.TEXT)
+                                                    AgentMessage.builder()
+                                                            .role(AgentMessage.ROLE.USER)
+                                                            .type(AgentMessage.TYPE.TEXT)
                                                             .text(taskMessage)
                                                             .build(),
                                                     null
@@ -268,9 +269,9 @@ public class Team {
                     Thread.ofVirtual().name("comment-" + commentTask.getId()).start(() -> {
                         try {
                             var result = taskAgent.call(
-                                    me.karboom.java.iSerf.agent.Message.builder()
-                                            .role(me.karboom.java.iSerf.agent.Message.ROLE.USER)
-                                            .type(me.karboom.java.iSerf.agent.Message.TYPE.TEXT)
+                                    AgentMessage.builder()
+                                            .role(AgentMessage.ROLE.USER)
+                                            .type(AgentMessage.TYPE.TEXT)
                                             .text(commentMessage)
                                             .build(),
                                     null

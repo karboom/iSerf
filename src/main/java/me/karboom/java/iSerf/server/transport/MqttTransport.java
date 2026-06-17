@@ -6,7 +6,7 @@ import com.hivemq.client.mqtt.mqtt5.Mqtt5Client;
 import com.hivemq.client.mqtt.mqtt5.message.publish.Mqtt5Publish;
 import com.hivemq.embedded.EmbeddedHiveMQ;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.server.ContainerServer;
+import me.karboom.java.iSerf.server.Server;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 
@@ -51,7 +51,7 @@ public abstract class MqttTransport implements ITransport {
     /**
      * 所属的传输容器
      */
-    private final ContainerServer container;
+    private final Server container;
 
     /**
      * MQTT 监听端口
@@ -79,7 +79,7 @@ public abstract class MqttTransport implements ITransport {
      * @param container 所属容器
      * @param port      MQTT 监听端口
      */
-    public MqttTransport(ContainerServer container, Integer port) {
+    public MqttTransport(Server container, Integer port) {
         this.container = container;
         this.port = port;
         this.transportId = DataUtil.getFlakeId();
@@ -235,7 +235,7 @@ public abstract class MqttTransport implements ITransport {
             return;
         }
 
-        var ctx = ContainerServer.Context.builder()
+        var ctx = Server.Context.builder()
                 .transport(this)
                 .client(clientId)
                 .serverId(container.id)

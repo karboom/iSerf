@@ -1,7 +1,7 @@
 package me.karboom.java.iSerf.agent.memory;
 
 import me.karboom.java.iSerf.agent.Agent;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,20 +47,20 @@ class MemoryManagerTest {
         assertEquals(0, memoryManager.size());
         assertTrue(memoryManager.isEmpty());
 
-        memoryManager.add(Message.builder().text("hello").build());
+        memoryManager.add(AgentMessage.builder().text("hello").build());
         assertEquals(1, memoryManager.size());
         assertFalse(memoryManager.isEmpty());
 
-        memoryManager.add(Message.builder().text("world").build());
+        memoryManager.add(AgentMessage.builder().text("world").build());
         assertEquals(2, memoryManager.size());
     }
 
     @Test
     void testAddAll() {
         var list = List.of(
-                Message.builder().text("a").build(),
-                Message.builder().text("b").build(),
-                Message.builder().text("c").build()
+                AgentMessage.builder().text("a").build(),
+                AgentMessage.builder().text("b").build(),
+                AgentMessage.builder().text("c").build()
         );
         memoryManager.addAll(list);
         assertEquals(3, memoryManager.size());
@@ -68,9 +68,9 @@ class MemoryManagerTest {
 
     @Test
     void testRemoveByEventId() {
-        var m1 = Message.builder().text("keep").eventId("evt-1").build();
-        var m2 = Message.builder().text("remove").eventId("evt-2").build();
-        var m3 = Message.builder().text("keep2").eventId("evt-1").build();
+        var m1 = AgentMessage.builder().text("keep").eventId("evt-1").build();
+        var m2 = AgentMessage.builder().text("remove").eventId("evt-2").build();
+        var m3 = AgentMessage.builder().text("keep2").eventId("evt-1").build();
 
         memoryManager.add(m1);
         memoryManager.add(m2);
@@ -89,31 +89,31 @@ class MemoryManagerTest {
 
     @Test
     void testGetMessagesReturnsDefensiveCopy() {
-        memoryManager.add(Message.builder().text("original").build());
+        memoryManager.add(AgentMessage.builder().text("original").build());
 
         var copy = memoryManager.getMessages();
-        copy.add(Message.builder().text("added-later").build());
+        copy.add(AgentMessage.builder().text("added-later").build());
 
         assertEquals(1, memoryManager.size(), "防御性副本修改不应影响原列表");
     }
 
     @Test
     void testGetMessagesRawReturnsActualReference() {
-        memoryManager.add(Message.builder().text("msg").build());
+        memoryManager.add(AgentMessage.builder().text("msg").build());
 
         var raw = memoryManager.getMessagesRaw();
         assertEquals(1, raw.size());
 
-        raw.add(Message.builder().text("extra").build());
+        raw.add(AgentMessage.builder().text("extra").build());
         assertEquals(2, memoryManager.size(), "原始引用修改应反映到内部列表");
     }
 
     @Test
     void testGetActiveMessagesFiltersForgotten() {
-        memoryManager.add(Message.builder().text("active1").isForgotten(0).build());
-        memoryManager.add(Message.builder().text("forgotten").isForgotten(1).build());
-        memoryManager.add(Message.builder().text("active2").isForgotten(0).build());
-        memoryManager.add(Message.builder().text("nullForgotten").isForgotten(null).build());
+        memoryManager.add(AgentMessage.builder().text("active1").isForgotten(0).build());
+        memoryManager.add(AgentMessage.builder().text("forgotten").isForgotten(1).build());
+        memoryManager.add(AgentMessage.builder().text("active2").isForgotten(0).build());
+        memoryManager.add(AgentMessage.builder().text("nullForgotten").isForgotten(null).build());
 
         var active = memoryManager.getActiveMessages();
         assertEquals(3, active.size());
@@ -123,12 +123,12 @@ class MemoryManagerTest {
 
     @Test
     void testGetMessagesForLLMWithSystemPrompt() {
-        memoryManager.add(Message.builder().text("user msg").isForgotten(0).role(Message.ROLE.USER).build());
+        memoryManager.add(AgentMessage.builder().text("user msg").isForgotten(0).role(AgentMessage.ROLE.USER).build());
 
         var llmMessages = memoryManager.getMessagesForLLM();
 
         assertEquals(2, llmMessages.size());
-        assertEquals(Message.ROLE.SYSTEM, llmMessages.get(0).getRole());
+        assertEquals(AgentMessage.ROLE.SYSTEM, llmMessages.get(0).getRole());
         assertEquals("你是一个测试助手", llmMessages.get(0).getText());
         assertEquals("user msg", llmMessages.get(1).getText());
     }
@@ -136,7 +136,7 @@ class MemoryManagerTest {
     @Test
     void testGetMessagesForLLMWithoutSystemPrompt() {
         memoryManager.setSystemPrompt(null);
-        memoryManager.add(Message.builder().text("user msg").isForgotten(0).build());
+        memoryManager.add(AgentMessage.builder().text("user msg").isForgotten(0).build());
 
         var llmMessages = memoryManager.getMessagesForLLM();
 
@@ -147,7 +147,7 @@ class MemoryManagerTest {
     @Test
     void testGetMessagesForLLMEmptySystemPrompt() {
         memoryManager.setSystemPrompt("");
-        memoryManager.add(Message.builder().text("user msg").isForgotten(0).build());
+        memoryManager.add(AgentMessage.builder().text("user msg").isForgotten(0).build());
 
         var llmMessages = memoryManager.getMessagesForLLM();
 
@@ -170,14 +170,14 @@ class MemoryManagerTest {
     void testOrganizeMemory() {
         // 添加多条消息
         for (int i = 0; i < 10; i++) {
-            memoryManager.add(Message.builder()
+            memoryManager.add(AgentMessage.builder()
                     .text("测试消息内容 " + i)
-                    .role(Message.ROLE.USER)
+                    .role(AgentMessage.ROLE.USER)
                     .isForgotten(0)
                     .build());
-            memoryManager.add(Message.builder()
+            memoryManager.add(AgentMessage.builder()
                     .text("回复内容 " + i)
-                    .role(Message.ROLE.ASSISTANT)
+                    .role(AgentMessage.ROLE.ASSISTANT)
                     .isForgotten(0)
                     .build());
         }
@@ -199,7 +199,7 @@ class MemoryManagerTest {
         // 摘要不应被遗忘
         var lastMsg = messages.get(messages.size() - 1);
         assertEquals(0, (int) lastMsg.getIsForgotten());
-        assertEquals(Message.ROLE.ASSISTANT, lastMsg.getRole());
+        assertEquals(AgentMessage.ROLE.ASSISTANT, lastMsg.getRole());
     }
 
     // endregion
@@ -208,9 +208,9 @@ class MemoryManagerTest {
 
     @Test
     void testCheckAndOrganizeBelowThreshold() {
-        var msg = Message.builder()
+        var msg = AgentMessage.builder()
                 .text("hello")
-                .usage(Message.Usage.builder().promptTotal(100).build())
+                .usage(AgentMessage.Usage.builder().promptTotal(100).build())
                 .build();
         memoryManager.add(msg);
 
@@ -222,9 +222,9 @@ class MemoryManagerTest {
     @Test
     @Timeout(30)
     void testCheckAndOrganizeAboveThreshold() {
-        var msg = Message.builder()
+        var msg = AgentMessage.builder()
                 .text("large message")
-                .usage(Message.Usage.builder().promptTotal(160000).build())
+                .usage(AgentMessage.Usage.builder().promptTotal(160000).build())
                 .isForgotten(0)
                 .build();
         memoryManager.add(msg);
@@ -247,14 +247,14 @@ class MemoryManagerTest {
 
     @Test
     void testGetMessagesForLLMSkipsForgotten() {
-        memoryManager.add(Message.builder().text("visible").isForgotten(0).role(Message.ROLE.USER).build());
-        memoryManager.add(Message.builder().text("hidden").isForgotten(1).role(Message.ROLE.USER).build());
+        memoryManager.add(AgentMessage.builder().text("visible").isForgotten(0).role(AgentMessage.ROLE.USER).build());
+        memoryManager.add(AgentMessage.builder().text("hidden").isForgotten(1).role(AgentMessage.ROLE.USER).build());
 
         var llmMessages = memoryManager.getMessagesForLLM();
 
         // system prompt + 1 visible
         assertEquals(2, llmMessages.size());
-        assertEquals(Message.ROLE.SYSTEM, llmMessages.get(0).getRole());
+        assertEquals(AgentMessage.ROLE.SYSTEM, llmMessages.get(0).getRole());
         assertTrue(llmMessages.stream().anyMatch(m -> "visible".equals(m.getText())));
         assertTrue(llmMessages.stream().noneMatch(m -> "hidden".equals(m.getText())));
     }
@@ -265,7 +265,7 @@ class MemoryManagerTest {
 
     @Test
     void testCheckAndOrganizeWithNullUsage() {
-        var msg = Message.builder()
+        var msg = AgentMessage.builder()
                 .text("no usage field")
                 .isForgotten(0)
                 .build();

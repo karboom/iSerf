@@ -2,7 +2,7 @@ package me.karboom.java.iSerf.rag.util;
 
 import lombok.*;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.llm.text.OpenAI;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
@@ -256,9 +256,9 @@ public class PicTreeBuilder {
                     9. 根据相邻标题的缩进关系确认父标题
                     """;
 
-            var messages = List.of(Message.builder()
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.IMAGE)
+            var messages = List.of(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.IMAGE)
 
                     .text(prompt)
                     .files(List.of(dataUrl))

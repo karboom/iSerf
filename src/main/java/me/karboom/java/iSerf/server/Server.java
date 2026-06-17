@@ -4,18 +4,20 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import lombok.extern.jackson.Jacksonized;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
-import me.karboom.java.iSerf.agent.Event;
+import me.karboom.java.iSerf.agent.AgentEvent;
 import me.karboom.java.iSerf.agent.persistence.IPersistence;
 import me.karboom.java.iSerf.config.Config;
+import me.karboom.java.iSerf.server.lifecycle.AgentLifecycle;
+import me.karboom.java.iSerf.server.lifecycle.TeamLifecycle;
 import me.karboom.java.iSerf.team.Team;
 import me.karboom.java.iSerf.server.messageBus.IMessageBus;
 import me.karboom.java.iSerf.server.metaData.IMetaData;
 import me.karboom.java.iSerf.server.metaData.Node;
 import me.karboom.java.iSerf.server.transport.ITransport;
 import me.karboom.java.iSerf.util.DataUtil;
+import me.karboom.java.iSerf.util.ErrorUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import reactor.core.Disposable;
 import tools.jackson.core.type.TypeReference;
@@ -31,9 +33,11 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * 可挂载多个 ITransport 实现（Websocket、Mqtt 等），统一管理生命周期和集群通信。
  */
 @Slf4j
-public abstract class ContainerServer {
+public abstract class Server {
 
     // ======================== 事件名常量 ========================
+    public static final String EVENT_AGENT_ACTIVATE = "agent.activate";
+    public static final String EVENT_AGENT_DEACTIVATE = "agent.deactivate";
     public static final String EVENT_AGENT_CREATE = "agent.create";
     public static final String EVENT_AGENT_SEND = "agent.send";
     public static final String EVENT_AGENT_SUBSCRIBE = "agent.subscribe";
@@ -124,7 +128,7 @@ public abstract class ContainerServer {
         /**
          * 所属容器实例，供生命周期方法访问 messageBus、metaData 等
          */
-        public ContainerServer server;
+        public Server server;
         /**
          * 是否集群内部通信（来自其他节点的代理请求）
          */
@@ -212,8 +216,8 @@ public abstract class ContainerServer {
      * @param agentLifecycle Agent 生命周期管理
      * @param teamLifecycle  Team 生命周期管理
      */
-    public ContainerServer(String clusterIp, IMessageBus messageBus, IMetaData metaData,
-                           AgentLifecycle agentLifecycle, TeamLifecycle teamLifecycle) {
+    public Server(String clusterIp, IMessageBus messageBus, IMetaData metaData,
+                  AgentLifecycle agentLifecycle, TeamLifecycle teamLifecycle) {
         this.clusterIp = clusterIp;
         this.id = DataUtil.getFlakeId();
         this.messageBus = messageBus;
@@ -309,7 +313,7 @@ public abstract class ContainerServer {
      */
     public ObjectNode handleAgentSend(Context context, ObjectNode data) {
         var agentId = data.path("agentId").asText();
-        var eventObj = JSONUtil.convert(data.path("event"), Event.class);
+        var eventObj = JSONUtil.convert(data.path("event"), AgentEvent.class);
         var agent = localAgents.get(agentId);
         if (agent != null) {
             agent.trigger(eventObj);
@@ -426,11 +430,10 @@ public abstract class ContainerServer {
      * @return 包含 agents 数组的 ObjectNode
      */
     public ObjectNode handleAgentList(Context context, ObjectNode data) {
-        var keyword = data.path("keyword").asText();
-        var snapshots = persistence.search(keyword);
+        var agents = agentLifecycle.listAgent(context, data);
 
         var resultArray = JSONUtil.createArray();
-        snapshots.forEach(snapshot -> resultArray.add(agentLifecycle.serializeAgentSnapshot(snapshot)));
+        agents.forEach(agent -> resultArray.add(agentLifecycle.serializeAgent(agent)));
         return JSONUtil.create().set("agents", resultArray);
     }
 
@@ -451,28 +454,70 @@ public abstract class ContainerServer {
 
     /**
      * 处理 agent.detail 事件：获取 Agent 详情。
-     * Agent 在本地则直接返回详情，不在本地则代理到目标节点。
+     * 通过底层共享存储查找，单节点即可返回全局结果。
      *
      * @param context 上下文（含 transport、client、user）
      * @param data    请求数据（含 agentId）
-     * @return 响应 ObjectNode，本地命中时返回；远程代理时返回 null（异步回调）
+     * @return 响应 ObjectNode，命中时返回；未找到时返回 null
      */
     public ObjectNode handleAgentDetail(Context context, ObjectNode data) {
         var agent = agentLifecycle.detailAgent(context, data);
         if (agent != null) {
             return agentLifecycle.serializeAgent(agent);
         }
-        var agentId = data.path("agentId").asText();
-        var targetNodeId = metaData.getAgentStay(agentId);
-        if (targetNodeId != null && !this.id.equals(targetNodeId)) {
-            var transportRecord = TransportClientRecord.builder()
-                    .transportId(context.transport.getTransportId())
-                    .clientHandle(context.client)
-                    .build();
-            agentClient.put(agentId, transportRecord);
-            sendToOtherNode(EVENT_AGENT_DETAIL, JSONUtil.stringify(data), targetNodeId);
-        }
         return null;
+    }
+
+    /**
+     * 处理 agent.activate 事件：从持久化存储加载 Agent 到内存（冷状态恢复）
+     *
+     * @param context 上下文（含 transport、client、user）
+     * @param data    请求数据（含 agentId）
+     * @return 响应 ObjectNode，含 agentId
+     */
+    public ObjectNode handleAgentActivate(Context context, ObjectNode data) {
+        var agentId = data.path("agentId").asText();
+        if (localAgents.containsKey(agentId)) {
+            throw ErrorUtil.make("agent already active: %s".formatted(agentId));
+        }
+        var agent = agentLifecycle.detailAgent(context, data);
+        if (agent == null) {
+            throw ErrorUtil.make("agent not found: %s".formatted(agentId));
+        }
+        agent.run();
+        localAgents.put(agentId, agent);
+        metaData.setAgentStay(agentId, this.id);
+        log.debug("handleAgentActivate agent.activate: %s".formatted(agentId));
+        return JSONUtil.create().put("agentId", agentId);
+    }
+
+    /**
+     * 处理 agent.deactivate 事件：将 Agent 从内存移除回持久化存储
+     *
+     * @param context 上下文（含 transport、client、user）
+     * @param data    请求数据（含 agentId）
+     * @return 响应 ObjectNode，本地命中时返回；远程代理时返回 null
+     */
+    public ObjectNode handleAgentDeactivate(Context context, ObjectNode data) {
+        var agentId = data.path("agentId").asText();
+        var agent = localAgents.get(agentId);
+        if (agent != null) {
+            persistence.syncMemory(agent);
+            persistence.syncEvent(agent);
+            persistence.syncToolCall(agent);
+            persistence.syncPlan(agent);
+            agent.stop();
+            localAgents.remove(agentId);
+            metaData.removeAgentStay(agentId);
+            log.debug("handleAgentDeactivate agent.deactivate: %s".formatted(agentId));
+            return JSONUtil.create().put("agentId", agentId);
+        } else {
+            var targetNodeId = metaData.getAgentStay(agentId);
+            if (targetNodeId != null) {
+                sendToOtherNode(EVENT_AGENT_DEACTIVATE, JSONUtil.stringify(data), targetNodeId);
+            }
+            return null;
+        }
     }
 
     // ======================== Team 事件处理 ========================
@@ -611,6 +656,8 @@ public abstract class ContainerServer {
             this.eventInterceptor(context, event, dataJson);
 
             var result = switch (event) {
+                case EVENT_AGENT_ACTIVATE -> handleAgentActivate(context, msg.body);
+                case EVENT_AGENT_DEACTIVATE -> handleAgentDeactivate(context, msg.body);
                 case EVENT_AGENT_CREATE -> handleAgentCreate(context, msg.body);
                 case EVENT_AGENT_SEND -> handleAgentSend(context, msg.body);
                 case EVENT_AGENT_SUBSCRIBE -> handleAgentSubscribe(context, msg.body);
@@ -730,25 +777,7 @@ public abstract class ContainerServer {
                     }
                     case "reverse" -> {
 
-                        if (EVENT_AGENT_DETAIL.equals(event)) {
-                            // region 处理 agent.detail 反向回调：从 agentClient 查找传输通道并转发
-                            var parsed = JSONUtil.parse(bodyJson);
-                            var dataNode = parsed.path("body").path("data");
-                            if (!dataNode.isMissingNode()) {
-                                var targetId = dataNode.path("metadata").path("id").asText();
-                                var record = agentClient.get(targetId);
-                                if (record != null) {
-                                    for (var transport : transports) {
-                                        if (record.getTransportId().equals(transport.getTransportId())) {
-                                            transport.sendToClient(record.getClientHandle(), event, JSONUtil.stringify(dataNode));
-                                            agentClient.remove(targetId);
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                            // endregion
-                        } else if (EVENT_TEAM_DETAIL.equals(event)) {
+                        if (EVENT_TEAM_DETAIL.equals(event)) {
                             // region 处理 team.detail 反向回调：从 teamClient 查找传输通道并转发
                             var parsed = JSONUtil.parse(bodyJson);
                             var dataNode = parsed.path("body").path("data");

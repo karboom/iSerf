@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import me.karboom.java.iSerf.agent.AgentMessage;
 
 import java.util.List;
 
@@ -14,5 +15,5 @@ import java.util.List;
 public class Message {
     public String agentId;
     public List<String> mentions;
-    public me.karboom.java.iSerf.agent.Message message;
+    public AgentMessage message;
 }

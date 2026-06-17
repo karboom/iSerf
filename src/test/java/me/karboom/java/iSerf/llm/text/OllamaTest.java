@@ -1,6 +1,6 @@
 package me.karboom.java.iSerf.llm.text;
 
-import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.AgentMessage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -59,15 +59,15 @@ public class OllamaTest {
     @Test
     void testSend() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
-            var messages = new ArrayList<Message>();
-            messages.add(Message.builder()
-                    .role(Message.ROLE.SYSTEM)
-                    .type(Message.TYPE.TEXT)
+            var messages = new ArrayList<AgentMessage>();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.SYSTEM)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("You are a helpful assistant.")
                     .build());
-            messages.add(Message.builder()
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.TEXT)
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("What is the capital of France?")
                     .build());
 
@@ -106,15 +106,15 @@ public class OllamaTest {
     @Test
     void testOutputFormat() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
-            var messages = new ArrayList<Message>();
-            messages.add(Message.builder()
-                    .role(Message.ROLE.SYSTEM)
-                    .type(Message.TYPE.TEXT)
+            var messages = new ArrayList<AgentMessage>();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.SYSTEM)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("You are a helpful assistant.")
                     .build());
-            messages.add(Message.builder()
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.TEXT)
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("北京的气温是多少度？用 JSON 格式回答。")
                     .build());
 
@@ -151,15 +151,15 @@ public class OllamaTest {
     @Test
     void testQuery() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
-            var messages = new ArrayList<Message>();
-            messages.add(Message.builder()
-                    .role(Message.ROLE.SYSTEM)
-                    .type(Message.TYPE.TEXT)
+            var messages = new ArrayList<AgentMessage>();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.SYSTEM)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("你是一个乐于助人的助手。")
                     .build());
-            messages.add(Message.builder()
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.TEXT)
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("1+1 等于几？")
                     .build());
 
@@ -180,11 +180,11 @@ public class OllamaTest {
     @Test
     void testBatchNotSupported() {
         assertThrows(UnsupportedOperationException.class, () -> {
-            var messages = new ArrayList<List<Message>>();
-            var msg = new ArrayList<Message>();
-            msg.add(Message.builder()
-                    .role(Message.ROLE.USER)
-                    .type(Message.TYPE.TEXT)
+            var messages = new ArrayList<List<AgentMessage>>();
+            var msg = new ArrayList<AgentMessage>();
+            msg.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("Hello")
                     .build());
             messages.add(msg);

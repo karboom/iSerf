@@ -4,11 +4,11 @@ import io.socket.client.IO;
 import io.socket.client.Socket;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.server.ContainerServer;
+import me.karboom.java.iSerf.server.Server;
 import me.karboom.java.iSerf.server.TestContainer;
 import me.karboom.java.iSerf.server.TestTeamLifecycle;
-import me.karboom.java.iSerf.server.messageBus.Pulsar;
-import me.karboom.java.iSerf.server.metaData.RedisSingle;
+import me.karboom.java.iSerf.server.messageBus.PulsarMessageBus;
+import me.karboom.java.iSerf.server.metaData.RedisSingleMetaData;
 import me.karboom.java.iSerf.util.JSONUtil;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,14 +27,14 @@ import static org.junit.jupiter.api.Assertions.*;
 @Slf4j
 class WebsocketTransportTest {
 
-    private ContainerServer container;
+    private Server container;
     private TestWebsocketTransport transport;
 
     @BeforeEach
     void setUp() {
-        container = new ContainerServer("127.0.0.1",
-                new Pulsar("pulsar://localhost:6650"),
-                new RedisSingle("redis://:RGluZ1NoZW5nMTIz@localhost:6379"),
+        container = new Server("127.0.0.1",
+                new PulsarMessageBus("pulsar://localhost:6650"),
+                new RedisSingleMetaData("redis://:RGluZ1NoZW5nMTIz@localhost:6379"),
                 new TestContainer(),
                 new TestTeamLifecycle()) {
             @Override
@@ -95,7 +95,7 @@ class WebsocketTransportTest {
         socket.connect();
         assertTrue(connectLatch.await(5, TimeUnit.SECONDS), "客户端应能连接");
 
-        socket.emit(ContainerServer.EVENT_AGENT_CREATE, "{}", new io.socket.client.Ack() {
+        socket.emit(Server.EVENT_AGENT_CREATE, "{}", new io.socket.client.Ack() {
             @Override
             public void call(Object... args) {
                 if (args.length > 0 && args[0] instanceof String) {
@@ -177,7 +177,7 @@ class WebsocketTransportTest {
         var ackLatch = new CountDownLatch(1);
         var ackRef = new AtomicReferenceArray<String>(1);
 
-        socket.emit(ContainerServer.EVENT_AGENT_CREATE, "{}", new io.socket.client.Ack() {
+        socket.emit(Server.EVENT_AGENT_CREATE, "{}", new io.socket.client.Ack() {
             @Override
             public void call(Object... args) {
                 if (args.length > 0 && args[0] instanceof String) {
@@ -213,7 +213,7 @@ class WebsocketTransportTest {
      */
     static class TestWebsocketTransport extends WebsocketTransport {
 
-        public TestWebsocketTransport(ContainerServer container, Integer port) {
+        public TestWebsocketTransport(Server container, Integer port) {
             super(container, port);
         }
 

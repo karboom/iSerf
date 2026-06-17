@@ -14,7 +14,7 @@ import java.util.List;
 @AllArgsConstructor
 @NoArgsConstructor
 @Builder
-public class Message {
+public class AgentMessage {
     static public class TYPE {
         public static final String TEXT = "TEXT";
         public static final String IMAGE = "IMAGE";
@@ -96,7 +96,7 @@ public class Message {
     /**
      * 多个消息混合
      */
-    public List<Message> mixed;
+    public List<AgentMessage> mixed;
 
     public ObjectNode custom;
 

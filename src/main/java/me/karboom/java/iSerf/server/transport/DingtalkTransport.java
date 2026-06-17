@@ -1,7 +1,7 @@
 package me.karboom.java.iSerf.server.transport;
 
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.server.ContainerServer;
+import me.karboom.java.iSerf.server.Server;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import okhttp3.OkHttpClient;
@@ -12,7 +12,6 @@ import okhttp3.WebSocketListener;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -42,7 +41,7 @@ public abstract class DingtalkTransport implements ITransport {
     /**
      * 所属的传输容器
      */
-    private final ContainerServer container;
+    private final Server container;
 
     /**
      * 钉钉应用 AppKey
@@ -91,7 +90,7 @@ public abstract class DingtalkTransport implements ITransport {
      * @param appKey    钉钉应用 AppKey
      * @param appSecret 钉钉应用 AppSecret
      */
-    public DingtalkTransport(ContainerServer container, String appKey, String appSecret) {
+    public DingtalkTransport(Server container, String appKey, String appSecret) {
         this.container = container;
         this.appKey = appKey;
         this.appSecret = appSecret;
@@ -325,7 +324,7 @@ public abstract class DingtalkTransport implements ITransport {
             }
 
             // 将钉钉消息作为 agent.send 事件转发到 ContainerServer
-            var ctx = ContainerServer.Context.builder()
+            var ctx = Server.Context.builder()
                     .transport(this)
                     .client(senderStaffId)
                     .serverId(container.id)
@@ -339,7 +338,7 @@ public abstract class DingtalkTransport implements ITransport {
                     .put("messageId", messageId)
                     .set("rawData", data));
 
-            container.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_SEND, eventData);
+            container.handleUserEvent(ctx, Server.EVENT_AGENT_SEND, eventData);
         } catch (Exception e) {
             log.warn("handleDingtalkMessage error: %s".formatted(e.getMessage()));
         }
