@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -17,12 +19,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 public class SocialTest {
 
+    private static final Path WORK_BASE = Path.of("/tmp/iSerf/team/social");
+
     private Team team;
 
     @BeforeEach
     @SneakyThrows
     void setUp() {
-        team = new Social().text();
+        team = new Social().text(WORK_BASE);
     }
 
     // region 团队构建
@@ -52,6 +56,20 @@ public class SocialTest {
             assertEquals(team, team.leader.team);
             for (var member : team.member) {
                 assertEquals(team, member.team);
+            }
+        }
+
+        @Test
+        void testWorkDirSet() {
+            var agentIds = List.of("leader", "topic", "tree", "editor", "validator", "channel");
+            var allAgents = new java.util.ArrayList<me.karboom.java.iSerf.agent.Agent>();
+            allAgents.add(team.leader);
+            allAgents.addAll(team.member);
+
+            for (var agent : allAgents) {
+                var expectedDir = WORK_BASE.resolve(agent.metadata.getId());
+                assertEquals(expectedDir, agent.workDir,
+                        "WorkDir for %s should be %s".formatted(agent.metadata.getId(), expectedDir));
             }
         }
     }
@@ -217,10 +235,18 @@ public class SocialTest {
                     .desc("请优化开头部分，增加吸引力")
                     .build());
 
-            // COMMENT 通过虚拟线程异步处理，等待 agent 响应
-            Thread.sleep(3000);
+            Thread.sleep(5000);
 
             assertNotNull(task.getResult(), "Task result should be updated after comment");
+
+            // 验证 editor 工作目录中产生了文件
+            var editorDir = WORK_BASE.resolve("editor");
+            if (Files.exists(editorDir)) {
+                try (var files = Files.list(editorDir)) {
+                    var fileList = files.toList();
+                    assertFalse(fileList.isEmpty(), "Editor should produce output files after comment");
+                }
+            }
         }
     }
 
@@ -254,6 +280,29 @@ public class SocialTest {
             for (var task : team.tasks) {
                 assertEquals(Task.STATUS.DONE, task.getStatus(),
                         "Task %s should be DONE".formatted(task.getId()));
+                assertNotNull(task.getResult(), "Task %s should have result".formatted(task.getId()));
+            }
+
+            // 验证工作目录存在
+            var agentIds = List.of("topic", "tree", "editor", "validator", "channel");
+            for (var id : agentIds) {
+                var dir = WORK_BASE.resolve(id);
+                assertTrue(Files.exists(dir),
+                        "WorkDir should exist for %s: %s".formatted(id, dir));
+            }
+
+            // 验证 editor 产出文件
+            var editorDir = WORK_BASE.resolve("editor");
+            try (var files = Files.list(editorDir)) {
+                var editorFiles = files.toList();
+                assertFalse(editorFiles.isEmpty(), "Editor should produce output files");
+            }
+
+            // 验证 channel 产出最终文件
+            var channelDir = WORK_BASE.resolve("channel");
+            try (var files = Files.list(channelDir)) {
+                var channelFiles = files.toList();
+                assertFalse(channelFiles.isEmpty(), "Channel should produce final output files");
             }
         }
     }
