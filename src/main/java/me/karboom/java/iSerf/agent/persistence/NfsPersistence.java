@@ -81,6 +81,10 @@ public class NfsPersistence implements IPersistence {
         return Paths.get(getAgentDir(metadata) + "/plan.cbor");
     }
 
+    private Path getMetadataPath(AgentMetadata metadata) {
+        return Paths.get(getAgentDir(metadata) + "/metadata.cbor");
+    }
+
     // endregion
 
     // region 通用读写
@@ -128,6 +132,29 @@ public class NfsPersistence implements IPersistence {
 
         Files.move(tmpPath, path, StandardCopyOption.ATOMIC_MOVE);
         log.debug("writeList to file: {}", path);
+    }
+
+    @SneakyThrows
+    private <T> T readSingle(Path path, Class<T> clazz) {
+        var bytes = Files.readAllBytes(path);
+        if (bytes == null || bytes.length == 0) {
+            return null;
+        }
+        return CBORUtil.parse(bytes, clazz);
+    }
+
+    @SneakyThrows
+    private void writeSingle(Path path, Object obj) {
+        var tmpPath = Paths.get(path.toString() + ".tmp");
+        var bytes = CBORUtil.toByte(obj);
+
+        try (var channel = FileChannel.open(tmpPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
+            channel.write(java.nio.ByteBuffer.wrap(bytes));
+            channel.force(true);
+        }
+
+        Files.move(tmpPath, path, StandardCopyOption.ATOMIC_MOVE);
+        log.debug("writeSingle to file: {}", path);
     }
 
     @SneakyThrows
@@ -278,10 +305,12 @@ public class NfsPersistence implements IPersistence {
         var events = readList(getEventPath(metadata), AgentEvent.class);
         var toolCalls = readDir(getToolCallDir(metadata), CallCache.class);
         var plans = readList(getPlanPath(metadata), Plan.class);
+        var loadedMetadata = readSingle(getMetadataPath(metadata), AgentMetadata.class);
 
         log.debug("load from dir: {}", getAgentDir(metadata));
 
         return AgentSnapshot.builder()
+                .metadata(loadedMetadata)
                 .memories(memories)
                 .events(events)
                 .toolCalls(toolCalls)
@@ -409,6 +438,14 @@ public class NfsPersistence implements IPersistence {
     }
 
     @Override
+    public void syncMetadata(Agent agent) {
+        if (agent.metadata == null) {
+            return;
+        }
+        writeSingle(getMetadataPath(agent.metadata), agent.metadata);
+    }
+
+    @Override
     @SneakyThrows
     public List<AgentSnapshot> search(Map<String, Object> params) {
         var result = new ArrayList<AgentSnapshot>();
@@ -481,6 +518,7 @@ public class NfsPersistence implements IPersistence {
         var toolCallDir = getToolCallDir(agent.metadata);
         var eventPath = getEventPath(agent.metadata);
         var planPath = getPlanPath(agent.metadata);
+        var metadataPath = getMetadataPath(agent.metadata);
 
         // 创建目录结构
         Files.createDirectories(agentDir);
@@ -490,6 +528,12 @@ public class NfsPersistence implements IPersistence {
         // 创建空文件
         Files.createFile(eventPath);
         Files.createFile(planPath);
+        Files.createFile(metadataPath);
+
+        // 写入初始 metadata
+        if (agent.metadata != null) {
+            writeSingle(metadataPath, agent.metadata);
+        }
 
         log.debug("create agent dir: {}", agentDir);
         return true;

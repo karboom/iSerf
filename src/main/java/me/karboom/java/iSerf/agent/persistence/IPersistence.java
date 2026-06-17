@@ -85,6 +85,17 @@ public interface IPersistence {
 
     // endregion
 
+    // region Metadata
+
+    /**
+     * 全量覆盖元数据
+     *
+     * @param agent Agent 实例
+     */
+    void syncMetadata(Agent agent);
+
+    // endregion
+
     // region Search
 
     /**

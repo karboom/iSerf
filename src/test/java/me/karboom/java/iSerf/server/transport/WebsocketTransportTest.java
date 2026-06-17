@@ -39,6 +39,11 @@ class WebsocketTransportTest {
                 new TestTeamLifecycle()) {
             @Override
             public void eventInterceptor(Context ctx, String event, String dataJson) {}
+
+            @Override
+            public Exception exceptionHandler(Context ctx, String event, String msgId, Exception e) {
+                return e;
+            }
         };
         transport = new TestWebsocketTransport(container, 9090);
         transport.start();

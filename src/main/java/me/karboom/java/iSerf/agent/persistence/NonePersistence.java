@@ -58,6 +58,11 @@ public class NonePersistence implements IPersistence {
     }
 
     @Override
+    public void syncMetadata(Agent agent) {
+        // do nothing
+    }
+
+    @Override
     public List<AgentSnapshot> search(Map<String, Object> params) {
         return List.of();
     }

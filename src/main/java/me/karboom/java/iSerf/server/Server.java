@@ -54,9 +54,7 @@ public abstract class Server {
     public static final String EVENT_TEAM_DETAIL = "team.detail";
 
 
-    static class Error extends RuntimeException {
 
-    }
 
     @Data
     @Builder
@@ -227,6 +225,17 @@ public abstract class Server {
     }
 
     public abstract void eventInterceptor(Context ctx, String event, String dataJson);
+
+    /**
+     * 全局异常处理，子类实现以自定义异常转换逻辑
+     *
+     * @param ctx   请求上下文
+     * @param event 事件名
+     * @param msgId 消息ID
+     * @param e     原始异常
+     * @return 处理后的异常，用于构建错误响应
+     */
+    public abstract Exception exceptionHandler(Context ctx, String event, String msgId, Exception e);
     /**
      * 挂载一个传输协议实例
      *
@@ -634,6 +643,7 @@ public abstract class Server {
      * @return 响应 JSON 字符串（{msgId, body} 格式），无返回值时为 null
      */
     public String handleUserEvent(Context context, String event, String dataJson) {
+        Message<ObjectNode> msg = null;
         try {
             if (isShuttingDown) {
                 var shutdownErrorJson = buildErrorResponse("", "server is shutting down");
@@ -641,7 +651,7 @@ public abstract class Server {
                 context.transport.closeClient(context.client);
                 throw new RuntimeException("server is shutting down");
             }
-            var msg = JSONUtil.parse(dataJson, new TypeReference<Message<ObjectNode>>() {});
+            msg = JSONUtil.parse(dataJson, new TypeReference<Message<ObjectNode>>() {});
             if (msg.msgId == null) {
                 throw new RuntimeException("need msgId");
             }
@@ -682,11 +692,9 @@ public abstract class Server {
             }
             return null;
         } catch (Exception e) {
-            var errMsg = "服务器错误";
-            if (e instanceof Error) {
-                errMsg = e.getMessage();
-            }
-            var errResponse = buildErrorResponse("", errMsg);
+            var msgId = msg != null ? msg.msgId : "";
+            var handled = exceptionHandler(context, event, msgId, e);
+            var errResponse = buildErrorResponse(msgId, handled.getMessage());
 
             if (!context.isInternal) {
                 context.transport.sendToClient(context.client, event, errResponse);

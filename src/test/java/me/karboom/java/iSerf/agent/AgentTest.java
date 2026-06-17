@@ -532,19 +532,12 @@ class AgentTest {
     void testConstructor() {
         assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
             var testPath = Paths.get("src/test/resources/agent/constructor");
-            var loader = new Loader(2000);
-            var toolsFromFile = loader.fromToolFile(testPath.resolve("tools.yaml"), null);
-            var promptPath = testPath.resolve("system-prompt.md");
-            var prompt = java.nio.file.Files.exists(promptPath) ? java.nio.file.Files.readString(promptPath, java.nio.charset.StandardCharsets.UTF_8) : "";
-
-            var config = new AgentConfig();
+            var loader = new AgentConfigLoader();
+            var config = loader.fromPath(testPath);
             var metadata = new AgentMetadata();
             metadata.setId("test-path-init-agent");
             config.setMetadata(metadata);
-            config.setPrompt(prompt);
             config.setLlm(llmProvider);
-            config.setTools(toolsFromFile);
-            config.setWorkDir(testPath);
             var agent = new Agent(config) {}.run();
 
             assertEquals("test-path-init-agent", agent.metadata.getId());

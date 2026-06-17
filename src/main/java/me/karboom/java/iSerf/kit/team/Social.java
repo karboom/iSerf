@@ -3,9 +3,9 @@ package me.karboom.java.iSerf.kit.team;
 import lombok.SneakyThrows;
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.AgentConfig;
+import me.karboom.java.iSerf.agent.AgentConfigLoader;
 import me.karboom.java.iSerf.agent.AgentMetadata;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
-import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
 import me.karboom.java.iSerf.agent.tool.Loader;
 import me.karboom.java.iSerf.kit.tool.filesystem.ListDirectory;
 import me.karboom.java.iSerf.kit.tool.filesystem.ReadFile;
@@ -13,8 +13,6 @@ import me.karboom.java.iSerf.kit.tool.filesystem.WriteFile;
 import me.karboom.java.iSerf.llm.text.OpenAI;
 import me.karboom.java.iSerf.team.Team;
 
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
@@ -49,12 +47,12 @@ public class Social {
         );
 
         // 创建团队成员
-        var leader = createAgent("leader", provider, rootPath.resolve("leader"), loader);
-        var topic = createAgent("topic", provider, rootPath.resolve("topic"), loader);
-        var tree = createAgent("tree", provider, rootPath.resolve("tree"), loader);
-        var editor = createAgent("editor", provider, rootPath.resolve("editor"), loader);
-        var validator = createAgent("validator", provider, rootPath.resolve("validator"), loader);
-        var channel = createAgent("channel", provider, rootPath.resolve("channel"), loader);
+        var leader = createAgent("leader", provider, rootPath.resolve("leader"));
+        var topic = createAgent("topic", provider, rootPath.resolve("topic"));
+        var tree = createAgent("tree", provider, rootPath.resolve("tree"));
+        var editor = createAgent("editor", provider, rootPath.resolve("editor"));
+        var validator = createAgent("validator", provider, rootPath.resolve("validator"));
+        var channel = createAgent("channel", provider, rootPath.resolve("channel"));
 
         // 设置工作目录并安装文件系统工具
         for (var member : List.of(leader, topic, tree, editor, validator, channel)) {
@@ -69,24 +67,14 @@ public class Social {
 
     /**
      * 从文件系统创建 Agent
-     * path/system-prompt.md 系统提示词
-     * path/tools.yaml 工具配置
      */
-    @SneakyThrows
-    private Agent createAgent(String id, ILlmProvider provider, Path path, Loader loader) {
-        var tools = loader.fromToolFile(path.resolve("tools.yaml"), null);
-        var promptPath = path.resolve("system-prompt.md");
-        var prompt = Files.exists(promptPath) ? Files.readString(promptPath, StandardCharsets.UTF_8) : "";
-
-        var config = new AgentConfig();
+    private Agent createAgent(String id, FixedLlmProvider provider, Path path) {
+        var loader = new AgentConfigLoader();
+        var config = loader.fromPath(path);
         var metadata = new AgentMetadata();
         metadata.setId(id);
         config.setMetadata(metadata);
-        config.setPrompt(prompt);
         config.setLlm(provider);
-        config.setTools(tools);
-        config.setWorkDir(path);
-
         return new Agent(config) {}.run();
     }
 }

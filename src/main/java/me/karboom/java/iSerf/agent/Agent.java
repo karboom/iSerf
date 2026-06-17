@@ -46,7 +46,7 @@ public class Agent {
     // region =========== 成员变量 ============
 
 
-    private MemoryManager memoryManager;
+    protected MemoryManager memoryManager;
     public IPersistence persistence;
     protected ILlmProvider llmProvider;
 
@@ -56,8 +56,8 @@ public class Agent {
     protected Sinks.Many<AgentMessage> sink;
     public Flux<AgentMessage> broadcast;
 
-    private ExecutorService eventPool;
-    private ExecutorService broadcastPool;
+    protected ExecutorService eventPool;
+    protected ExecutorService broadcastPool;
 
     public ISchedule schedule;
 
@@ -85,9 +85,12 @@ public class Agent {
     // region ============ 构造函数 ===============
 
     /**
-     * 空构造函数，用于纯数据构造，不初始化任何组件
+     * 空构造函数，用于纯数据构造
+     *
      */
-    public Agent() {}
+    public Agent() {
+        this.memoryManager = new MemoryManager(null);
+    }
 
     /**
      * 通过配置类构造，完整初始化所有组件
@@ -314,6 +317,8 @@ public class Agent {
                             if (thinkingItem.getId() != null) {
                                 // thinking阶段结束，更新thinkingItem为非片段并发送
                                 sink.tryEmitNext(thinkingItem);
+//                                memoryManager.add(thinkingItem);
+//                                persistence.addMemory(this);
                             }
                             // 将当前chunk添加到toolCall列表中用于后续处理
                             toolCall.add(chunk);
@@ -322,6 +327,8 @@ public class Agent {
                             if (thinkingItem.getId() != null) {
                                 // thinking阶段结束，更新thinkingItem为非片段并发送
                                 sink.tryEmitNext(thinkingItem);
+//                                memoryManager.add(thinkingItem);
+//                                persistence.addMemory(this);
                                 thinkingItem.setId(null);
                             }
 
@@ -435,6 +442,8 @@ public class Agent {
 
         // 添加到记忆中
         memoryManager.add(userMessage);
+        // 用户消息入库后立即持久化，避免后续 assistant 消息覆盖导致 addMemory 只写入最后一条
+        persistence.addMemory(this);
 
         var format = event.getMessage().getFormatted() == null ? null : event.getMessage().getFormatted().getClass();
 
@@ -553,6 +562,11 @@ public class Agent {
             return;
         }
 
+        // 恢复元数据
+        if (snapshot.getMetadata() != null) {
+            this.metadata = snapshot.getMetadata();
+        }
+
         var items = snapshot.getMemories();
         log.debug("applySnapshot items size: %s".formatted(items != null ? items.size() : 0));
 
@@ -579,6 +593,11 @@ public class Agent {
      */
     public AgentSnapshot toSnapshot() {
         var builder = AgentSnapshot.builder();
+
+        // 导出元数据
+        if (metadata != null) {
+            builder.metadata(metadata);
+        }
 
         // 导出记忆
         if (memoryManager != null) {

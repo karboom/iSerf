@@ -125,6 +125,11 @@ class ContainerServerTest {
                 }) {
             @Override
             public void eventInterceptor(Context ctx, String event, String dataJson) {}
+
+            @Override
+            public Exception exceptionHandler(Context ctx, String event, String msgId, Exception e) {
+                return e;
+            }
         };
         container.addTransport(transport);
     }
