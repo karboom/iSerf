@@ -4,7 +4,7 @@ import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 
 import me.karboom.java.iSerf.llm.text.OpenAI;
-import me.karboom.java.iSerf.server.lifecycle.AgentLifecycle;
+import me.karboom.java.iSerf.server.lifecycle.IAgentLifecycle;
 import me.karboom.java.iSerf.util.JSONUtil;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -16,7 +16,7 @@ import java.util.UUID;
 /**
  * 测试用 AgentLifecycle 实现，Agent 工厂方法
  */
-public class TestContainer extends AgentLifecycle {
+public class TestContainer implements IAgentLifecycle {
 
     @Override
     public Agent createAgent(Server.Context ctx, ObjectNode params) {

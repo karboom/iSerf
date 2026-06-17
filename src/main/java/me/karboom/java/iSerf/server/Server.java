@@ -9,8 +9,8 @@ import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.AgentEvent;
 import me.karboom.java.iSerf.agent.persistence.IPersistence;
 import me.karboom.java.iSerf.config.Config;
-import me.karboom.java.iSerf.server.lifecycle.AgentLifecycle;
-import me.karboom.java.iSerf.server.lifecycle.TeamLifecycle;
+import me.karboom.java.iSerf.server.lifecycle.IAgentLifecycle;
+import me.karboom.java.iSerf.server.lifecycle.ITeamLifecycle;
 import me.karboom.java.iSerf.team.Team;
 import me.karboom.java.iSerf.server.messageBus.IMessageBus;
 import me.karboom.java.iSerf.server.metaData.IMetaData;
@@ -190,12 +190,12 @@ public abstract class Server {
     /**
      * Agent 生命周期管理
      */
-    public AgentLifecycle agentLifecycle;
+    public IAgentLifecycle agentLifecycle;
 
     /**
      * Team 生命周期管理
      */
-    public TeamLifecycle teamLifecycle;
+    public ITeamLifecycle teamLifecycle;
 
     /**
      * 关闭状态标志
@@ -217,7 +217,7 @@ public abstract class Server {
      * @param teamLifecycle  Team 生命周期管理
      */
     public Server(String clusterIp, IMessageBus messageBus, IMetaData metaData,
-                  AgentLifecycle agentLifecycle, TeamLifecycle teamLifecycle) {
+                  IAgentLifecycle agentLifecycle, ITeamLifecycle teamLifecycle) {
         this.clusterIp = clusterIp;
         this.id = DataUtil.getFlakeId();
         this.messageBus = messageBus;

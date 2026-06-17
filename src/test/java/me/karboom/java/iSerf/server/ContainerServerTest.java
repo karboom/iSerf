@@ -10,8 +10,8 @@ import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.llm.text.BatchTaskInfo;
 import me.karboom.java.iSerf.llm.text.IText;
 import me.karboom.java.iSerf.llm.text.Output;
-import me.karboom.java.iSerf.server.lifecycle.AgentLifecycle;
-import me.karboom.java.iSerf.server.lifecycle.TeamLifecycle;
+import me.karboom.java.iSerf.server.lifecycle.IAgentLifecycle;
+import me.karboom.java.iSerf.server.lifecycle.ITeamLifecycle;
 import me.karboom.java.iSerf.server.messageBus.MemoryMessageBus;
 import me.karboom.java.iSerf.server.metaData.MemoryMetaData;
 import me.karboom.java.iSerf.server.transport.NoneTransport;
@@ -69,7 +69,7 @@ class ContainerServerTest {
         transport = new NoneTransport();
 
         container = new Server("127.0.0.1", messageBus, metaData,
-                new AgentLifecycle() {
+                new IAgentLifecycle() {
                     @Override
                     public Agent createAgent(Server.Context ctx, ObjectNode params) { return makeAgent(); }
                     @Override
@@ -94,7 +94,7 @@ class ContainerServerTest {
                     }
 
                 },
-                new TeamLifecycle() {
+                new ITeamLifecycle() {
                     @Override
                     public Team createTeam(Server.Context ctx, ObjectNode params) {
                         return new Team(makeAgent(), List.of()) {};
