@@ -1,7 +1,10 @@
 package me.karboom.java.iSerf.kit.tool;
 
 import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.AgentConfig;
+import me.karboom.java.iSerf.agent.AgentMetadata;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
+import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
 import me.karboom.java.iSerf.agent.tool.Loader;
 import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.kit.tool.videosearch.MixedSearch;
@@ -104,8 +107,14 @@ public class VideoSearchTest {
             var i = inputs.indexOf(input);
             var llm = llmTest.getLlm();
             var llmProvider = new FixedLlmProvider(llm);
-            var agent = new Agent("srag-agent-" + i, "", llmProvider, tools) {
-            }.run();
+            var config = new AgentConfig();
+            var metadata = new AgentMetadata();
+            metadata.setId("srag-agent-" + i);
+            config.setMetadata(metadata);
+            config.setPrompt("");
+            config.setLlm(llmProvider);
+            config.setTools(tools);
+            var agent = new Agent(config) {}.run();
 
             // 使用agent.subscribe订阅响应内容
             agent.subscribe(
@@ -148,8 +157,14 @@ public class VideoSearchTest {
 
         var llm = llmTest.getLlm("qwen3-vl-plus");
         var llmProvider = new FixedLlmProvider(llm);
-        var agent = new Agent("build-index-agent", "", llmProvider, tools) {
-        }.run();
+        var config = new AgentConfig();
+        var metadata = new AgentMetadata();
+        metadata.setId("build-index-agent");
+        config.setMetadata(metadata);
+        config.setPrompt("");
+        config.setLlm(llmProvider);
+        config.setTools(tools);
+        var agent = new Agent(config) {}.run();
 
         var result = new StringBuilder();
         var finished = new AtomicBoolean(false);

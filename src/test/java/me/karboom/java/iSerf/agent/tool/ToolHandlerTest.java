@@ -1,6 +1,8 @@
 package me.karboom.java.iSerf.agent.tool;
 
 import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.AgentConfig;
+import me.karboom.java.iSerf.agent.AgentMetadata;
 import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
@@ -42,7 +44,14 @@ class ToolHandlerTest {
         tools.add(weatherT);
 
         toolHandler = new ToolHandler(tools, 5);
-        testAgent = new Agent("test-agent", "test prompt", llmProvider, tools);
+        var config = new AgentConfig();
+        var metadata = new AgentMetadata();
+        metadata.setId("test-agent");
+        config.setMetadata(metadata);
+        config.setPrompt("test prompt");
+        config.setLlm(llmProvider);
+        config.setTools(tools);
+        testAgent = new Agent(config);
     }
 
     @Test

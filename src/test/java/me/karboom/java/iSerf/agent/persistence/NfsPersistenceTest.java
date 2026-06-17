@@ -44,7 +44,7 @@ class NfsPersistenceTest {
             assertFalse(Files.exists(Paths.get(agentDir)), "目录不应存在");
 
             // 测试 remove 不存在的数据（不应抛出异常）
-            var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
+            var agent = new Agent();
             agent.metadata = metadata;
             persistence.remove(agent);
         });
@@ -62,7 +62,7 @@ class NfsPersistenceTest {
                     .build();
 
             // 创建 Agent 并添加记忆
-            var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
+            var agent = new Agent();
             agent.metadata = metadata;
 
             var message1 = AgentMessage.builder()
@@ -110,7 +110,7 @@ class NfsPersistenceTest {
                     .id("test-agent-" + UUID.randomUUID())
                     .build();
 
-            var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
+            var agent = new Agent();
             agent.metadata = metadata;
 
             // 添加第一条记忆并追加
@@ -155,7 +155,7 @@ class NfsPersistenceTest {
                     .id("test-agent-" + UUID.randomUUID())
                     .build();
 
-            var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
+            var agent = new Agent();
             agent.metadata = metadata;
 
             // 同步事件（清空）
@@ -181,7 +181,7 @@ class NfsPersistenceTest {
                     .id("test-agent-" + UUID.randomUUID())
                     .build();
 
-            var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
+            var agent = new Agent();
             agent.metadata = metadata;
 
             // 添加工具调用缓存
@@ -218,7 +218,7 @@ class NfsPersistenceTest {
                     .id("test-agent-" + UUID.randomUUID())
                     .build();
 
-            var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
+            var agent = new Agent();
             agent.metadata = metadata;
 
             // 添加第一个工具调用缓存
@@ -265,7 +265,7 @@ class NfsPersistenceTest {
                     .id("test-agent-" + UUID.randomUUID())
                     .build();
 
-            var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
+            var agent = new Agent();
             agent.metadata = metadata;
 
             // 添加一些数据

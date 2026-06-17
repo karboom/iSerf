@@ -2,7 +2,9 @@ package me.karboom.java.iSerf.server;
 
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.AgentConfig;
 import me.karboom.java.iSerf.agent.AgentEvent;
+import me.karboom.java.iSerf.agent.AgentMetadata;
 import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
 
@@ -47,7 +49,13 @@ class ContainerServerTest {
                 };
             }
         };
-        return new Agent(UUID.randomUUID().toString(), "test", provider, List.of());
+        var config = new AgentConfig();
+        var metadata = new AgentMetadata();
+        metadata.setId(UUID.randomUUID().toString());
+        config.setMetadata(metadata);
+        config.setPrompt("test");
+        config.setLlm(provider);
+        return new Agent(config);
     }
 
     // ======================== 被测对象 & 依赖 ========================

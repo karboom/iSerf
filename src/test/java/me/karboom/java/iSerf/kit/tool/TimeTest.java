@@ -2,6 +2,8 @@ package me.karboom.java.iSerf.kit.tool;
 
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.AgentConfig;
+import me.karboom.java.iSerf.agent.AgentMetadata;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
 import me.karboom.java.iSerf.agent.tool.Loader;
@@ -67,7 +69,14 @@ public class TimeTest {
 
                 var llm = llmTest.getLlm();
                 var llmProvider = new FixedLlmProvider(llm);
-                var agent = new Agent("time-agent-" + System.currentTimeMillis(), "", llmProvider, tools) {}.run();
+                var config = new AgentConfig();
+                var metadata = new AgentMetadata();
+                metadata.setId("time-agent-" + System.currentTimeMillis());
+                config.setMetadata(metadata);
+                config.setPrompt("");
+                config.setLlm(llmProvider);
+                config.setTools(tools);
+                var agent = new Agent(config) {}.run();
 
                 var result = new StringBuilder();
                 var finished = new AtomicBoolean(false);

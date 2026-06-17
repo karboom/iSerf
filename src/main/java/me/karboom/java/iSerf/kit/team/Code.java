@@ -1,6 +1,8 @@
 package me.karboom.java.iSerf.kit.team;
 
 import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.AgentConfig;
+import me.karboom.java.iSerf.agent.AgentMetadata;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 import me.karboom.java.iSerf.llm.text.OpenAI;
 import me.karboom.java.iSerf.team.Team;
@@ -33,10 +35,29 @@ public class Code {
         var llm = new FixedLlmProvider(new OpenAI("qwen-plus", llmConfig, apiKey, url, 3));
 
         // 创建团队成员
-        var leader = new Agent("leader", "你是一个技术负责人，负责整个项目的架构设计和技术决策", llm, null) {}.run();
-        var frontend = new Agent("frontend", "你是一个前端工程师，负责用户界面和用户体验开发", llm, null) {}.run();
-        var backend = new Agent("backend", "你是一个后端工程师，负责服务端逻辑和数据库设计", llm, null) {}.run();
-        var tester = new Agent("tester", "你是一个测试工程师，负责软件质量保证和测试工作", llm, null) {}.run();
+        var leaderConfig = new AgentConfig();
+        leaderConfig.setMetadata(new AgentMetadata() {{ setId("leader"); }});
+        leaderConfig.setPrompt("你是一个技术负责人，负责整个项目的架构设计和技术决策");
+        leaderConfig.setLlm(llm);
+        var leader = new Agent(leaderConfig) {}.run();
+
+        var frontendConfig = new AgentConfig();
+        frontendConfig.setMetadata(new AgentMetadata() {{ setId("frontend"); }});
+        frontendConfig.setPrompt("你是一个前端工程师，负责用户界面和用户体验开发");
+        frontendConfig.setLlm(llm);
+        var frontend = new Agent(frontendConfig) {}.run();
+
+        var backendConfig = new AgentConfig();
+        backendConfig.setMetadata(new AgentMetadata() {{ setId("backend"); }});
+        backendConfig.setPrompt("你是一个后端工程师，负责服务端逻辑和数据库设计");
+        backendConfig.setLlm(llm);
+        var backend = new Agent(backendConfig) {}.run();
+
+        var testerConfig = new AgentConfig();
+        testerConfig.setMetadata(new AgentMetadata() {{ setId("tester"); }});
+        testerConfig.setPrompt("你是一个测试工程师，负责软件质量保证和测试工作");
+        testerConfig.setLlm(llm);
+        var tester = new Agent(testerConfig) {}.run();
 
         // 创建团队
         var members = List.of(frontend, backend, tester);

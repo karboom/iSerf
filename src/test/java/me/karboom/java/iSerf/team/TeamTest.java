@@ -1,7 +1,10 @@
 package me.karboom.java.iSerf.team;
 
 import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.AgentConfig;
+import me.karboom.java.iSerf.agent.AgentMetadata;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
+import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,27 +27,26 @@ public class TeamTest {
         var llmProvider = new FixedLlmProvider(llm);
 
         // 创建5个agent：测试工程师一个、前端两个、后端两个
-        var tester = new Agent("tester", "你是一个测试工程师", llmProvider, null) {
-        }.run();
-        
-        var frontend1 = new Agent("frontend1", "你是一个前端工程师", llmProvider, null) {
-        }.run();
-        
-        var frontend2 = new Agent("frontend2", "你是一个前端工程师", llmProvider, null) {
-        }.run();
-        
-        var backend1 = new Agent("backend1", "你是一个后端工程师", llmProvider, null) {
-        }.run();
-        
-        var backend2 = new Agent("backend2", "你是一个后端工程师", llmProvider, null) {
-        }.run();
-
-        var leader = new Agent("leader", "你是一个软件团队的管理者", llmProvider, null) {
-        }.run();
+        var tester = createAgent("tester", "你是一个测试工程师", llmProvider);
+        var frontend1 = createAgent("frontend1", "你是一个前端工程师", llmProvider);
+        var frontend2 = createAgent("frontend2", "你是一个前端工程师", llmProvider);
+        var backend1 = createAgent("backend1", "你是一个后端工程师", llmProvider);
+        var backend2 = createAgent("backend2", "你是一个后端工程师", llmProvider);
+        var leader = createAgent("leader", "你是一个软件团队的管理者", llmProvider);
 
         // 将所有agent作为构造函数参数传入team中
         var members = List.of(tester, frontend1, frontend2, backend1, backend2);
         team = new Team(leader, members);
+    }
+
+    private Agent createAgent(String id, String prompt, ILlmProvider llmProvider) {
+        var config = new AgentConfig();
+        var metadata = new AgentMetadata();
+        metadata.setId(id);
+        config.setMetadata(metadata);
+        config.setPrompt(prompt);
+        config.setLlm(llmProvider);
+        return new Agent(config) {}.run();
     }
 
     @Test

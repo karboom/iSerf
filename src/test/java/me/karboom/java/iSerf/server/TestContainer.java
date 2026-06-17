@@ -1,6 +1,8 @@
 package me.karboom.java.iSerf.server;
 
 import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.AgentConfig;
+import me.karboom.java.iSerf.agent.AgentMetadata;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 
 import me.karboom.java.iSerf.llm.text.OpenAI;
@@ -23,7 +25,13 @@ public class TestContainer implements IAgentLifecycle {
         var llm = new OpenAI("qwen-plus", new HashMap<>(), System.getenv("OPENAI_API_KEY"),
                 "https://dashscope.aliyuncs.com/compatible-mode/v1", 3);
         var provider = new FixedLlmProvider(llm);
-        var agent = new Agent(UUID.randomUUID().toString(), "test transport agent", provider, null).run();
+        var config = new AgentConfig();
+        var metadata = new AgentMetadata();
+        metadata.setId(UUID.randomUUID().toString());
+        config.setMetadata(metadata);
+        config.setPrompt("test transport agent");
+        config.setLlm(provider);
+        var agent = new Agent(config).run();
         return agent;
     }
 

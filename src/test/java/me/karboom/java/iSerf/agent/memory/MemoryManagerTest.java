@@ -1,6 +1,8 @@
 package me.karboom.java.iSerf.agent.memory;
 
 import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.AgentConfig;
+import me.karboom.java.iSerf.agent.AgentMetadata;
 import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
@@ -22,7 +24,13 @@ class MemoryManagerTest {
         var llmTest = new OpenAITest();
         var provider = new FixedLlmProvider(llmTest.getLlm());
         memoryManager = new MemoryManager("你是一个测试助手");
-        testAgent = new Agent("test-agent", "test prompt", provider, List.of());
+        var config = new AgentConfig();
+        var metadata = new AgentMetadata();
+        metadata.setId("test-agent");
+        config.setMetadata(metadata);
+        config.setPrompt("test prompt");
+        config.setLlm(provider);
+        testAgent = new Agent(config);
     }
 
     // region ========== 构造函数 & systemPrompt ==========

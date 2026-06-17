@@ -1,6 +1,7 @@
 package me.karboom.java.iSerf.agent.billing;
 
 import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.AgentMetadata;
 import me.karboom.java.iSerf.billing.Cost;
 import me.karboom.java.iSerf.billing.ILedger;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,7 +43,10 @@ class AgentBillingTest {
             }
         };
         billing = new AgentBilling(testLedger);
-        testAgent = new Agent("test-agent-001", "test prompt", null, List.of());
+        testAgent = new Agent();
+        var metadata = new AgentMetadata();
+        metadata.setId("test-agent-001");
+        testAgent.metadata = metadata;
     }
 
     // region ========== recordMemory ==========

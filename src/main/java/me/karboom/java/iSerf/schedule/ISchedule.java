@@ -9,4 +9,11 @@ public interface ISchedule {
 
     void addPlan(Plan plan);
     void removePlan(String planId);
+
+    /**
+     * 获取所有计划
+     *
+     * @return 计划列表
+     */
+    List<Plan> getPlans();
 }

@@ -7,6 +7,7 @@ import me.karboom.java.iSerf.agent.tool.CallCache;
 import me.karboom.java.iSerf.agent.tool.CallResult;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
+import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
 import me.karboom.java.iSerf.agent.tool.Loader;
 import me.karboom.java.iSerf.agent.tool.Tool;
 import org.junit.jupiter.api.BeforeEach;
@@ -71,6 +72,20 @@ class AgentTest {
 
     }
 
+    /**
+     * 创建测试 Agent 的辅助方法
+     */
+    private Agent createTestAgent(String id, String prompt) {
+        var config = new AgentConfig();
+        var metadata = new AgentMetadata();
+        metadata.setId(id);
+        config.setMetadata(metadata);
+        config.setPrompt(prompt);
+        config.setLlm(llmProvider);
+        config.setTools(tools);
+        return new Agent(config) {}.run();
+    }
+
     @Test
     public void testToolCall() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
@@ -97,7 +112,7 @@ class AgentTest {
             inputs.forEach(input -> {
                 var i = inputs.indexOf(input);
 
-                var agent = new Agent("test-agent-" + i, "", llmProvider, tools) {}.run();
+                var agent = createTestAgent("test-agent-" + i, "");
 
                 // 订阅 broadcast
                 agent.subscribe(item -> {
@@ -149,7 +164,7 @@ class AgentTest {
             inputs.forEach(input -> {
                 var i = inputs.indexOf(input);
 
-                var agent = new Agent("test-agent-" + i, "", llmProvider, tools) {}.run();
+                var agent = createTestAgent("test-agent-" + i, "");
 
                 // 订阅 broadcast
                 agent.subscribe(item -> {
@@ -222,7 +237,7 @@ class AgentTest {
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='操作日志表';
                     """;
 
-            var agent = new Agent("test-agent", prompt, llmProvider, tools) {}.run();
+            var agent = createTestAgent("test-agent", prompt);
 
             // 创建一个列表来收集广播的消息
             var receivedMessages = new ArrayList<AgentMessage>();
@@ -253,7 +268,7 @@ class AgentTest {
     @Test
     void testErrorHandle() {
         // 创建 Agent
-        var agent = new Agent("test-agent", "", llmProvider, tools) {}.run();
+        var agent = createTestAgent("test-agent", "");
 
         agent.send("xxx");
 
@@ -271,7 +286,7 @@ class AgentTest {
     @Timeout(30)
     @SneakyThrows
     void testMessageEvent() {
-            var agent = new Agent("test-message-agent", "请你做一个自我介绍", llmProvider, tools) {}.run();
+            var agent = createTestAgent("test-message-agent", "请你做一个自我介绍");
 
             var receivedItems = new ArrayList<AgentMessage>();
             var latch = new CountDownLatch(1);
@@ -314,7 +329,7 @@ class AgentTest {
     @Test
     void testOrganizeMemoryEvent() {
         assertTimeoutPreemptively(Duration.ofSeconds(60), () -> {
-            var agent = new Agent("test-organize-memory-agent", "你是一个有用的助手", llmProvider, tools) {}.run();
+            var agent = createTestAgent("test-organize-memory-agent", "你是一个有用的助手");
 
             var messages = List.of(
                     "你好",
@@ -386,7 +401,7 @@ class AgentTest {
     @Test
     void testInvokeToolCallCache() {
         assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
-            var agent = new Agent("test-cache-agent", "你是一个有用的助手", llmProvider, tools) {}.run();
+            var agent = createTestAgent("test-cache-agent", "你是一个有用的助手");
 
             // 准备测试参数
             var testParams = new HashMap<String, Object>() {{
@@ -430,7 +445,7 @@ class AgentTest {
     @Test
     void testCalcMemoryBillings() {
         assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
-            var agent = new Agent("test-billing-agent", "你是一个有用的助手", llmProvider, tools) {}.run();
+            var agent = createTestAgent("test-billing-agent", "你是一个有用的助手");
 
             // 添加一些测试记忆
             agent.getMemoryManager().add(AgentMessage.builder()
@@ -463,7 +478,7 @@ class AgentTest {
     @Test
     void testInterrupt() {
         assertTimeoutPreemptively(Duration.ofSeconds(60), () -> {
-            var agent = new Agent("test-interrupt-agent", "你是一个有用的助手", llmProvider, tools) {}.run();
+            var agent = createTestAgent("test-interrupt-agent", "你是一个有用的助手");
 
             var receivedItems = new ArrayList<AgentMessage>();
             agent.subscribe(item -> {
@@ -511,13 +526,26 @@ class AgentTest {
     }
 
     /**
-     * 测试 Path 初始化构造函数
+     * 测试 Path 初始化
      */
     @Test
     void testConstructor() {
         assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
             var testPath = Paths.get("src/test/resources/agent/constructor");
-            var agent = new Agent("test-path-init-agent", llmProvider, testPath) {}.run();
+            var loader = new Loader(2000);
+            var toolsFromFile = loader.fromToolFile(testPath.resolve("tools.yaml"), null);
+            var promptPath = testPath.resolve("system-prompt.md");
+            var prompt = java.nio.file.Files.exists(promptPath) ? java.nio.file.Files.readString(promptPath, java.nio.charset.StandardCharsets.UTF_8) : "";
+
+            var config = new AgentConfig();
+            var metadata = new AgentMetadata();
+            metadata.setId("test-path-init-agent");
+            config.setMetadata(metadata);
+            config.setPrompt(prompt);
+            config.setLlm(llmProvider);
+            config.setTools(toolsFromFile);
+            config.setWorkDir(testPath);
+            var agent = new Agent(config) {}.run();
 
             assertEquals("test-path-init-agent", agent.metadata.getId());
             assertEquals(0, agent.getMemoryManager().size());
@@ -531,7 +559,7 @@ class AgentTest {
     @Test
     void testCall() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
-            var agent = new Agent("test-call-agent", "你是一个有用的助手", llmProvider, tools) {}.run();
+            var agent = createTestAgent("test-call-agent", "你是一个有用的助手");
 
             var memorySizeBefore = agent.getMemoryManager().size();
 

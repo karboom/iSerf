@@ -4,6 +4,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
 import me.karboom.java.iSerf.agent.memory.MemoryManager;
+import me.karboom.java.iSerf.agent.persistence.AgentSnapshot;
 import me.karboom.java.iSerf.agent.persistence.IPersistence;
 import me.karboom.java.iSerf.agent.persistence.NonePersistence;
 import me.karboom.java.iSerf.agent.tool.*;
@@ -25,9 +26,6 @@ import reactor.util.function.Tuple3;
 import reactor.util.function.Tuples;
 import tools.jackson.databind.node.ObjectNode;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -85,63 +83,42 @@ public class Agent {
     // endregion
 
     // region ============ 构造函数 ===============
+
     /**
-     * 全参构造函数
-     *
-     * @param metadata    Agent 元数据（id、orgId、userId）
-     * @param prompt      系统提示词
-     * @param llm         LLM 实例
-     * @param tools       工具列表
-     * @param persistence 持久化实现，null 则使用 NonePersistence
-     * @param ledger      计费账本，null 则使用 Config 默认账本
-     * @param workDir     工作目录，文件系统工具以此目录为根
-     * @param schedule    定时任务调度器，null 则不启用定时任务
+     * 空构造函数，用于纯数据构造，不初始化任何组件
      */
-    public Agent(AgentMetadata metadata, String prompt, ILlmProvider llm, List<Tool<?>> tools,
-                 IPersistence persistence, ILedger ledger, Path workDir, ISchedule schedule) {
-        this.metadata = metadata;
+    public Agent() {}
+
+    /**
+     * 通过配置类构造，完整初始化所有组件
+     *
+     * @param config Agent 配置
+     */
+    public Agent(AgentConfig config) {
+        this.metadata = config.getMetadata();
         this.queue = new PriorityBlockingQueue<>(100, Comparator.comparing(AgentEvent::getPriority));
 
-        this.llmProvider = llm;
-        this.persistence = persistence != null ? persistence : new NonePersistence();
-        this.memoryManager = new MemoryManager(prompt);
+        this.llmProvider = config.getLlm();
+        this.persistence = config.getPersistence() != null ? config.getPersistence() : new NonePersistence();
+        this.memoryManager = new MemoryManager(config.getPrompt());
 
         this.sink = Sinks.many().multicast().onBackpressureBuffer();
         this.broadcast = sink.asFlux();
 
         this.eventPool = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Event-", 0).factory());
         this.broadcastPool = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Broadcast-", 0).factory());
-        this.agentBilling = new AgentBilling(ledger);
+        this.agentBilling = new AgentBilling(config.getLedger());
 
-        this.workDir = workDir;
-        this.schedule = schedule;
+        this.workDir = config.getWorkDir();
+        this.schedule = config.getSchedule();
 
-        this.toolHandler = new ToolHandler(tools, 5);
+        this.toolHandler = new ToolHandler(config.getTools(), 5);
 
         // 自动创建或恢复
         var isNew = this.persistence.create(this);
         if (Boolean.FALSE.equals(isNew)) {
             this.loadFromPersistence();
         }
-    }
-
-    /**
-     * 便捷构造函数，使用默认持久化和默认账本
-     */
-    public Agent(String id, String prompt, ILlmProvider llm, List<Tool<?>> tools) {
-        this(AgentMetadata.builder().id(id).build(), prompt, llm, tools, null, null, null, null);
-    }
-
-    /**
-     * 文件系统构造函数
-     * path/system-prompt.md 系统提示词
-     */
-    public Agent(String id, ILlmProvider provider, Path path) throws IOException {
-        var tools = new Loader(2000).fromToolFile(path.resolve("tools.yaml"), null);
-        var promptPath = path.resolve("system-prompt.md");
-        var prompt = Files.exists(promptPath) ? Files.readString(promptPath, StandardCharsets.UTF_8) : "";
-        this(AgentMetadata.builder().id(id).build(), prompt, provider, tools,
-                null, null, path, null);
     }
 
     // endregion
@@ -563,16 +540,29 @@ public class Agent {
 
     private void loadFromPersistence() {
         var snapshot = persistence.load(this.metadata);
+        applySnapshot(snapshot);
+    }
+
+    /**
+     * 从快照恢复 Agent 状态
+     *
+     * @param snapshot Agent 快照
+     */
+    public void applySnapshot(AgentSnapshot snapshot) {
+        if (snapshot == null) {
+            return;
+        }
 
         var items = snapshot.getMemories();
-
-        log.debug("loadFromPersistence items size: %s".formatted(items.size()));
+        log.debug("applySnapshot items size: %s".formatted(items != null ? items.size() : 0));
 
         // 恢复记忆
-        memoryManager.addAll(items);
+        if (items != null && memoryManager != null) {
+            memoryManager.addAll(items);
+        }
 
         // 恢复工具调用缓存
-        if (snapshot.getToolCalls() != null) {
+        if (snapshot.getToolCalls() != null && toolHandler != null) {
             snapshot.getToolCalls().forEach(toolHandler::addCache);
         }
 
@@ -580,6 +570,32 @@ public class Agent {
         if (snapshot.getPlans() != null && schedule != null) {
             snapshot.getPlans().forEach(schedule::addPlan);
         }
+    }
+
+    /**
+     * 导出当前 Agent 状态为快照
+     *
+     * @return Agent 快照
+     */
+    public AgentSnapshot toSnapshot() {
+        var builder = AgentSnapshot.builder();
+
+        // 导出记忆
+        if (memoryManager != null) {
+            builder.memories(memoryManager.getMessagesRaw());
+        }
+
+        // 导出工具调用缓存
+        if (toolHandler != null) {
+            builder.toolCalls(toolHandler.getCaches());
+        }
+
+        // 导出定时任务计划
+        if (schedule != null) {
+            builder.plans(schedule.getPlans());
+        }
+
+        return builder.build();
     }
 
     // endregion

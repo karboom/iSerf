@@ -90,7 +90,7 @@ class NfsPersistencePerformanceTest {
                                     .id("test-agent-" + finalI)
                                     .build();
 
-                            var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
+                            var agent = new Agent();
                             agent.metadata = metadata;
 
                             agent.getMemoryManager().add(AgentMessage.builder()
@@ -167,7 +167,7 @@ class NfsPersistencePerformanceTest {
                 "能给我讲讲%s的历史吗？"
         };
 
-        var agent = new Agent(metadata.getId(), "test prompt", null, List.of());
+        var agent = new Agent();
         agent.metadata = metadata;
 
         // 生成 200 轮对话，每轮约 500 字符（user + assistant 各 250），总计约 200kb
