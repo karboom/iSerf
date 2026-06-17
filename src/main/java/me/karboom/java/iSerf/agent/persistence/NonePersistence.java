@@ -4,6 +4,7 @@ import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.AgentMetadata;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 空持久化实现
@@ -57,7 +58,12 @@ public class NonePersistence implements IPersistence {
     }
 
     @Override
-    public List<AgentSnapshot> search(String keyword) {
+    public List<AgentSnapshot> search(Map<String, Object> params) {
         return List.of();
+    }
+
+    @Override
+    public Boolean create(Agent agent) {
+        return false;
     }
 }

@@ -381,22 +381,6 @@ class AgentTest {
     }
 
     /**
-     * 测试 RECOVERY 事件处理
-     */
-    @Test
-    void testRecoveryEvent() {
-        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
-            var agent = new Agent("test-recovery-agent", "你是一个有用的助手", llmProvider, tools) {}.run();
-
-            agent.recovery();
-
-            Thread.sleep(1000);
-
-            assertTrue(true, "RECOVERY 事件已处理");
-        });
-    }
-
-    /**
      * 测试 invokeToolCallCache 方法
      */
     @Test

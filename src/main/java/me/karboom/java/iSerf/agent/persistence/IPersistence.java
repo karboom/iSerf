@@ -4,6 +4,7 @@ import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.AgentMetadata;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Agent 持久化接口
@@ -90,10 +91,23 @@ public interface IPersistence {
      * 全局搜索 Agent
      * 根据关键字匹配 orgId、userId、agentId，返回匹配的 Agent 快照列表
      *
-     * @param keyword 搜索关键字，为空时返回所有 Agent
+     * @param params 搜索参数
      * @return 匹配的 Agent 快照列表
      */
-    List<AgentSnapshot> search(String keyword);
+    List<AgentSnapshot> search(Map<String, Object> params);
+
+    // endregion
+
+    // region Lifecycle
+
+    /**
+     * 创建 Agent 持久化记录
+     * 初始化目录结构和空文件
+     *
+     * @param agent Agent 实例
+     * @return true=新建成功，false=已存在
+     */
+    Boolean create(Agent agent);
 
     // endregion
 }

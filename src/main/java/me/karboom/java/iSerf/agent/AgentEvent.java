@@ -13,7 +13,6 @@ public class AgentEvent {
     static public class Type {
         final static public String ORGANIZE_MEMORY = "ORGANIZE_MEMORY";
         final static public String MESSAGE = "MESSAGE";
-        final static public String RECOVERY = "RECOVERY";
     }
 
     public String id;

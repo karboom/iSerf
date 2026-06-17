@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.Map;
+
 @Data
 @Builder
 @AllArgsConstructor
@@ -13,4 +15,6 @@ public class AgentMetadata {
     public String id;
     public String orgId;
     public String userId;
+    public String type;
+    public Map<String, Object> extra;
 }

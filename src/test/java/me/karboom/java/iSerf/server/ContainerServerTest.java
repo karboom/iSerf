@@ -47,12 +47,7 @@ class ContainerServerTest {
                 };
             }
         };
-        return new Agent(UUID.randomUUID().toString(), "test", provider, List.of()) {
-            @Override
-            public void recovery() {
-                this.trigger(AgentEvent.builder().type(AgentEvent.Type.RECOVERY).priority(0).build());
-            }
-        };
+        return new Agent(UUID.randomUUID().toString(), "test", provider, List.of());
     }
 
     // ======================== 被测对象 & 依赖 ========================

@@ -117,6 +117,12 @@ public class Agent {
         this.schedule = schedule;
 
         this.toolHandler = new ToolHandler(tools, 5);
+
+        // 自动创建或恢复
+        var isNew = this.persistence.create(this);
+        if (Boolean.FALSE.equals(isNew)) {
+            this.loadFromPersistence();
+        }
     }
 
     /**
@@ -132,7 +138,9 @@ public class Agent {
      */
     public Agent(String id, ILlmProvider provider, Path path) throws IOException {
         var tools = new Loader(2000).fromToolFile(path.resolve("tools.yaml"), null);
-        this(AgentMetadata.builder().id(id).build(), Files.readString(path.resolve("system-prompt.md"), StandardCharsets.UTF_8), provider, tools,
+        var promptPath = path.resolve("system-prompt.md");
+        var prompt = Files.exists(promptPath) ? Files.readString(promptPath, StandardCharsets.UTF_8) : "";
+        this(AgentMetadata.builder().id(id).build(), prompt, provider, tools,
                 null, null, path, null);
     }
 
@@ -181,10 +189,6 @@ public class Agent {
                             // 记忆压缩后全量刷盘
                             persistence.syncMemory(this);
                         }
-
-                        case AgentEvent.Type.RECOVERY -> {
-                            handleRecovery(event);
-                        }
                     }
 
                 } catch (Exception e) {
@@ -218,13 +222,7 @@ public class Agent {
             }
         });
 
-        this.recovery();
-
         return this;
-    }
-
-    public void recovery () {
-        this.trigger(AgentEvent.builder().type(AgentEvent.Type.RECOVERY).build());
     }
 
     public MemoryManager getMemoryManager() {
@@ -250,7 +248,7 @@ public class Agent {
         }
 
         var type = event.getType();
-        var validTypes = Set.of(AgentEvent.Type.ORGANIZE_MEMORY, AgentEvent.Type.MESSAGE, AgentEvent.Type.RECOVERY);
+        var validTypes = Set.of(AgentEvent.Type.ORGANIZE_MEMORY, AgentEvent.Type.MESSAGE);
         if (!validTypes.contains(type)) {
             throw ErrorUtil.make("trigger invalid event type: %s".formatted(type));
         }
@@ -563,13 +561,12 @@ public class Agent {
         memoryManager.checkAndOrganize(this);
     }
 
-    private void handleRecovery(AgentEvent event) {
+    private void loadFromPersistence() {
         var snapshot = persistence.load(this.metadata);
 
         var items = snapshot.getMemories();
-        var events = snapshot.getEvents();
 
-        log.debug("handleRecovery items size: %s, events size: %s".formatted(items.size(), events.size()));
+        log.debug("loadFromPersistence items size: %s".formatted(items.size()));
 
         // 恢复记忆
         memoryManager.addAll(items);
@@ -583,11 +580,6 @@ public class Agent {
         if (snapshot.getPlans() != null && schedule != null) {
             snapshot.getPlans().forEach(schedule::addPlan);
         }
-
-        // 重新触发未处理的事件
-        events.stream()
-                .filter(e -> e.getType() != AgentEvent.Type.RECOVERY)
-                .forEach(queue::offer);
     }
 
     // endregion

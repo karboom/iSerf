@@ -19,6 +19,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -86,9 +87,6 @@ public class NfsPersistence implements IPersistence {
 
     @SneakyThrows
     private <T> List<T> readList(Path path, Class<T> clazz) {
-        if (!Files.exists(path)) {
-            return new ArrayList<>();
-        }
         var bytes = Files.readAllBytes(path);
         if (bytes == null || bytes.length == 0) {
             return new ArrayList<>();
@@ -105,9 +103,6 @@ public class NfsPersistence implements IPersistence {
 
     @SneakyThrows
     private <T> List<T> readDir(Path dir, Class<T> clazz) {
-        if (!Files.exists(dir)) {
-            return new ArrayList<>();
-        }
         var result = new ArrayList<T>();
         try (var stream = Files.list(dir)) {
             var files = stream
@@ -123,11 +118,6 @@ public class NfsPersistence implements IPersistence {
 
     @SneakyThrows
     private void writeList(Path path, List<?> list) {
-        var parent = path.getParent();
-        if (!Files.exists(parent)) {
-            Files.createDirectories(parent);
-        }
-
         var tmpPath = Paths.get(path.toString() + ".tmp");
         var bytes = CBORUtil.toByte(list);
 
@@ -142,10 +132,6 @@ public class NfsPersistence implements IPersistence {
 
     @SneakyThrows
     private <T> void appendToDir(Path dir, List<T> items, Class<T> clazz) {
-        if (!Files.exists(dir)) {
-            Files.createDirectories(dir);
-        }
-        
         var key = dir.toString();
         var counter = counters.computeIfAbsent(key, k -> {
             // 从索引文件读取当前序号
@@ -179,10 +165,6 @@ public class NfsPersistence implements IPersistence {
     
     @SneakyThrows
     private void checkAndTriggerMerge(Path dir) {
-        if (!Files.exists(dir)) {
-            return;
-        }
-        
         // 统计文件数量
         long fileCount;
         try (var stream = Files.list(dir)) {
@@ -201,10 +183,6 @@ public class NfsPersistence implements IPersistence {
     
     @SneakyThrows
     private void mergeDirGeneric(Path dir) {
-        if (!Files.exists(dir)) {
-            return;
-        }
-        
         // 读取所有文件（作为通用 List）
         var allItems = new ArrayList<>();
         try (var stream = Files.list(dir)) {
@@ -256,10 +234,6 @@ public class NfsPersistence implements IPersistence {
 
     @SneakyThrows
     private <T> void mergeDir(Path dir, Class<T> clazz) {
-        if (!Files.exists(dir)) {
-            return;
-        }
-        
         // 读取所有文件
         var allItems = readDir(dir, clazz);
         if (allItems.isEmpty()) {
@@ -344,19 +318,17 @@ public class NfsPersistence implements IPersistence {
         var dir = getMemoryDir(agent.metadata);
         
         // 删除所有现有文件（包括索引文件）
-        if (Files.exists(dir)) {
-            try (var stream = Files.list(dir)) {
-                stream.filter(p -> p.toString().endsWith(".cbor") || p.getFileName().toString().equals(INDEX_FILE))
-                        .forEach(p -> {
-                            try {
-                                Files.delete(p);
-                            } catch (Exception e) {
-                                log.error("delete file failed: {}", p, e);
-                            }
-                        });
-            } catch (Exception e) {
-                log.error("list dir failed: {}", dir, e);
-            }
+        try (var stream = Files.list(dir)) {
+            stream.filter(p -> p.toString().endsWith(".cbor") || p.getFileName().toString().equals(INDEX_FILE))
+                    .forEach(p -> {
+                        try {
+                            Files.delete(p);
+                        } catch (Exception e) {
+                            log.error("delete file failed: {}", p, e);
+                        }
+                    });
+        } catch (Exception e) {
+            log.error("list dir failed: {}", dir, e);
         }
         
         // 重置计数器
@@ -391,19 +363,17 @@ public class NfsPersistence implements IPersistence {
         var dir = getToolCallDir(agent.metadata);
         
         // 删除所有现有文件（包括索引文件）
-        if (Files.exists(dir)) {
-            try (var stream = Files.list(dir)) {
-                stream.filter(p -> p.toString().endsWith(".cbor") || p.getFileName().toString().equals(INDEX_FILE))
-                        .forEach(p -> {
-                            try {
-                                Files.delete(p);
-                            } catch (Exception e) {
-                                log.error("delete file failed: {}", p, e);
-                            }
-                        });
-            } catch (Exception e) {
-                log.error("list dir failed: {}", dir, e);
-            }
+        try (var stream = Files.list(dir)) {
+            stream.filter(p -> p.toString().endsWith(".cbor") || p.getFileName().toString().equals(INDEX_FILE))
+                    .forEach(p -> {
+                        try {
+                            Files.delete(p);
+                        } catch (Exception e) {
+                            log.error("delete file failed: {}", p, e);
+                        }
+                    });
+        } catch (Exception e) {
+            log.error("list dir failed: {}", dir, e);
         }
         
         // 重置计数器
@@ -440,7 +410,7 @@ public class NfsPersistence implements IPersistence {
 
     @Override
     @SneakyThrows
-    public List<AgentSnapshot> search(String keyword) {
+    public List<AgentSnapshot> search(Map<String, Object> params) {
         var result = new ArrayList<AgentSnapshot>();
         var basePath = Paths.get(baseDir);
 
@@ -448,6 +418,7 @@ public class NfsPersistence implements IPersistence {
             return result;
         }
 
+        var keyword = params != null ? (String) params.get("keyword") : null;
         var lowerKeyword = keyword != null ? keyword.toLowerCase() : "";
 
         // 遍历 orgId 目录
@@ -491,8 +462,37 @@ public class NfsPersistence implements IPersistence {
                     });
         }
 
-        log.debug("search keyword: {} found {} agents", keyword, result.size());
+        log.debug("search params: {} found {} agents", params, result.size());
         return result;
+    }
+
+    @Override
+    @SneakyThrows
+    public Boolean create(Agent agent) {
+        var agentDir = Paths.get(getAgentDir(agent.metadata));
+        
+        // 如果目录已存在，返回 false
+        if (Files.exists(agentDir)) {
+            log.debug("create agent dir already exists: {}", agentDir);
+            return false;
+        }
+
+        var memoryDir = getMemoryDir(agent.metadata);
+        var toolCallDir = getToolCallDir(agent.metadata);
+        var eventPath = getEventPath(agent.metadata);
+        var planPath = getPlanPath(agent.metadata);
+
+        // 创建目录结构
+        Files.createDirectories(agentDir);
+        Files.createDirectories(memoryDir);
+        Files.createDirectories(toolCallDir);
+
+        // 创建空文件
+        Files.createFile(eventPath);
+        Files.createFile(planPath);
+
+        log.debug("create agent dir: {}", agentDir);
+        return true;
     }
 
     // endregion
