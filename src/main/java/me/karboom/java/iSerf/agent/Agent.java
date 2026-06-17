@@ -70,7 +70,7 @@ public class Agent {
     /**
      * 工具调用处理器
      */
-    protected ToolHandler toolHandler;
+    public ToolHandler toolHandler;
 
     /**
      * 工作目录，文件系统工具以此目录为根目录进行读写

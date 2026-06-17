@@ -1,286 +1,658 @@
 package me.karboom.java.iSerf.server;
 
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.server.messageBus.Pulsar;
-import me.karboom.java.iSerf.server.metaData.RedisSingle;
-import me.karboom.java.iSerf.server.transport.ITransport;
-import me.karboom.java.iSerf.util.DataUtil;
+import me.karboom.java.iSerf.agent.Agent;
+import me.karboom.java.iSerf.agent.Event;
+import me.karboom.java.iSerf.agent.Message;
+import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
+import me.karboom.java.iSerf.agent.persistence.AgentSnapshot;
+import me.karboom.java.iSerf.agent.persistence.NonePersistence;
+import me.karboom.java.iSerf.agent.tool.Tool;
+import me.karboom.java.iSerf.llm.text.BatchTaskInfo;
+import me.karboom.java.iSerf.llm.text.IText;
+import me.karboom.java.iSerf.llm.text.Output;
+import me.karboom.java.iSerf.server.messageBus.MemoryMessageBus;
+import me.karboom.java.iSerf.server.metaData.MemoryMetaData;
+import me.karboom.java.iSerf.server.transport.NoneTransport;
+import me.karboom.java.iSerf.team.Team;
 import me.karboom.java.iSerf.util.JSONUtil;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.*;
+import reactor.core.publisher.Flux;
+import tools.jackson.databind.node.ObjectNode;
 
-import java.util.List;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * ContainerServer 测试用例，验证 transport 管理、生命周期、事件路由和 agent 操作
- */
 @Slf4j
 class ContainerServerTest {
 
-    private ContainerServer server;
-    private StubTransport stub;
+    /** 轻量 Agent 工厂：FakeLlmProvider 返回 Flux.empty()，不依赖真实 LLM */
+    static Agent makeAgent() {
+        var provider = new ILlmProvider() {
+            @Override
+            public IText get(List<Tool<?>> tools, Class<?> outputFormat, Integer retryTimes) {
+                return new IText() {
+                    @Override
+                    public Flux<Output> send(List<Message> memory, Class<?> of, List<Tool<?>> t) { return Flux.empty(); }
+                    @Override
+                    public Output query(List<Message> messages, Class<?> of) { return null; }
+                    @Override
+                    public String batch(List<List<Message>> mb, Class<?> of) { return null; }
+                    @Override
+                    public BatchTaskInfo taskStatus(String taskId) { return null; }
+                    @Override
+                    public List<Output> taskResult(BatchTaskInfo task) { return List.of(); }
+                };
+            }
+        };
+        return new Agent(UUID.randomUUID().toString(), "test", provider, List.of()) {
+            @Override
+            public void recovery() {
+                this.trigger(Event.builder().type(Event.Type.RECOVERY).priority(0).build());
+            }
+        };
+    }
+
+    // ======================== 被测对象 & 依赖 ========================
+
+    ContainerServer container;
+    MemoryMessageBus messageBus;
+    MemoryMetaData metaData;
+    NoneTransport transport;
+    NonePersistence persistence;
 
     @BeforeEach
     void setUp() {
-        server = new ContainerServer("127.0.0.1",
-                new Pulsar("pulsar://localhost:6650"),
-                new RedisSingle("redis://:RGluZ1NoZW5nMTIz@localhost:6379"),
-                new TestContainer(),
-                new TestTeamLifecycle()) {
+        messageBus = new MemoryMessageBus();
+        metaData = new MemoryMetaData();
+        transport = new NoneTransport();
+        persistence = new NonePersistence();
+
+        container = new ContainerServer("127.0.0.1", messageBus, metaData,
+                new AgentLifecycle() {
+                    @Override
+                    public Agent createAgent(ContainerServer.Context ctx, ObjectNode params) { return makeAgent(); }
+                    @Override
+                    public List<Agent> listAgent(ContainerServer.Context ctx, ObjectNode params) { return List.of(); }
+                    @Override
+                    public Agent removeAgent(ContainerServer.Context ctx, ObjectNode params) { return null; }
+                    @Override
+                    public Agent editAgent(ContainerServer.Context ctx, ObjectNode params) { return null; }
+                    @Override
+                    public Agent detailAgent(ContainerServer.Context ctx, ObjectNode params) {
+                        var id = params.path("agentId").asText();
+                        return container.localAgents.get(id);
+                    }
+                    @Override
+                    public ObjectNode serializeAgent(Agent agent) {
+                        return JSONUtil.create().put("id", agent.metadata.getId());
+                    }
+                    @Override
+                    public ObjectNode serializeAgentSnapshot(AgentSnapshot snapshot) {
+                        return JSONUtil.convert(snapshot);
+                    }
+                },
+                new TeamLifecycle() {
+                    @Override
+                    public Team createTeam(ContainerServer.Context ctx, ObjectNode params) {
+                        return new Team(makeAgent(), List.of()) {};
+                    }
+                    @Override
+                    public List<Team> listTeam(ContainerServer.Context ctx, ObjectNode params) { return List.of(); }
+                    @Override
+                    public Team removeTeam(ContainerServer.Context ctx, ObjectNode params) {
+                        var teamId = params.path("teamId").asText();
+                        return container.localTeams.get(teamId);
+                    }
+                    @Override
+                    public Team editTeam(ContainerServer.Context ctx, ObjectNode params) {
+                        return new Team(makeAgent(), List.of()) {};
+                    }
+                    @Override
+                    public Team detailTeam(ContainerServer.Context ctx, ObjectNode params) {
+                        var id = params.path("teamId").asText();
+                        return container.localTeams.get(id);
+                    }
+                    @Override
+                    public ObjectNode serializeTeam(Team team) {
+                        return JSONUtil.create().put("id", "team-id");
+                    }
+                }) {
             @Override
             public void eventInterceptor(Context ctx, String event, String dataJson) {}
         };
-        stub = new StubTransport(server);
+        container.persistence = persistence;
+        container.addTransport(transport);
     }
 
-    /**
-     * 验证 server 启停生命周期
-     */
-    @SneakyThrows
-    @Test
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
-    void testStartStop() {
-        server.addTransport(stub);
-
-        // 启动前状态
-        assertFalse(server.isShuttingDown, "启动前 isShuttingDown 应为 false");
-        assertFalse(stub.started, "启动前 StubTransport 不应为已启动状态");
-
-        server.start();
-
-        // 等待启动完成
-        Thread.sleep(1000);
-
-        // 启动后状态
-        assertTrue(stub.started, "start 后 StubTransport 应为已启动状态");
-        // metaData 中应包含本节点
-        var nodesAfterStart = server.metaData.getNodes();
-        var nodeExists = nodesAfterStart.stream().anyMatch(n -> server.id.equals(n.id));
-        assertTrue(nodeExists, "start 后 metaData 应包含本节点");
-
-        server.stop();
-
-        // 停止后状态
-        assertTrue(server.isShuttingDown, "stop 后 isShuttingDown 应为 true");
-        assertTrue(stub.stopped, "stop 后 StubTransport 应为已停止状态");
-        // metaData 中不应再包含本节点
-        var nodesAfterStop = server.metaData.getNodes();
-        var nodeExistsAfterStop = nodesAfterStop.stream().anyMatch(n -> server.id.equals(n.id));
-        assertFalse(nodeExistsAfterStop, "stop 后 metaData 不应包含本节点");
-    }
-
-    /**
-     * 验证关闭状态下 handleUserEvent 返回错误
-     */
-    @Test
-    @Timeout(value = 10, unit = TimeUnit.SECONDS)
-    void testShuttingDown() {
-        var ctx = ContainerServer.Context.builder()
-                .transport(stub)
+    private ContainerServer.Context buildContext(boolean isInternal) {
+        return ContainerServer.Context.builder()
+                .transport(transport)
                 .client("test-client")
-                .serverId(server.id)
+                .requestId("req-123")
+                .isInternal(isInternal)
                 .build();
-
-        // 正常状态下应处理事件
-        server.isShuttingDown = false;
-        var normalResult = server.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_CREATE, "{}");
-        assertNotNull(normalResult, "正常状态下应有响应");
-
-        // 关闭状态下应返回错误
-        server.isShuttingDown = true;
-        var shutdownResult = server.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_CREATE, "{}");
-        assertNotNull(shutdownResult, "关闭状态下应有响应");
-        assertTrue(shutdownResult.contains("shutting down"), "关闭状态下应返回 shutting down 错误");
     }
 
-    /**
-     * 验证事件路由：不同 event 名称正确分发到对应 handler
-     */
-    @Test
-    @Timeout(value = 10, unit = TimeUnit.SECONDS)
-    void testHandleUserEventRouting() {
-        var ctx = ContainerServer.Context.builder()
-                .transport(stub)
-                .client("test-client")
-                .serverId(server.id)
-                .build();
+    // ======================== 构造与生命周期 ========================
 
-        // agent.create 应返回含 agentId 的 JSON，并派发给 transport
-        var createResult = server.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_CREATE, "{}");
-        assertNotNull(createResult, "agent.create 应返回结果");
-        assertTrue(createResult.contains("agentId"), "agent.create 结果应包含 agentId");
-        assertEquals(1, stub.receivedMessages.size(), "本节点 agent.create 有返回值，应派发 1 条消息给 transport");
-
-        // agent.send 对不存在的 agent 返回 null（直接跨节点转发无本地响应），无派发
-        var sendEvent = java.util.Map.of(
-                "agentId", "nonexistent",
-                "event", java.util.Map.of(
-                        "type", "MESSAGE",
-                        "priority", 1,
-                        "message", java.util.Map.of(
-                                "type", "TEXT",
-                                "text", "test",
-                                "files", List.of("1", 2)
-                        )
-                )
-        );
-        var sendResult = server.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_SEND, JSONUtil.stringify(sendEvent));
-        assertNull(sendResult, "agent.send 对不存在 agent 应返回 null");
-        assertEquals(1, stub.receivedMessages.size(), "agent.send 无返回值，不应追加派发");
-
-        // agent.unsubscribe 对不存在的 agent 返回 null，无派发
-        var unsubscribeResult = server.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_UNSUBSCRIBE,
-                JSONUtil.stringify(java.util.Map.of("agentId", "nonexistent")));
-        assertNull(unsubscribeResult, "agent.unsubscribe 对不存在 agent 应返回 null");
-        assertEquals(1, stub.receivedMessages.size(), "agent.unsubscribe 无返回值，不应追加派发");
-
-        // agent.toolCall 对不存在的 agent 返回 null，无派发
-        var toolCallResult = server.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_TOOL_CALL,
-                JSONUtil.stringify(java.util.Map.of("agentId", "nonexistent", "toolCallId", "test")));
-        assertNull(toolCallResult, "agent.toolCall 对不存在 agent 应返回 null");
-        assertEquals(1, stub.receivedMessages.size(), "agent.toolCall 无返回值，不应追加派发");
-
-        // 未定义的 event 返回 null，无派发
-        var unknownResult = server.handleUserEvent(ctx, "unknown/event", "{}");
-        assertNull(unknownResult, "未知 event 应返回 null");
-        assertEquals(1, stub.receivedMessages.size(), "未知 event 无返回值，不应追加派发");
-    }
-
-    /**
-     * 验证 agent.create 处理流程
-     */
-    @Test
-    @Timeout(value = 10, unit = TimeUnit.SECONDS)
-    void testHandleAgentCreate() {
-        var ctx = ContainerServer.Context.builder()
-                .transport(stub)
-                .client("test-client")
-                .serverId(server.id)
-                .build();
-
-        // 创建前 localAgents 为空
-        assertTrue(server.localAgents.isEmpty(), "创建前 localAgents 应为空");
-
-        var result = server.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_CREATE, "{}");
-        var resultNode = JSONUtil.parse(result);
-        var agentId = resultNode.path("agentId").asText();
-
-        assertNotNull(agentId, "agentId 不应为 null");
-        assertFalse(agentId.isEmpty(), "agentId 不应为空");
-
-        // 创建后 localAgents 应包含该 agent
-        assertEquals(1, server.localAgents.size(), "创建后 localAgents 应有 1 个元素");
-        assertNotNull(server.localAgents.get(agentId), "localAgents 应包含创建的 agent");
-
-        // 本节点有返回值时应通过 transport 派发同名事件
-        assertEquals(1, stub.receivedMessages.size(), "本节点 agent.create 有返回值，应派发 1 条消息");
-        assertEquals(result, stub.receivedMessages.peek(), "派发的消息内容应与返回值一致");
-    }
-
-    /**
-     * 验证本地 agent toolCall 处理流程
-     */
-    @Test
-    @Timeout(value = 10, unit = TimeUnit.SECONDS)
-    void testHandleToolCall() {
-//        var ctx = ContainerServer.Context.builder()
-//                .transport(stub)
-//                .client("test-client")
-//                .build();
-//
-//        // 先创建 agent
-//        var createResult = server.handleUserEvent(ctx, "agent.create", "{}");
-//        var agentId = JSONUtil.parse(createResult).path("agentId").asText();
-//
-//        // 对已存在的 agent 调用 toolCall
-//        var toolCallResult = server.handleUserEvent(ctx, "agent.toolCall",
-//                JSONUtil.stringify(java.util.Map.of("agentId", agentId, "toolCallId", "test-tool-call")));
-//        // toolCall 应返回非空结果
-//        assertNotNull(toolCallResult, "本地 agent toolCall 应返回结果");
-    }
-
-    // ======================== 内部类 ========================
-
-    /**
-     * 桩传输实现，在内存中模拟 ITransport，记录启停状态并支持 sendToClient 消息收集
-     */
-    @Slf4j
-    static class StubTransport implements ITransport {
-
-        public String transportId;
-        public ContainerServer container;
-        public ConcurrentLinkedQueue<String> receivedMessages = new ConcurrentLinkedQueue<>();
-        public boolean started = false;
-        public boolean stopped = false;
-
-        public StubTransport(ContainerServer container) {
-            this.container = container;
-            this.transportId = DataUtil.getFlakeId();
-        }
-
-        @Override
-        public void start() {
-            log.debug("start StubTransport started: %s".formatted(transportId));
-            started = true;
-        }
-
-        @Override
-        public void stop() {
-            log.debug("stop StubTransport stopped: %s".formatted(transportId));
-            stopped = true;
-        }
-
-        @Override
-        public String getTransportId() {
-            return transportId;
-        }
-
-        @Override
-        public void sendToClient(Object clientHandle, String event, String bodyJson) {
-            log.debug("sendToClient event: %s, body: %s".formatted(event, bodyJson));
-            receivedMessages.add(bodyJson);
-        }
-
-        @Override
-        public Object getUser(Object clientHandle) {
-            return null;
-        }
-
-        @Override
-        public void closeClient(Object clientHandle) {
-
-        }
-
-        @Override
-        public void authorizeConnection(Object clientHandle) {
-        }
-
-        @Override
-        public String getUserId(Object clientHandle) {
-            return null;
-        }
-
-        /**
-         * 模拟客户端事件，构造 Context 并委托给 ContainerServer 处理
-         *
-         * @param event    事件名
-         * @param dataJson 请求数据 JSON 字符串
-         * @return 响应 JSON 字符串，可为 null
-         */
-        public String simulateEvent(String event, String dataJson) {
-            var ctx = ContainerServer.Context.builder()
-                    .transport(this)
-                    .client("stub-client-" + transportId)
-                    .serverId(container.id)
-                    .build();
-            return container.handleUserEvent(ctx, event, dataJson);
+    @Nested
+    class Constructor {
+        @Test
+        void testConstructor() {
+            assertNotNull(container.id);
+            assertFalse(container.id.isEmpty());
+            assertEquals("127.0.0.1", container.clusterIp);
+            assertSame(messageBus, container.messageBus);
+            assertSame(metaData, container.metaData);
         }
     }
 
+    @Nested
+    class AddTransport {
+        @Test
+        void testAddTransport() {
+            var sizeBefore = container.transports.size();
+            container.addTransport(new NoneTransport());
+            assertEquals(sizeBefore + 1, container.transports.size());
+        }
+    }
+
+    @Nested
+    class RemoveTransport {
+        @Test
+        void testRemoveTransport() {
+            var extra = new NoneTransport();
+            container.addTransport(extra);
+            var sizeBefore = container.transports.size();
+            container.removeTransport(extra);
+            assertEquals(sizeBefore - 1, container.transports.size());
+        }
+    }
+
+    @Nested
+    class Start {
+        @Test @Timeout(5)
+        void testStart() {
+            container.start();
+            var nodes = metaData.getNodes();
+            assertTrue(nodes.stream().anyMatch(n -> n.getId().equals(container.id)));
+            // start 已调用 listenMessage → 已订阅消息总线
+        }
+    }
+
+    @Nested
+    class Stop {
+        @Test @Timeout(5)
+        void testStop() {
+            container.start();
+            container.stop();
+            assertTrue(container.isShuttingDown);
+            var nodes = metaData.getNodes();
+            assertTrue(nodes.stream().noneMatch(n -> n.getId().equals(container.id)));
+        }
+    }
+
+    @Nested
+    class StartStopLifecycle {
+        @Test @Timeout(5)
+        void testStartStopLifecycle() {
+            container.start();
+            var nodesAfterStart = metaData.getNodes();
+            assertTrue(nodesAfterStart.stream().anyMatch(n -> n.getId().equals(container.id)));
+
+            container.stop();
+            assertTrue(container.isShuttingDown);
+            var nodesAfterStop = metaData.getNodes();
+            assertTrue(nodesAfterStop.stream().noneMatch(n -> n.getId().equals(container.id)));
+        }
+    }
+
+    // ======================== Agent 事件处理 ========================
+
+    @Nested
+    class HandleAgentCreate {
+        @Test @Timeout(5)
+        void testHandleAgentCreate() {
+            var ctx = buildContext(false);
+            var data = JSONUtil.create().put("name", "test-agent");
+
+            var result = container.handleAgentCreate(ctx, data);
+
+            assertNotNull(result);
+            var agentId = result.path("agentId").asText();
+            assertFalse(agentId.isEmpty());
+            assertTrue(container.localAgents.containsKey(agentId));
+            assertEquals(container.id, metaData.getAgentStay(agentId));
+        }
+    }
+
+    @Nested
+    class HandleAgentSend {
+        @Test @Timeout(5)
+        void testHandleAgentSendLocal() {
+            var agent = makeAgent();
+            var agentId = agent.metadata.getId();
+            container.localAgents.put(agentId, agent);
+
+            var userMsg = Message.builder()
+                    .role(Message.ROLE.USER).type(Message.TYPE.TEXT).text("hello").build();
+            var eventNode = JSONUtil.convert(
+                    Event.builder().type(Event.Type.MESSAGE).priority(1).message(userMsg).build());
+
+            var ctx = buildContext(false);
+            var sendData = JSONUtil.create().put("agentId", agentId).set("event", eventNode);
+
+            var result = container.handleAgentSend(ctx, sendData);
+            assertNull(result);
+        }
+
+        @Test @Timeout(5)
+        void testHandleAgentSendRemote() {
+            var ctx = buildContext(false);
+            var nonExistentId = "non-existent-agent-send";
+            metaData.setAgentStay(nonExistentId, "remote-node-1");
+
+            var userMsg = Message.builder()
+                    .role(Message.ROLE.USER).type(Message.TYPE.TEXT).text("hello").build();
+            var data = JSONUtil.create()
+                    .put("agentId", nonExistentId)
+                    .set("event", JSONUtil.convert(
+                            Event.builder().type(Event.Type.MESSAGE).priority(1).message(userMsg).build()));
+
+            var result = container.handleAgentSend(ctx, data);
+            assertNull(result);
+        }
+    }
+
+    @Nested
+    class HandleAgentSubscribe {
+        @Test @Timeout(5)
+        void testHandleAgentSubscribeLocal() {
+            var agent = makeAgent();
+            var agentId = agent.metadata.getId();
+            container.localAgents.put(agentId, agent);
+
+            var ctx = buildContext(false);
+            var subscribeData = JSONUtil.create().put("agentId", agentId);
+            var result = container.handleAgentSubscribe(ctx, subscribeData);
+
+            assertNull(result);
+            assertTrue(container.localSubscriptions.containsKey(agentId));
+        }
+
+        @Test @Timeout(5)
+        void testHandleAgentSubscribeRemote() {
+            var ctx = buildContext(false);
+            var remoteAgentId = "remote-agent-sub";
+            metaData.setAgentStay(remoteAgentId, "remote-node-2");
+
+            var subscribeData = JSONUtil.create().put("agentId", remoteAgentId);
+            var result = container.handleAgentSubscribe(ctx, subscribeData);
+
+            assertNull(result);
+            assertTrue(container.agentClient.containsKey(remoteAgentId));
+            assertEquals(transport.getTransportId(), container.agentClient.get(remoteAgentId).transportId);
+        }
+    }
+
+    @Nested
+    class HandleAgentUnsubscribe {
+        @Test @Timeout(5)
+        void testHandleAgentUnsubscribeLocal() {
+            var agent = makeAgent();
+            var agentId = agent.metadata.getId();
+            container.localAgents.put(agentId, agent);
+
+            var ctx = buildContext(false);
+            container.handleAgentSubscribe(ctx, JSONUtil.create().put("agentId", agentId));
+            assertTrue(container.localSubscriptions.containsKey(agentId));
+
+            var result = container.handleAgentUnsubscribe(ctx, JSONUtil.create().put("agentId", agentId));
+            assertNull(result);
+            assertFalse(container.localSubscriptions.containsKey(agentId));
+        }
+
+        @Test @Timeout(5)
+        void testHandleAgentUnsubscribeRemote() {
+            var ctx = buildContext(false);
+            var remoteAgentId = "remote-agent-unsub-2";
+            metaData.setAgentStay(remoteAgentId, "remote-node-3");
+
+            var result = container.handleAgentUnsubscribe(ctx, JSONUtil.create().put("agentId", remoteAgentId));
+            assertNull(result);
+        }
+    }
+
+    @Nested
+    class HandleAgentToolCall {
+        @Test @Timeout(5)
+        void testHandleAgentToolCallLocal() {
+            var agent = makeAgent();
+            var agentId = agent.metadata.getId();
+            container.localAgents.put(agentId, agent);
+
+            var ctx = buildContext(false);
+            var data = JSONUtil.create().put("agentId", agentId).put("toolCallId", "non-existent-call");
+
+            assertThrows(RuntimeException.class, () -> {
+                container.handleAgentToolCall(ctx, data);
+            });
+        }
+
+        @Test @Timeout(5)
+        void testHandleAgentToolCallRemote() {
+            var ctx = buildContext(false);
+            var remoteAgentId = "remote-agent-tool-2";
+            metaData.setAgentStay(remoteAgentId, "remote-node-4");
+
+            var data = JSONUtil.create().put("agentId", remoteAgentId).put("toolCallId", "some-call");
+            var result = container.handleAgentToolCall(ctx, data);
+            assertNull(result);
+        }
+    }
+
+    @Nested
+    class HandleAgentList {
+        @Test @Timeout(5)
+        void testHandleAgentList() {
+            var ctx = buildContext(false);
+            var data = JSONUtil.create().put("keyword", "test");
+            var result = container.handleAgentList(ctx, data);
+
+            assertNotNull(result);
+            var agents = result.path("agents");
+            assertFalse(agents.isMissingNode());
+            assertTrue(agents.isArray());
+            assertEquals(0, agents.size());
+        }
+    }
+
+    @Nested
+    class HandleAgentEdit {
+        @Test @Timeout(5)
+        void testHandleAgentEdit() {
+            var ctx = buildContext(false);
+            var data = JSONUtil.create().put("agentId", "any-id");
+            var result = container.handleAgentEdit(ctx, data);
+            assertNull(result);
+        }
+    }
+
+    @Nested
+    class HandleAgentDetail {
+        @Test @Timeout(5)
+        void testHandleAgentDetailLocal() {
+            var agent = makeAgent();
+            var agentId = agent.metadata.getId();
+            container.localAgents.put(agentId, agent);
+
+            var ctx = buildContext(false);
+            var data = JSONUtil.create().put("agentId", agentId);
+            var result = container.handleAgentDetail(ctx, data);
+
+            assertNotNull(result);
+            assertEquals(agentId, result.path("id").asText());
+        }
+
+        @Test @Timeout(5)
+        void testHandleAgentDetailRemote() {
+            var ctx = buildContext(false);
+            var remoteAgentId = "remote-agent-detail-2";
+            metaData.setAgentStay(remoteAgentId, "remote-node-5");
+
+            var data = JSONUtil.create().put("agentId", remoteAgentId);
+            var result = container.handleAgentDetail(ctx, data);
+
+            assertNull(result);
+            assertTrue(container.agentClient.containsKey(remoteAgentId));
+        }
+    }
+
+    // ======================== Team 事件处理 ========================
+
+    @Nested
+    class HandleTeamCreate {
+        @Test @Timeout(5)
+        void testHandleTeamCreate() {
+            var ctx = buildContext(false);
+            var data = JSONUtil.create().put("name", "test-team");
+            var result = container.handleTeamCreate(ctx, data);
+
+            assertNotNull(result);
+            var teamId = result.path("teamId").asText();
+            assertFalse(teamId.isEmpty());
+            assertTrue(container.localTeams.containsKey(teamId));
+            assertEquals(container.id, metaData.getTeamStay(teamId));
+        }
+    }
+
+    @Nested
+    class HandleTeamList {
+        @Test @Timeout(5)
+        void testHandleTeamList() {
+            var ctx = buildContext(false);
+            var data = JSONUtil.create().put("keyword", "test");
+            var result = container.handleTeamList(ctx, data);
+
+            assertNotNull(result);
+            assertFalse(result.path("teams").isMissingNode());
+        }
+    }
+
+    @Nested
+    class HandleTeamEdit {
+        @Test @Timeout(5)
+        void testHandleTeamEdit() {
+            var ctx = buildContext(false);
+            var data = JSONUtil.create().put("teamId", "any-team-id");
+            var result = container.handleTeamEdit(ctx, data);
+
+            assertNotNull(result);
+            assertEquals("team-id", result.path("id").asText());
+        }
+    }
+
+    @Nested
+    class HandleTeamDetail {
+        @Test @Timeout(5)
+        void testHandleTeamDetailLocal() {
+            var ctx = buildContext(false);
+            var createResult = container.handleTeamCreate(ctx, JSONUtil.create());
+            var teamId = createResult.path("teamId").asText();
+
+            var data = JSONUtil.create().put("teamId", teamId);
+            var result = container.handleTeamDetail(ctx, data);
+
+            assertNotNull(result);
+            assertEquals("team-id", result.path("id").asText());
+        }
+
+        @Test @Timeout(5)
+        void testHandleTeamDetailRemote() {
+            var ctx = buildContext(false);
+            var remoteTeamId = "remote-team-detail-2";
+            metaData.setTeamStay(remoteTeamId, "remote-node-6");
+
+            var data = JSONUtil.create().put("teamId", remoteTeamId);
+            var result = container.handleTeamDetail(ctx, data);
+
+            assertNull(result);
+            assertTrue(container.teamClient.containsKey(remoteTeamId));
+        }
+    }
+
+    @Nested
+    class HandleTeamRemove {
+        @Test @Timeout(5)
+        void testHandleTeamRemove() {
+            var ctx = buildContext(false);
+            var createResult = container.handleTeamCreate(ctx, JSONUtil.create());
+            var teamId = createResult.path("teamId").asText();
+            assertTrue(container.localTeams.containsKey(teamId));
+
+            var data = JSONUtil.create().put("teamId", teamId);
+            var result = container.handleTeamRemove(ctx, data);
+
+            assertNotNull(result);
+            assertEquals(teamId, result.path("teamId").asText());
+            assertFalse(container.localTeams.containsKey(teamId));
+            assertNull(metaData.getTeamStay(teamId));
+        }
+    }
+
+    // ======================== handleUserEvent ========================
+
+    @Nested
+    class HandleUserEvent {
+        @Test @Timeout(5)
+        void testShuttingDown() {
+            container.isShuttingDown = true;
+
+            var ctx = buildContext(false);
+            var dataJson = "{\"msgId\":\"msg-1\",\"body\":{}}";
+
+            var result = container.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_CREATE, dataJson);
+
+            assertNotNull(result);
+            assertTrue(result.contains("\"error\""));
+        }
+
+        @Test @Timeout(5)
+        void testMissingMsgId() {
+            var ctx = buildContext(false);
+            var dataJson = "{\"body\":{}}";
+
+            var result = container.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_CREATE, dataJson);
+            assertNotNull(result);
+            assertTrue(result.contains("\"error\""));
+        }
+
+        @Test @Timeout(5)
+        void testDispatch() {
+            var ctx = buildContext(false);
+            var dataJson = "{\"msgId\":\"msg-dispatch\",\"body\":{}}";
+
+            var result = container.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_CREATE, dataJson);
+
+            assertNotNull(result);
+            assertTrue(result.contains("agentId"));
+        }
+
+        @Test @Timeout(5)
+        void testNonInternalResponse() {
+            var ctx = buildContext(false);
+            var dataJson = "{\"msgId\":\"msg-non-internal\",\"body\":{}}";
+
+            var result = container.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_CREATE, dataJson);
+
+            assertNotNull(result);
+            assertTrue(result.contains("agentId"));
+        }
+
+        @Test @Timeout(5)
+        void testException() {
+            var agent = makeAgent();
+            var agentId = agent.metadata.getId();
+            container.localAgents.put(agentId, agent);
+
+            var ctx = buildContext(false);
+            var data = JSONUtil.create().put("agentId", agentId).put("toolCallId", "non-existent");
+            var body = new ContainerServer.Message<ObjectNode>() {};
+            body.msgId = "msg-err";
+            body.body = data;
+            var dataJson = JSONUtil.stringify(body);
+
+            var result = container.handleUserEvent(ctx, ContainerServer.EVENT_AGENT_TOOL_CALL, dataJson);
+
+            assertNotNull(result);
+            assertTrue(result.contains("\"error\""));
+        }
+    }
+
+    // ======================== listenMessage ========================
+
+    @Nested
+    class ListenMessage {
+        @BeforeEach
+        void setUpListen() {
+            container.start();
+        }
+
+        @Test @Timeout(5)
+        void testProxy() {
+            var sourceNodeId = "remote-node-proxy";
+
+            var requestBody = "{\"msgId\":\"proxy-msg\",\"body\":{}}";
+            var proxyArray = JSONUtil.createArray();
+            proxyArray.add(sourceNodeId).add("proxy")
+                    .add(ContainerServer.EVENT_AGENT_CREATE).add(requestBody);
+
+            messageBus.publish("%s-message".formatted(container.id), JSONUtil.stringify(proxyArray));
+
+            assertFalse(container.localAgents.isEmpty(), "proxy 处理后应创建 Agent");
+        }
+
+        @Test @Timeout(5)
+        void testReverseAgentMessage() {
+            var agentId = "reverse-agent";
+            container.agentClient.put(agentId,
+                    ContainerServer.TransportClientRecord.builder()
+                            .transportId(transport.getTransportId()).clientHandle("client-123").build());
+
+            var dataNode = JSONUtil.create().put("agentId", agentId);
+            var bodyObj = new ContainerServer.OutMessageBody() {};
+            bodyObj.setData(dataNode);
+            var bodyJson = JSONUtil.stringify(bodyObj);
+
+            var reverseArray = JSONUtil.createArray();
+            reverseArray.add("remote-node").add("reverse")
+                    .add(ContainerServer.EVENT_AGENT_MESSAGE).add(bodyJson);
+
+            messageBus.publish("%s-message".formatted(container.id), JSONUtil.stringify(reverseArray));
+
+            // verify 不抛异常即可（NoneTransport.sendToClient 是 no-op）
+        }
+
+        @Test @Timeout(5)
+        void testReverseAgentDetail() {
+            var agentId = "detail-agent-reverse";
+            container.agentClient.put(agentId,
+                    ContainerServer.TransportClientRecord.builder()
+                            .transportId(transport.getTransportId()).clientHandle("detail-client").build());
+
+            var dataNode = JSONUtil.create().set("metadata", JSONUtil.create().put("id", agentId));
+            var bodyNode = JSONUtil.create().set("data", dataNode);
+            var fullResponse = JSONUtil.create().set("body", bodyNode);
+
+            var reverseArray = JSONUtil.createArray();
+            reverseArray.add("remote-node").add("reverse")
+                    .add(ContainerServer.EVENT_AGENT_DETAIL).add(JSONUtil.stringify(fullResponse));
+
+            messageBus.publish("%s-message".formatted(container.id), JSONUtil.stringify(reverseArray));
+
+            assertFalse(container.agentClient.containsKey(agentId), "推送后应从 agentClient 移除缓存");
+        }
+
+        @Test @Timeout(5)
+        void testReverseTeamDetail() {
+            var teamId = "detail-team-reverse";
+            container.teamClient.put(teamId,
+                    ContainerServer.TransportClientRecord.builder()
+                            .transportId(transport.getTransportId()).clientHandle("team-detail-client").build());
+
+            var dataNode = JSONUtil.create().set("metadata", JSONUtil.create().put("id", teamId));
+            var bodyNode = JSONUtil.create().set("data", dataNode);
+            var fullResponse = JSONUtil.create().set("body", bodyNode);
+
+            var reverseArray = JSONUtil.createArray();
+            reverseArray.add("remote-node").add("reverse")
+                    .add(ContainerServer.EVENT_TEAM_DETAIL).add(JSONUtil.stringify(fullResponse));
+
+            messageBus.publish("%s-message".formatted(container.id), JSONUtil.stringify(reverseArray));
+
+            assertFalse(container.teamClient.containsKey(teamId), "推送后应从 teamClient 移除缓存");
+        }
+    }
 }
