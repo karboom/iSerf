@@ -203,6 +203,11 @@ public class Anthropic implements IText {
                             sink.complete();
                             break;
 
+                        case "error":
+                            var errorMsg = json.path("error").path("message").asText("unknown error");
+                            sink.error(new RuntimeException(errorMsg));
+                            break;
+
                         case "ping":
                             break;
                     }

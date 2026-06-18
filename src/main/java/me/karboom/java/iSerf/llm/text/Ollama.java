@@ -68,6 +68,14 @@ public class Ollama implements IText {
                     if (data != null && !data.trim().isEmpty()) {
                         try {
                             var json = JSONUtil.parse(data);
+
+                            // Ollama 错误响应
+                            var errorNode = json.path("error");
+                            if (!errorNode.isMissingNode() && !errorNode.isNull()) {
+                                sink.error(new RuntimeException(errorNode.asText()));
+                                return;
+                            }
+
                             var doneNode = json.path("done");
                             if (doneNode.asBoolean(false)) {
                                 var output = parseOutput(json, true);

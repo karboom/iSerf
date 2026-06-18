@@ -295,7 +295,7 @@ public class Agent {
         return flux
                 .publishOn(Schedulers.fromExecutor(this.eventPool))
                 .reduce(Tuples.of(
-                        AgentMessage.builder().type(AgentMessage.TYPE.THINKING).text("").isSegment(0).build(),
+                        AgentMessage.builder().role(AgentMessage.ROLE.ASSISTANT).type(AgentMessage.TYPE.THINKING).text("").isSegment(0).build(),
                         new ArrayList<>(),
                         AgentMessage.builder().role(AgentMessage.ROLE.ASSISTANT).type(AgentMessage.TYPE.TEXT).text("").isSegment(0).isForgotten(0).eventId(event.getId()).build()
                 ), (acc, chunk) -> {
@@ -326,8 +326,8 @@ public class Agent {
                             if (thinkingItem.getId() != null) {
                                 // thinking阶段结束，更新thinkingItem为非片段并发送
                                 sink.tryEmitNext(thinkingItem);
-//                                memoryManager.add(thinkingItem);
-//                                persistence.addMemory(this);
+                                memoryManager.add(thinkingItem);
+                                persistence.addMemory(this);
                             }
                             // 将当前chunk添加到toolCall列表中用于后续处理
                             toolCall.add(chunk);
@@ -336,8 +336,8 @@ public class Agent {
                             if (thinkingItem.getId() != null) {
                                 // thinking阶段结束，更新thinkingItem为非片段并发送
                                 sink.tryEmitNext(thinkingItem);
-//                                memoryManager.add(thinkingItem);
-//                                persistence.addMemory(this);
+                                memoryManager.add(thinkingItem);
+                                persistence.addMemory(this);
                                 thinkingItem.setId(null);
                             }
 

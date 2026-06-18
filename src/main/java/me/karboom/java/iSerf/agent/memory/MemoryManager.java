@@ -73,6 +73,7 @@ public class MemoryManager {
     public List<AgentMessage> getActiveMessages() {
         return messages.stream()
                 .filter(item -> item.getIsForgotten() == null || item.getIsForgotten() == 0)
+                .filter(item -> !AgentMessage.TYPE.THINKING.equals(item.getType()))
                 .toList();
     }
 

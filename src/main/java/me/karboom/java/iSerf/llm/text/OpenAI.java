@@ -72,7 +72,11 @@ public class OpenAI extends AbstractOpenAIText {
                         }
                         var output = parseOutput(JSONUtil.parse(data), true);
                         if (output != null) {
-                            sink.next(output);
+                            if (output.getError() != null) {
+                                sink.error(new RuntimeException(output.getError()));
+                            } else {
+                                sink.next(output);
+                            }
                         }
                     }
                 }
