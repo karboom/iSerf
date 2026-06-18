@@ -2,8 +2,11 @@ package me.karboom.java.iSerf.billing;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.util.CBORUtil;
+import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
+import oshi.SystemInfo;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -12,11 +15,15 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
 public class NfsLedger implements ILedger {
+    private static final String CPU_MODEL = new SystemInfo()
+            .getHardware().getProcessor().getProcessorIdentifier().getName();
+
     private final Path filePath;
     private final String format;
 
@@ -122,4 +129,94 @@ public class NfsLedger implements ILedger {
         log.debug("queryByUser userId: {} found: {}", userId, result.size());
         return result;
     }
+
+    // region ========== 语义方法 ==========
+
+    @Override
+    public void recordMemory(Agent agent, long bytes) {
+        record(Cost.builder()
+                .id(DataUtil.getFlakeId())
+                .targetType("agent")
+                .targetId(agent.metadata.getId())
+                .memory((int) bytes)
+                .captureTime(Instant.now())
+                .build());
+    }
+
+    @Override
+    public void recordCpu(Agent agent, long nanos) {
+        record(Cost.builder()
+                .id(DataUtil.getFlakeId())
+                .targetType("agent")
+                .targetId(agent.metadata.getId())
+                .cpuModel(CPU_MODEL)
+                .cpu(nanos)
+                .captureTime(Instant.now())
+                .build());
+    }
+
+    @Override
+    public void recordToken(Agent agent, int tokens) {
+        record(Cost.builder()
+                .id(DataUtil.getFlakeId())
+                .targetType("agent")
+                .targetId(agent.metadata.getId())
+                .token(tokens)
+                .captureTime(Instant.now())
+                .build());
+    }
+
+    @Override
+    public void recordDisk(Agent agent, int bytes) {
+        record(Cost.builder()
+                .id(DataUtil.getFlakeId())
+                .targetType("agent")
+                .targetId(agent.metadata.getId())
+                .disk(bytes)
+                .captureTime(Instant.now())
+                .build());
+    }
+
+    @Override
+    public void recordTraffic(Agent agent, int bytes) {
+        record(Cost.builder()
+                .id(DataUtil.getFlakeId())
+                .targetType("agent")
+                .targetId(agent.metadata.getId())
+                .traffic(bytes)
+                .captureTime(Instant.now())
+                .build());
+    }
+
+    @Override
+    public long usageCount(Agent agent) {
+        return query("agent", agent.metadata.getId()).size();
+    }
+
+    @Override
+    public long totalTokens(Agent agent) {
+        return query("agent", agent.metadata.getId()).stream()
+                .filter(c -> c.getToken() != null)
+                .mapToLong(Cost::getToken)
+                .sum();
+    }
+
+    // endregion
+
+    // region ========== 用户维度统计 ==========
+
+    @Override
+    public UsageSummary queryUsageSummary(String userId) {
+        var costs = queryByUser(userId);
+        return UsageSummary.builder()
+                .count((long) costs.size())
+                .cpu(costs.stream().filter(c -> c.getCpu() != null).mapToLong(Cost::getCpu).sum())
+                .memory(costs.stream().filter(c -> c.getMemory() != null).mapToLong(Cost::getMemory).sum())
+                .disk(costs.stream().filter(c -> c.getDisk() != null).mapToLong(Cost::getDisk).sum())
+                .token(costs.stream().filter(c -> c.getToken() != null).mapToLong(Cost::getToken).sum())
+                .traffic(costs.stream().filter(c -> c.getTraffic() != null).mapToLong(Cost::getTraffic).sum())
+                .build();
+    }
+
+    // endregion
 }

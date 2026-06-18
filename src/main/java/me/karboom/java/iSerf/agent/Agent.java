@@ -8,8 +8,8 @@ import me.karboom.java.iSerf.agent.persistence.AgentSnapshot;
 import me.karboom.java.iSerf.agent.persistence.IPersistence;
 import me.karboom.java.iSerf.agent.persistence.NonePersistence;
 import me.karboom.java.iSerf.agent.tool.*;
-import me.karboom.java.iSerf.agent.billing.AgentBilling;
 import me.karboom.java.iSerf.billing.ILedger;
+import me.karboom.java.iSerf.config.Config;
 import me.karboom.java.iSerf.util.*;
 import org.openjdk.jol.info.GraphLayout;
 import me.karboom.java.iSerf.llm.text.Output;
@@ -63,7 +63,7 @@ public class Agent {
 
     public Disposable eventDisposable;
 
-    public AgentBilling agentBilling;
+    public ILedger ledger;
 
     /**
      * 工具调用处理器
@@ -110,7 +110,7 @@ public class Agent {
 
         this.eventPool = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Event-", 0).factory());
         this.broadcastPool = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("Agent-Broadcast-", 0).factory());
-        this.agentBilling = new AgentBilling(config.getLedger());
+        this.ledger = config.getLedger() != null ? config.getLedger() : Config.getInstance().getDefaultLedger();
 
         this.workDir = config.getWorkDir();
         this.schedule = config.getSchedule();
@@ -194,7 +194,7 @@ public class Agent {
                 } finally {
                     persistence.syncEvent(this);
                     if (cpuStart > 0) {
-                        agentBilling.recordCpu(this, System.nanoTime() - cpuStart);
+                        ledger.recordCpu(this, System.nanoTime() - cpuStart);
                     }
                 }
             }
@@ -435,7 +435,7 @@ public class Agent {
      */
     public void calcMemoryBillings() {
         var memorySize = GraphLayout.parseInstance(memoryManager.getMessagesRaw()).totalSize();
-        agentBilling.recordMemory(this, memorySize);
+        ledger.recordMemory(this, memorySize);
     }
 
     // endregion
