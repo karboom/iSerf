@@ -5,6 +5,8 @@ import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.AgentMessage;
+import me.karboom.java.iSerf.persistence.ITeamPersistence;
+import me.karboom.java.iSerf.persistence.NoneTeamPersistence;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.ErrorUtil;
 import reactor.core.Disposable;
@@ -59,6 +61,11 @@ public class Team {
      */
     public Flux<Message> broadcast;
 
+    /**
+     * 持久化实现
+     */
+    public ITeamPersistence persistence;
+
     public Team(Agent leader, List<Agent> members) {
         this.leader = leader;
         this.member = new ArrayList<>(members);
@@ -74,6 +81,8 @@ public class Team {
         Flux<Message> membersBroadcast = Flux.fromIterable(this.member)
                 .flatMap(m -> m.broadcast.map(item -> Message.builder().agentId(m.metadata.getId()).message(item).build()));
         this.broadcast = Flux.merge(leaderBroadcast, membersBroadcast).share();
+
+        this.persistence = new NoneTeamPersistence();
 
         this.eventQueue = new PriorityBlockingQueue<>(100, Comparator.comparing(Event::getId));
         this.eventBroadcast = Flux.<Event>generate(sink -> {

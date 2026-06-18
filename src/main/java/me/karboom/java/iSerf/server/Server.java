@@ -7,7 +7,7 @@ import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.AgentEvent;
-import me.karboom.java.iSerf.agent.persistence.IPersistence;
+import me.karboom.java.iSerf.persistence.IAgentPersistence;
 import me.karboom.java.iSerf.config.Config;
 import me.karboom.java.iSerf.server.BO.Context;
 import me.karboom.java.iSerf.server.BO.Message;
@@ -130,7 +130,7 @@ public abstract class Server {
     /**
      * 持久化实现，用于全局搜索 Agent
      */
-    public IPersistence persistence = Config.getInstance().getDefaultPersistence();
+    public IAgentPersistence persistence = Config.getInstance().getDefaultPersistence();
 
     /**
      * 构造通用传输容器

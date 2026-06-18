@@ -6,7 +6,7 @@ import me.karboom.java.iSerf.agent.AgentConfig;
 import me.karboom.java.iSerf.agent.AgentEvent;
 import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.AgentMetadata;
-import me.karboom.java.iSerf.agent.persistence.NfsPersistence;
+import me.karboom.java.iSerf.persistence.NfsAgentPersistence;
 import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
 import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.llm.text.BatchTaskInfo;
@@ -75,7 +75,7 @@ class ServerIT {
         config.setMetadata(metadata);
         config.setPrompt("test");
         config.setLlm(provider);
-        config.setPersistence(new NfsPersistence(persistenceBaseDir));
+        config.setPersistence(new NfsAgentPersistence(persistenceBaseDir));
         return new Agent(config);
     }
 
@@ -159,7 +159,7 @@ class ServerIT {
         server3 = createServer("127.0.0.3", messageBus, metaData, persistenceBaseDir);
 
         // 设置 server 的 persistence 使用临时目录
-        var nfsPersistence = new NfsPersistence(persistenceBaseDir);
+        var nfsPersistence = new NfsAgentPersistence(persistenceBaseDir);
         server1.persistence = nfsPersistence;
         server2.persistence = nfsPersistence;
         server3.persistence = nfsPersistence;

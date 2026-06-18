@@ -4,8 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.agent.persistence.IPersistence;
-import me.karboom.java.iSerf.agent.persistence.NfsPersistence;
+import me.karboom.java.iSerf.persistence.IAgentPersistence;
+import me.karboom.java.iSerf.persistence.NfsAgentPersistence;
 import me.karboom.java.iSerf.billing.ILedger;
 import me.karboom.java.iSerf.billing.NfsLedger;
 
@@ -22,7 +22,7 @@ import java.nio.file.Path;
 public class Config {
 
     public ILedger defaultLedger;
-    public IPersistence defaultPersistence;
+    public IAgentPersistence defaultPersistence;
     public HttpConfig http = new HttpConfig();
 
     private static final Config INSTANCE = new Config();
@@ -34,7 +34,7 @@ public class Config {
     private Config() {
         var baseDir = Path.of(System.getProperty("user.home"), ".iserf");
         this.defaultLedger = new NfsLedger(baseDir.resolve("ledger").toString(), NfsLedger.Format.JSONL);
-        this.defaultPersistence = new NfsPersistence(baseDir.resolve("agent").toString());
+        this.defaultPersistence = new NfsAgentPersistence(baseDir.toString());
         loadFromYaml();
     }
 

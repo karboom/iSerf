@@ -4,9 +4,9 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
 import me.karboom.java.iSerf.agent.memory.MemoryManager;
-import me.karboom.java.iSerf.agent.persistence.AgentSnapshot;
-import me.karboom.java.iSerf.agent.persistence.IPersistence;
-import me.karboom.java.iSerf.agent.persistence.NonePersistence;
+import me.karboom.java.iSerf.persistence.AgentSnapshot;
+import me.karboom.java.iSerf.persistence.IAgentPersistence;
+import me.karboom.java.iSerf.persistence.NoneAgentPersistence;
 import me.karboom.java.iSerf.agent.tool.*;
 import me.karboom.java.iSerf.billing.ILedger;
 import me.karboom.java.iSerf.config.Config;
@@ -47,7 +47,7 @@ public class Agent {
 
 
     protected MemoryManager memoryManager;
-    public IPersistence persistence;
+    public IAgentPersistence persistence;
     protected ILlmProvider llmProvider;
 
     public PriorityBlockingQueue<AgentEvent> queue;
@@ -102,7 +102,7 @@ public class Agent {
         this.queue = new PriorityBlockingQueue<>(100, Comparator.comparing(AgentEvent::getPriority));
 
         this.llmProvider = config.getLlm();
-        this.persistence = config.getPersistence() != null ? config.getPersistence() : new NonePersistence();
+        this.persistence = config.getPersistence() != null ? config.getPersistence() : new NoneAgentPersistence();
         this.memoryManager = new MemoryManager(config.getPrompt());
 
         this.sink = Sinks.many().multicast().onBackpressureBuffer();
