@@ -223,14 +223,84 @@ Websocket 集群协议使用 Socket.IO，客户端连接至 `/user` 命名空间
 |------|----------|------|
 | `agent.message` | `{"msgId":"xxx","body":{"data":{"agentId":"xxx","message":{}}}}` | 服务端推送的 Agent 消息 |
 
-### 错误响应
+## 错误处理
 
-当服务端处于关闭状态或发生错误时，返回：
+客户端面临三层错误，每层的发生场景和处理方式不同：
+
+| 层级 | 错误类型 | 发生场景 | 客户端表现 |
+|------|----------|----------|------------|
+| 第 1 层 | HTTP 连接错误 | WebSocket 握手阶段失败 | `connect_error` 事件 |
+| 第 2 层 | WebSocket 消息错误 | `Message` 结构解析失败（JSON 格式错误、缺少 msgId 等） | 响应中 `body.error` 字段 |
+| 第 3 层 | Message 业务错误 | 业务逻辑异常或 Agent 执行错误 | `body.error` 或 `message.type=ERROR` |
+
+### 第 1 层：HTTP 连接错误
+
+WebSocket 握手阶段失败，连接未建立。由 socket.io-client 库自动处理。
+
+```javascript
+socket.on('connect_error', (err) => {
+    console.log('连接失败:', err.message);
+    // 常见原因：服务未启动、端口错误、鉴权失败等
+});
+```
+
+### 第 2 层：WebSocket 消息错误
+
+连接已建立，但发送的消息结构不符合 `Message<T>` 规范。服务端返回错误响应：
 
 ```json
 {"msgId":"","body":{"error":"错误信息"}}
 ```
 
-常见错误：
-- 服务关闭：`{"msgId":"","body":{"error":"server is shutting down"}}`
-- 未知事件（直接由 transport 返回）：`{"error":"unknown event: xxx"}`
+常见原因：
+- JSON 格式错误，无法解析
+- 缺少 `msgId` 字段：`{"error":"need msgId"}`
+- 服务关闭状态：`{"error":"server is shutting down"}`
+
+### 第 3 层：Message 业务错误
+
+消息结构正确，但业务逻辑处理失败。有两种表现形式：
+
+**1. 请求响应的 error 字段**
+
+服务端处理事件时抛出异常，通过 `body.error` 返回：
+
+```json
+{"msgId":"msg_001","body":{"error":"agent not found: xxx"}}
+```
+
+**2. Agent 消息的 ERROR 类型**
+
+Agent 执行过程中发生错误，通过 `agent.message` 事件推送，`message.type` 为 `ERROR`：
+
+```json
+{
+  "msgId": "xxx",
+  "body": {
+    "data": {
+      "agentId": "xxx",
+      "message": {
+        "type": "ERROR",
+        "text": "错误描述"
+      }
+    }
+  }
+}
+```
+
+客户端处理示例：
+
+```javascript
+socket.on('agent.message', (data) => {
+    const msg = JSON.parse(data);
+    const message = msg.body.data.message;
+    
+    if (message.type === 'ERROR') {
+        console.error('Agent 执行错误:', message.text);
+        return;
+    }
+    
+    // 处理正常消息
+    console.log('收到消息:', message);
+});
+```
