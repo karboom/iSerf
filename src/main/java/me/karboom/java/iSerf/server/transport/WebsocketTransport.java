@@ -4,6 +4,7 @@ import com.corundumstudio.socketio.*;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.server.Server;
 import me.karboom.java.iSerf.util.DataUtil;
+import me.karboom.java.iSerf.util.JSONUtil;
 
 import java.util.Set;
 
@@ -136,6 +137,8 @@ public abstract class WebsocketTransport implements ITransport {
     protected void setupUserNS(SocketIONamespace userNS) {
         // 已知事件白名单
         var knownEvents = Set.of(
+                Server.EVENT_AGENT_ACTIVATE,
+                Server.EVENT_AGENT_DEACTIVATE,
                 Server.EVENT_AGENT_CREATE,
                 Server.EVENT_AGENT_SEND,
                 Server.EVENT_AGENT_SUBSCRIBE,
@@ -158,7 +161,7 @@ public abstract class WebsocketTransport implements ITransport {
         userNS.addEventInterceptor((client, eventName, ackRequest, data) -> {
             if (!knownEvents.contains(eventName)) {
                 log.warn("setupUserNS unknown event: %s from %s".formatted(eventName, client.getSessionId()));
-                client.sendEvent(eventName, "{\"error\":\"unknown event: " + eventName + "\"}");
+                client.sendEvent(eventName, container.buildErrorResponse("", "unknown event: " + eventName));
             }
         });
 

@@ -732,7 +732,7 @@ public abstract class Server {
      * @param error 错误信息
      * @return 响应 JSON 字符串（{msgId, body: {error}} 格式）
      */
-    private String buildErrorResponse(String msgId, String error) {
+    public String buildErrorResponse(String msgId, String error) {
         var outMsg = new Message<OutMessageBody>() {};
         outMsg.setMsgId(msgId);
         var body = new OutMessageBody() {};
