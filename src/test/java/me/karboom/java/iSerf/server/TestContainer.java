@@ -6,6 +6,7 @@ import me.karboom.java.iSerf.agent.AgentMetadata;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 
 import me.karboom.java.iSerf.llm.text.OpenAI;
+import me.karboom.java.iSerf.server.BO.Context;
 import me.karboom.java.iSerf.server.lifecycle.IAgentLifecycle;
 import me.karboom.java.iSerf.util.JSONUtil;
 import tools.jackson.databind.node.ObjectNode;
@@ -21,7 +22,7 @@ import java.util.UUID;
 public class TestContainer implements IAgentLifecycle {
 
     @Override
-    public Agent createAgent(Server.Context ctx, ObjectNode params) {
+    public Agent createAgent(Context ctx, ObjectNode params) {
         var llm = new OpenAI("qwen-plus", new HashMap<>(), System.getenv("OPENAI_API_KEY"),
                 "https://dashscope.aliyuncs.com/compatible-mode/v1", 3);
         var provider = new FixedLlmProvider(llm);
@@ -36,22 +37,22 @@ public class TestContainer implements IAgentLifecycle {
     }
 
     @Override
-    public List<Agent> listAgent(Server.Context ctx, ObjectNode params) {
+    public List<Agent> listAgent(Context ctx, ObjectNode params) {
         return new ArrayList<>();
     }
 
     @Override
-    public Agent removeAgent(Server.Context ctx, ObjectNode params) {
+    public Agent removeAgent(Context ctx, ObjectNode params) {
         return null;
     }
 
     @Override
-    public Agent editAgent(Server.Context ctx, ObjectNode params) {
+    public Agent editAgent(Context ctx, ObjectNode params) {
         return null;
     }
 
     @Override
-    public Agent detailAgent(Server.Context ctx, ObjectNode params) {
+    public Agent detailAgent(Context ctx, ObjectNode params) {
         return null;
     }
 

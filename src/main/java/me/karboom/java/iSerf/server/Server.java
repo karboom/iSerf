@@ -9,6 +9,10 @@ import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.AgentEvent;
 import me.karboom.java.iSerf.agent.persistence.IPersistence;
 import me.karboom.java.iSerf.config.Config;
+import me.karboom.java.iSerf.server.BO.Context;
+import me.karboom.java.iSerf.server.BO.Message;
+import me.karboom.java.iSerf.server.BO.OutMessageBody;
+import me.karboom.java.iSerf.server.BO.TransportClientRecord;
 import me.karboom.java.iSerf.server.lifecycle.IAgentLifecycle;
 import me.karboom.java.iSerf.server.lifecycle.ITeamLifecycle;
 import me.karboom.java.iSerf.team.Team;
@@ -55,83 +59,6 @@ public abstract class Server {
 
 
 
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class Message<T> {
-        public String msgId;
-
-        public T body;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class OutMessageBody {
-        public String error;
-
-        public ObjectNode data;
-    }
-
-
-    /**
-     * 客户端记录：存储 transport 标识和客户端句柄，支持多协议互通
-     */
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class TransportClientRecord {
-        /**
-         * 所属 transport 的唯一标识
-         */
-        public String transportId;
-        /**
-         * transport 特定的客户端句柄（SocketIOClient / mqtt client / etc.）
-         */
-        public Object clientHandle;
-    }
-
-
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class Context {
-        public ITransport transport;
-        /**
-         * 请求ID,用于异步回复的匹配
-         */
-        public String requestId;
-
-        public Object client;
-
-        public Object userData;
-        /**
-         * 用户标识
-         */
-        public String userId;
-        /**
-         * 请求原始数据
-         */
-        public ObjectNode requestData;
-        /**
-         * 消息来源服务器标识
-         */
-        public String serverId;
-        /**
-         * 所属容器实例，供生命周期方法访问 messageBus、metaData 等
-         */
-        public Server server;
-        /**
-         * 是否集群内部通信（来自其他节点的代理请求）
-         */
-        public Boolean isInternal;
-    }
 
     /**
      * 挂载的所有传输协议实例

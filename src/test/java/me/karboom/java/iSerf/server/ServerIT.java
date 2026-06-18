@@ -13,6 +13,8 @@ import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.llm.text.BatchTaskInfo;
 import me.karboom.java.iSerf.llm.text.IText;
 import me.karboom.java.iSerf.llm.text.Output;
+import me.karboom.java.iSerf.server.BO.Context;
+import me.karboom.java.iSerf.server.BO.Message;
 import me.karboom.java.iSerf.server.lifecycle.IAgentLifecycle;
 import me.karboom.java.iSerf.server.lifecycle.ITeamLifecycle;
 import me.karboom.java.iSerf.server.messageBus.MemoryMessageBus;
@@ -157,24 +159,24 @@ class ServerIT {
         server = new Server("127.0.0.1", messageBus, metaData,
                 new IAgentLifecycle() {
                     @Override
-                    public Agent createAgent(Server.Context ctx, ObjectNode params) {
+                    public Agent createAgent(Context ctx, ObjectNode params) {
                         var agent = makeAgent(testPersistence);
                         allAgents.put(agent.metadata.getId(), agent);
                         return agent;
                     }
                     @Override
-                    public List<Agent> listAgent(Server.Context ctx, ObjectNode params) {
+                    public List<Agent> listAgent(Context ctx, ObjectNode params) {
                         var keyword = params.path("keyword").asText();
                         return server.localAgents.values().stream()
                                 .filter(a -> keyword.isEmpty() || a.metadata.getId().contains(keyword))
                                 .toList();
                     }
                     @Override
-                    public Agent removeAgent(Server.Context ctx, ObjectNode params) { return null; }
+                    public Agent removeAgent(Context ctx, ObjectNode params) { return null; }
                     @Override
-                    public Agent editAgent(Server.Context ctx, ObjectNode params) { return null; }
+                    public Agent editAgent(Context ctx, ObjectNode params) { return null; }
                     @Override
-                    public Agent detailAgent(Server.Context ctx, ObjectNode params) {
+                    public Agent detailAgent(Context ctx, ObjectNode params) {
                         var id = params.path("agentId").asText();
                         return allAgents.get(id);
                     }
@@ -185,24 +187,24 @@ class ServerIT {
                 },
                 new ITeamLifecycle() {
                     @Override
-                    public Team createTeam(Server.Context ctx, ObjectNode params) {
+                    public Team createTeam(Context ctx, ObjectNode params) {
                         return new Team(makeAgent(testPersistence), List.of()) {};
                     }
                     @Override
-                    public List<Team> listTeam(Server.Context ctx, ObjectNode params) {
+                    public List<Team> listTeam(Context ctx, ObjectNode params) {
                         return List.copyOf(server.localTeams.values());
                     }
                     @Override
-                    public Team removeTeam(Server.Context ctx, ObjectNode params) {
+                    public Team removeTeam(Context ctx, ObjectNode params) {
                         var teamId = params.path("teamId").asText();
                         return server.localTeams.get(teamId);
                     }
                     @Override
-                    public Team editTeam(Server.Context ctx, ObjectNode params) {
+                    public Team editTeam(Context ctx, ObjectNode params) {
                         return new Team(makeAgent(testPersistence), List.of()) {};
                     }
                     @Override
-                    public Team detailTeam(Server.Context ctx, ObjectNode params) {
+                    public Team detailTeam(Context ctx, ObjectNode params) {
                         var id = params.path("teamId").asText();
                         return server.localTeams.get(id);
                     }
@@ -225,8 +227,8 @@ class ServerIT {
 
     // region ======================== Helpers ========================
 
-    private Server.Context buildContext() {
-        return Server.Context.builder()
+    private Context buildContext() {
+        return Context.builder()
                 .transport(transport)
                 .client("test-client")
                 .isInternal(false)
@@ -235,7 +237,7 @@ class ServerIT {
     }
 
     private String buildRequest(String msgId, ObjectNode body) {
-        var msg = new Server.Message<ObjectNode>() {};
+        var msg = new Message<ObjectNode>() {};
         msg.setMsgId(msgId);
         msg.setBody(body);
         return JSONUtil.stringify(msg);
@@ -436,14 +438,14 @@ class ServerIT {
         void testMultiClientAgentLifecycle() {
             server.start();
 
-            var client1Ctx = Server.Context.builder()
+            var client1Ctx = Context.builder()
                     .transport(transport)
                     .client("client-1")
                     .isInternal(false)
                     .server(server)
                     .build();
 
-            var client2Ctx = Server.Context.builder()
+            var client2Ctx = Context.builder()
                     .transport(transport)
                     .client("client-2")
                     .isInternal(false)

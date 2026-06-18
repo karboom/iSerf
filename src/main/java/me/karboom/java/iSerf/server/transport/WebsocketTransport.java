@@ -2,6 +2,7 @@ package me.karboom.java.iSerf.server.transport;
 
 import com.corundumstudio.socketio.*;
 import lombok.extern.slf4j.Slf4j;
+import me.karboom.java.iSerf.server.BO.Context;
 import me.karboom.java.iSerf.server.Server;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
@@ -176,7 +177,7 @@ public abstract class WebsocketTransport implements ITransport {
      */
     private void registerUserEvent(SocketIONamespace ns, String event) {
         ns.addEventListener(event, String.class, (client, dataJson, ackSender) -> {
-            var ctx = Server.Context.builder()
+            var ctx = Context.builder()
                     .transport(this)
                     .client(client)
                     .serverId(container.id)

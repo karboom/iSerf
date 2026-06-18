@@ -1,6 +1,7 @@
 package me.karboom.java.iSerf.server.transport;
 
 import lombok.extern.slf4j.Slf4j;
+import me.karboom.java.iSerf.server.BO.Context;
 import me.karboom.java.iSerf.server.Server;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
@@ -324,7 +325,7 @@ public abstract class DingtalkTransport implements ITransport {
             }
 
             // 将钉钉消息作为 agent.send 事件转发到 ContainerServer
-            var ctx = Server.Context.builder()
+            var ctx = Context.builder()
                     .transport(this)
                     .client(senderStaffId)
                     .serverId(container.id)

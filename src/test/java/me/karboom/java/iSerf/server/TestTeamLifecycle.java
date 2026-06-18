@@ -1,5 +1,6 @@
 package me.karboom.java.iSerf.server;
 
+import me.karboom.java.iSerf.server.BO.Context;
 import me.karboom.java.iSerf.server.lifecycle.ITeamLifecycle;
 import me.karboom.java.iSerf.team.Team;
 import me.karboom.java.iSerf.util.JSONUtil;
@@ -14,27 +15,27 @@ import java.util.List;
 public class TestTeamLifecycle implements ITeamLifecycle {
 
     @Override
-    public Team createTeam(Server.Context ctx, ObjectNode params) {
+    public Team createTeam(Context ctx, ObjectNode params) {
         return null;
     }
 
     @Override
-    public List<Team> listTeam(Server.Context ctx, ObjectNode params) {
+    public List<Team> listTeam(Context ctx, ObjectNode params) {
         return new ArrayList<>();
     }
 
     @Override
-    public Team removeTeam(Server.Context ctx, ObjectNode params) {
+    public Team removeTeam(Context ctx, ObjectNode params) {
         return null;
     }
 
     @Override
-    public Team editTeam(Server.Context ctx, ObjectNode params) {
+    public Team editTeam(Context ctx, ObjectNode params) {
         return null;
     }
 
     @Override
-    public Team detailTeam(Server.Context ctx, ObjectNode params) {
+    public Team detailTeam(Context ctx, ObjectNode params) {
         return null;
     }
 

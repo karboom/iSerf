@@ -12,6 +12,10 @@ import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.llm.text.BatchTaskInfo;
 import me.karboom.java.iSerf.llm.text.IText;
 import me.karboom.java.iSerf.llm.text.Output;
+import me.karboom.java.iSerf.server.BO.Context;
+import me.karboom.java.iSerf.server.BO.Message;
+import me.karboom.java.iSerf.server.BO.OutMessageBody;
+import me.karboom.java.iSerf.server.BO.TransportClientRecord;
 import me.karboom.java.iSerf.server.lifecycle.IAgentLifecycle;
 import me.karboom.java.iSerf.server.lifecycle.ITeamLifecycle;
 import me.karboom.java.iSerf.server.messageBus.MemoryMessageBus;
@@ -74,20 +78,20 @@ class ContainerServerTest {
         container = new Server("127.0.0.1", messageBus, metaData,
                 new IAgentLifecycle() {
                     @Override
-                    public Agent createAgent(Server.Context ctx, ObjectNode params) { return makeAgent(); }
+                    public Agent createAgent(Context ctx, ObjectNode params) { return makeAgent(); }
                     @Override
-                    public List<Agent> listAgent(Server.Context ctx, ObjectNode params) {
+                    public List<Agent> listAgent(Context ctx, ObjectNode params) {
                         var keyword = params.path("keyword").asText();
                         return container.localAgents.values().stream()
                                 .filter(a -> keyword.isEmpty() || a.metadata.getId().contains(keyword))
                                 .toList();
                     }
                     @Override
-                    public Agent removeAgent(Server.Context ctx, ObjectNode params) { return null; }
+                    public Agent removeAgent(Context ctx, ObjectNode params) { return null; }
                     @Override
-                    public Agent editAgent(Server.Context ctx, ObjectNode params) { return null; }
+                    public Agent editAgent(Context ctx, ObjectNode params) { return null; }
                     @Override
-                    public Agent detailAgent(Server.Context ctx, ObjectNode params) {
+                    public Agent detailAgent(Context ctx, ObjectNode params) {
                         var id = params.path("agentId").asText();
                         return container.localAgents.get(id);
                     }
@@ -99,22 +103,22 @@ class ContainerServerTest {
                 },
                 new ITeamLifecycle() {
                     @Override
-                    public Team createTeam(Server.Context ctx, ObjectNode params) {
+                    public Team createTeam(Context ctx, ObjectNode params) {
                         return new Team(makeAgent(), List.of()) {};
                     }
                     @Override
-                    public List<Team> listTeam(Server.Context ctx, ObjectNode params) { return List.of(); }
+                    public List<Team> listTeam(Context ctx, ObjectNode params) { return List.of(); }
                     @Override
-                    public Team removeTeam(Server.Context ctx, ObjectNode params) {
+                    public Team removeTeam(Context ctx, ObjectNode params) {
                         var teamId = params.path("teamId").asText();
                         return container.localTeams.get(teamId);
                     }
                     @Override
-                    public Team editTeam(Server.Context ctx, ObjectNode params) {
+                    public Team editTeam(Context ctx, ObjectNode params) {
                         return new Team(makeAgent(), List.of()) {};
                     }
                     @Override
-                    public Team detailTeam(Server.Context ctx, ObjectNode params) {
+                    public Team detailTeam(Context ctx, ObjectNode params) {
                         var id = params.path("teamId").asText();
                         return container.localTeams.get(id);
                     }
@@ -134,8 +138,8 @@ class ContainerServerTest {
         container.addTransport(transport);
     }
 
-    private Server.Context buildContext(boolean isInternal) {
-        return Server.Context.builder()
+    private Context buildContext(boolean isInternal) {
+        return Context.builder()
                 .transport(transport)
                 .client("test-client")
                 .requestId("req-123")
@@ -580,7 +584,7 @@ class ContainerServerTest {
 
             var ctx = buildContext(false);
             var data = JSONUtil.create().put("agentId", agentId).put("toolCallId", "non-existent");
-            var body = new Server.Message<ObjectNode>() {};
+            var body = new Message<ObjectNode>() {};
             body.msgId = "msg-err";
             body.body = data;
             var dataJson = JSONUtil.stringify(body);
@@ -619,11 +623,11 @@ class ContainerServerTest {
         void testReverseAgentMessage() {
             var agentId = "reverse-agent";
             container.agentClient.put(agentId,
-                    Server.TransportClientRecord.builder()
+                    TransportClientRecord.builder()
                             .transportId(transport.getTransportId()).clientHandle("client-123").build());
 
             var dataNode = JSONUtil.create().put("agentId", agentId);
-            var bodyObj = new Server.OutMessageBody() {};
+            var bodyObj = new OutMessageBody() {};
             bodyObj.setData(dataNode);
             var bodyJson = JSONUtil.stringify(bodyObj);
 
@@ -640,7 +644,7 @@ class ContainerServerTest {
         void testReverseTeamDetail() {
             var teamId = "detail-team-reverse";
             container.teamClient.put(teamId,
-                    Server.TransportClientRecord.builder()
+                    TransportClientRecord.builder()
                             .transportId(transport.getTransportId()).clientHandle("team-detail-client").build());
 
             var dataNode = JSONUtil.create().set("metadata", JSONUtil.create().put("id", teamId));
