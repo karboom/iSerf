@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.transport.*;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.util.CodeUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import me.karboom.java.iSerf.util.YAMLUtil;
@@ -27,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * 将一切形式的函数定义转化为Tool类
  */
+@Slf4j
 public class Loader {
     public Integer timeout;
     private static final ObjectMapper objectMapper = new ObjectMapper();
@@ -65,6 +67,7 @@ public class Loader {
 
         var content = Files.readString(filePath);
         if (StrUtil.isBlank(content)) {
+            log.warn("fromToolFile tool file is empty: {}", filePath);
             return tools;
         }
         ArrayNode arrayNode;

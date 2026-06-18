@@ -136,7 +136,6 @@ public abstract class WebsocketTransport implements ITransport {
      * @param userNS 用户命名空间
      */
     protected void setupUserNS(SocketIONamespace userNS) {
-        // 已知事件白名单
         var knownEvents = Set.of(
                 Server.EVENT_AGENT_ACTIVATE,
                 Server.EVENT_AGENT_DEACTIVATE,
@@ -158,25 +157,7 @@ public abstract class WebsocketTransport implements ITransport {
         // 连接鉴权，子类自行处理通过/断开
         userNS.addConnectListener(client -> authorizeConnection(client));
 
-        // 拦截未知事件，立即返回错误
-        userNS.addEventInterceptor((client, eventName, ackRequest, data) -> {
-            if (!knownEvents.contains(eventName)) {
-                log.warn("setupUserNS unknown event: %s from %s".formatted(eventName, client.getSessionId()));
-                client.sendEvent(eventName, container.buildErrorResponse("", "unknown event: " + eventName));
-            }
-        });
-
-        knownEvents.forEach(e -> registerUserEvent(userNS, e));
-    }
-
-    /**
-     * 将指定事件注册到命名空间并委托给 ContainerServer 处理
-     *
-     * @param ns    目标 Socket.IO 命名空间
-     * @param event 事件名称
-     */
-    private void registerUserEvent(SocketIONamespace ns, String event) {
-        ns.addEventListener(event, String.class, (client, dataJson, ackSender) -> {
+        knownEvents.forEach(e -> userNS.addEventListener(e, String.class, (client, dataJson, ackSender) -> {
             var ctx = Context.builder()
                     .transport(this)
                     .client(client)
@@ -184,7 +165,7 @@ public abstract class WebsocketTransport implements ITransport {
                     .server(container)
                     .isInternal(false)
                     .build();
-            container.handleUserEvent(ctx, event, dataJson);
-        });
+            container.handleUserEvent(ctx, e, dataJson);
+        }));
     }
 }

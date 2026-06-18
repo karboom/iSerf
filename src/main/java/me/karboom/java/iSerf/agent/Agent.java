@@ -172,29 +172,27 @@ public class Agent {
                     }
 
                 } catch (Exception e) {
-                    // Todo 这里的错误如何抛出
-
                     // 不管发生了啥错误，先回滚
                     if (event != null) {
-
                         var eventId = event.getId();
                         switch (event.getType()) {
-                            case AgentEvent.Type.MESSAGE -> {
-                                // 清理中间状态的 memory
-                                memoryManager.removeByEventId(eventId);
-                            }
+                            case AgentEvent.Type.MESSAGE -> memoryManager.removeByEventId(eventId);
                         }
                     }
 
-                    // 不管发生了啥，一并通知上层, Todo 避免EmitError，它会终结整个流
-//                    sink.tryEmitError(e);
-
+                    // 通知下游错误，但不终结流
+                    handleError(e);
+                    sink.tryEmitNext(AgentMessage.builder()
+                            .type(AgentMessage.TYPE.ERROR)
+                            .text(e.getMessage())
+                            .build());
 
                     // 如果是人工触发中断，停止循环
                     if (e instanceof InterruptedException) {
                         break;
                     }
                 } finally {
+                    persistence.syncEvent(this);
                     if (cpuStart > 0) {
                         agentBilling.recordCpu(this, System.nanoTime() - cpuStart);
                     }
@@ -219,6 +217,17 @@ public class Agent {
 
     public void eventInterceptor(AgentEvent event) {
     }
+
+    /**
+     * 处理异常，子类可覆盖以自定义错误转换逻辑
+     * 默认记录错误日志并原样返回
+     * @return 转换后的异常，用于通知下游
+     */
+    protected Exception handleError(Exception e) {
+        log.error("handleError", e);
+        return e;
+    }
+
     /**
      * 事件统一入口，需要对字段进行校验
      */
