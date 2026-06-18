@@ -700,8 +700,13 @@ public abstract class Server {
                 switch (type) {
                     case "proxy" -> {
 
-                        var proxyCtx = Context.builder().client(sourceNode).serverId(sourceNode).isInternal(true).build();
-                        var result = handleUserEvent(proxyCtx, event, bodyJson);
+                        var proxyCtx = Context.builder().client(sourceNode).serverId(sourceNode).isInternal(true).server(this).build();
+                        // bodyJson 是原始请求体，需要包装为 {msgId, body} 格式
+                        var proxyMsg = new Message<ObjectNode>() {};
+                        proxyMsg.setMsgId(DataUtil.getFlakeId());
+                        proxyMsg.setBody(JSONUtil.parse(bodyJson, ObjectNode.class));
+                        var proxyMsgJson = JSONUtil.stringify(proxyMsg);
+                        var result = handleUserEvent(proxyCtx, event, proxyMsgJson);
                         log.debug("listenMessage proxy event: %s, result: %s".formatted(event, result));
 
                         if (result != null) {

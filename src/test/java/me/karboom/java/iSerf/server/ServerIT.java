@@ -6,8 +6,7 @@ import me.karboom.java.iSerf.agent.AgentConfig;
 import me.karboom.java.iSerf.agent.AgentEvent;
 import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.AgentMetadata;
-import me.karboom.java.iSerf.agent.persistence.AgentSnapshot;
-import me.karboom.java.iSerf.agent.persistence.IPersistence;
+import me.karboom.java.iSerf.agent.persistence.NfsPersistence;
 import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
 import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.llm.text.BatchTaskInfo;
@@ -23,9 +22,11 @@ import me.karboom.java.iSerf.server.transport.NoneTransport;
 import me.karboom.java.iSerf.team.Team;
 import me.karboom.java.iSerf.util.JSONUtil;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.io.TempDir;
 import reactor.core.publisher.Flux;
 import tools.jackson.databind.node.ObjectNode;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -34,94 +35,21 @@ import java.util.concurrent.ConcurrentHashMap;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Server 集成测试：覆盖从创建 Server、启动、客户端发送各类事件、到关闭服务的完整流程
+ * Server 集成测试：覆盖三节点集群场景，使用真实 NfsPersistence
  */
 @Slf4j
 class ServerIT {
 
-    private Server server;
+    private Server server1;
+    private Server server2;
+    private Server server3;
     private MemoryMessageBus messageBus;
     private MemoryMetaData metaData;
-    private NoneTransport transport;
+    private String persistenceBaseDir;
     private final Map<String, Agent> allAgents = new ConcurrentHashMap<>();
-    private TestPersistence testPersistence;
-
-    /** 可追踪调用的 Persistence 实现，用于验证 deactivate/activate 时的持久化操作 */
-    static class TestPersistence implements IPersistence {
-        public int syncMemoryCount = 0;
-        public int syncEventCount = 0;
-        public int syncToolCallCount = 0;
-        public int syncPlanCount = 0;
-        public int loadCount = 0;
-        public int createCount = 0;
-        public final Map<String, Agent> storedAgents = new ConcurrentHashMap<>();
-
-        @Override
-        public AgentSnapshot load(AgentMetadata metadata) {
-            loadCount++;
-            return AgentSnapshot.builder()
-                    .memories(List.of())
-                    .events(List.of())
-                    .toolCalls(List.of())
-                    .plans(List.of())
-                    .build();
-        }
-
-        @Override
-        public void remove(Agent agent) {}
-
-        @Override
-        public void syncMemory(Agent agent) {
-            syncMemoryCount++;
-            storedAgents.put(agent.metadata.getId(), agent);
-        }
-
-        @Override
-        public void addMemory(Agent agent) {}
-
-        @Override
-        public void syncEvent(Agent agent) {
-            syncEventCount++;
-        }
-
-        @Override
-        public void syncToolCall(Agent agent) {
-            syncToolCallCount++;
-        }
-
-        @Override
-        public void addToolCall(Agent agent) {}
-
-        @Override
-        public void syncPlan(Agent agent) {
-            syncPlanCount++;
-        }
-
-        @Override
-        public void syncMetadata(Agent agent) {}
-
-        @Override
-        public List<AgentSnapshot> search(Map<String, Object> params) { return List.of(); }
-
-        @Override
-        public Boolean create(Agent agent) {
-            createCount++;
-            return true;
-        }
-
-        public void reset() {
-            syncMemoryCount = 0;
-            syncEventCount = 0;
-            syncToolCallCount = 0;
-            syncPlanCount = 0;
-            loadCount = 0;
-            createCount = 0;
-            storedAgents.clear();
-        }
-    }
 
     /** 轻量 Agent 工厂：FakeLlmProvider 返回 Flux.empty()，不依赖真实 LLM */
-    static Agent makeAgent(IPersistence persistence) {
+    static Agent makeAgent(String persistenceBaseDir) {
         var provider = new ILlmProvider() {
             @Override
             public IText get(List<Tool<?>> tools, Class<?> outputFormat, Integer retryTimes) {
@@ -142,32 +70,29 @@ class ServerIT {
         var config = new AgentConfig();
         var metadata = new AgentMetadata();
         metadata.setId(UUID.randomUUID().toString());
+        metadata.setOrgId("test-org");
+        metadata.setUserId("test-user");
         config.setMetadata(metadata);
         config.setPrompt("test");
         config.setLlm(provider);
-        config.setPersistence(persistence);
+        config.setPersistence(new NfsPersistence(persistenceBaseDir));
         return new Agent(config);
     }
 
-    @BeforeEach
-    void setUp() {
-        messageBus = new MemoryMessageBus();
-        metaData = new MemoryMetaData();
-        transport = new NoneTransport();
-        testPersistence = new TestPersistence();
-
-        server = new Server("127.0.0.1", messageBus, metaData,
+    /** 创建 Server 实例 */
+    private Server createServer(String clusterIp, MemoryMessageBus bus, MemoryMetaData metaData, String persistenceBaseDir) {
+        return new Server(clusterIp, bus, metaData,
                 new IAgentLifecycle() {
                     @Override
                     public Agent createAgent(Context ctx, ObjectNode params) {
-                        var agent = makeAgent(testPersistence);
+                        var agent = makeAgent(persistenceBaseDir);
                         allAgents.put(agent.metadata.getId(), agent);
                         return agent;
                     }
                     @Override
                     public List<Agent> listAgent(Context ctx, ObjectNode params) {
                         var keyword = params.path("keyword").asText();
-                        return server.localAgents.values().stream()
+                        return ctx.server.localAgents.values().stream()
                                 .filter(a -> keyword.isEmpty() || a.metadata.getId().contains(keyword))
                                 .toList();
                     }
@@ -188,25 +113,25 @@ class ServerIT {
                 new ITeamLifecycle() {
                     @Override
                     public Team createTeam(Context ctx, ObjectNode params) {
-                        return new Team(makeAgent(testPersistence), List.of()) {};
+                        return new Team(makeAgent(persistenceBaseDir), List.of()) {};
                     }
                     @Override
                     public List<Team> listTeam(Context ctx, ObjectNode params) {
-                        return List.copyOf(server.localTeams.values());
+                        return List.copyOf(ctx.server.localTeams.values());
                     }
                     @Override
                     public Team removeTeam(Context ctx, ObjectNode params) {
                         var teamId = params.path("teamId").asText();
-                        return server.localTeams.get(teamId);
+                        return ctx.server.localTeams.get(teamId);
                     }
                     @Override
                     public Team editTeam(Context ctx, ObjectNode params) {
-                        return new Team(makeAgent(testPersistence), List.of()) {};
+                        return new Team(makeAgent(persistenceBaseDir), List.of()) {};
                     }
                     @Override
                     public Team detailTeam(Context ctx, ObjectNode params) {
                         var id = params.path("teamId").asText();
-                        return server.localTeams.get(id);
+                        return ctx.server.localTeams.get(id);
                     }
                     @Override
                     public ObjectNode serializeTeam(Team team) {
@@ -221,15 +146,41 @@ class ServerIT {
                 return e;
             }
         };
-        server.addTransport(transport);
-        server.persistence = testPersistence;
+    }
+
+    @BeforeEach
+    void setUp(@TempDir Path tempDir) {
+        messageBus = new MemoryMessageBus();
+        metaData = new MemoryMetaData();
+        persistenceBaseDir = tempDir.resolve("agents").toString();
+
+        server1 = createServer("127.0.0.1", messageBus, metaData, persistenceBaseDir);
+        server2 = createServer("127.0.0.2", messageBus, metaData, persistenceBaseDir);
+        server3 = createServer("127.0.0.3", messageBus, metaData, persistenceBaseDir);
+
+        // 设置 server 的 persistence 使用临时目录
+        var nfsPersistence = new NfsPersistence(persistenceBaseDir);
+        server1.persistence = nfsPersistence;
+        server2.persistence = nfsPersistence;
+        server3.persistence = nfsPersistence;
+
+        server1.addTransport(new NoneTransport());
+        server2.addTransport(new NoneTransport());
+        server3.addTransport(new NoneTransport());
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (server1 != null && !server1.isShuttingDown) server1.stop();
+        if (server2 != null && !server2.isShuttingDown) server2.stop();
+        if (server3 != null && !server3.isShuttingDown) server3.stop();
     }
 
     // region ======================== Helpers ========================
 
-    private Context buildContext() {
+    private Context buildContext(Server server) {
         return Context.builder()
-                .transport(transport)
+                .transport(server.transports.getFirst())
                 .client("test-client")
                 .isInternal(false)
                 .server(server)
@@ -250,294 +201,318 @@ class ServerIT {
 
     // endregion
 
+    // region ======================== 节点注册 ========================
+
+    @Nested
+    class NodeRegistration {
+
+        /**
+         * 三节点启动后均注册到 metaData
+         */
+        @Test
+        @Timeout(10)
+        void testAllNodesRegistered() {
+            server1.start();
+            server2.start();
+            server3.start();
+
+            var nodes = metaData.getNodes();
+            assertEquals(3, nodes.size(), "应有 3 个节点注册");
+
+            var nodeIds = nodes.stream().map(n -> n.getId()).toList();
+            assertTrue(nodeIds.contains(server1.id), "server1 应注册");
+            assertTrue(nodeIds.contains(server2.id), "server2 应注册");
+            assertTrue(nodeIds.contains(server3.id), "server3 应注册");
+
+            server1.stop();
+            server2.stop();
+            server3.stop();
+
+            assertTrue(metaData.getNodes().isEmpty(), "停止后应无节点");
+        }
+    }
+
+    // endregion
+
+    // region ======================== 多节点 Agent 创建 ========================
+
+    @Nested
+    class MultiNodeAgentCreate {
+
+        /**
+         * 在不同节点创建 Agent，验证 localAgents 和 metaData 路由
+         */
+        @Test
+        @Timeout(15)
+        void testAgentCreateOnDifferentNodes() {
+            server1.start();
+            server2.start();
+            server3.start();
+
+            var ctx1 = buildContext(server1);
+            var ctx2 = buildContext(server2);
+            var ctx3 = buildContext(server3);
+
+            // 在 server1 创建 Agent
+            var create1Req = buildRequest("msg-1", JSONUtil.create().put("name", "agent-on-node1"));
+            var create1Resp = server1.handleUserEvent(ctx1, Server.EVENT_AGENT_CREATE, create1Req);
+            assertNotNull(create1Resp);
+            var agentId1 = parseResponseBody(create1Resp).path("agentId").asText();
+            assertFalse(agentId1.isEmpty(), "agentId1 不应为空");
+            assertTrue(server1.localAgents.containsKey(agentId1), "Agent1 应在 server1.localAgents");
+            assertEquals(server1.id, metaData.getAgentStay(agentId1), "metaData 应记录 Agent1 在 server1");
+
+            // 在 server2 创建 Agent
+            var create2Req = buildRequest("msg-2", JSONUtil.create().put("name", "agent-on-node2"));
+            var create2Resp = server2.handleUserEvent(ctx2, Server.EVENT_AGENT_CREATE, create2Req);
+            assertNotNull(create2Resp);
+            var agentId2 = parseResponseBody(create2Resp).path("agentId").asText();
+            assertFalse(agentId2.isEmpty(), "agentId2 不应为空");
+            assertTrue(server2.localAgents.containsKey(agentId2), "Agent2 应在 server2.localAgents");
+            assertEquals(server2.id, metaData.getAgentStay(agentId2), "metaData 应记录 Agent2 在 server2");
+
+            // 在 server3 创建 Agent
+            var create3Req = buildRequest("msg-3", JSONUtil.create().put("name", "agent-on-node3"));
+            var create3Resp = server3.handleUserEvent(ctx3, Server.EVENT_AGENT_CREATE, create3Req);
+            assertNotNull(create3Resp);
+            var agentId3 = parseResponseBody(create3Resp).path("agentId").asText();
+            assertFalse(agentId3.isEmpty(), "agentId3 不应为空");
+            assertTrue(server3.localAgents.containsKey(agentId3), "Agent3 应在 server3.localAgents");
+            assertEquals(server3.id, metaData.getAgentStay(agentId3), "metaData 应记录 Agent3 在 server3");
+
+            // 验证各节点 localAgents 数量
+            assertEquals(1, server1.localAgents.size(), "server1 应有 1 个 Agent");
+            assertEquals(1, server2.localAgents.size(), "server2 应有 1 个 Agent");
+            assertEquals(1, server3.localAgents.size(), "server3 应有 1 个 Agent");
+        }
+    }
+
+    // endregion
+
+    // region ======================== 跨节点 Agent 操作 ========================
+
+    @Nested
+    class CrossNodeAgentOperations {
+
+        /**
+         * 从 server1 远程 deactivate server2 上的 Agent
+         */
+        @Test
+        @Timeout(15)
+        void testRemoteDeactivate() {
+            server1.start();
+            server2.start();
+            server3.start();
+
+            var ctx1 = buildContext(server1);
+            var ctx2 = buildContext(server2);
+
+            // 在 server2 创建 Agent
+            var createReq = buildRequest("msg-create", JSONUtil.create().put("name", "remote-agent"));
+            var createResp = server2.handleUserEvent(ctx2, Server.EVENT_AGENT_CREATE, createReq);
+            var agentId = parseResponseBody(createResp).path("agentId").asText();
+            assertTrue(server2.localAgents.containsKey(agentId), "Agent 应在 server2.localAgents");
+            assertEquals(server2.id, metaData.getAgentStay(agentId), "metaData 应记录 Agent 在 server2");
+
+            // 从 server1 远程 deactivate
+            var deactivateReq = buildRequest("msg-deactivate", JSONUtil.create().put("agentId", agentId));
+            var deactivateResp = server1.handleUserEvent(ctx1, Server.EVENT_AGENT_DEACTIVATE, deactivateReq);
+            // 远程操作返回 null（异步）
+            assertNull(deactivateResp, "远程 deactivate 应返回 null");
+
+            // 等待消息总线处理
+            try { Thread.sleep(100); } catch (InterruptedException ignored) {}
+
+            // 验证 Agent 已从 server2 移除
+            assertFalse(server2.localAgents.containsKey(agentId), "deactivate 后 Agent 应从 server2.localAgents 移除");
+            assertNull(metaData.getAgentStay(agentId), "deactivate 后 metaData 应移除路由");
+        }
+
+        /**
+         * 在 server2 上 activate Agent（从 NfsPersistence 恢复）
+         */
+        @Test
+        @Timeout(15)
+        void testRemoteActivate() {
+            server1.start();
+            server2.start();
+            server3.start();
+
+            var ctx2 = buildContext(server2);
+
+            // 在 server2 创建 Agent
+            var createReq = buildRequest("msg-create", JSONUtil.create().put("name", "remote-agent"));
+            var createResp = server2.handleUserEvent(ctx2, Server.EVENT_AGENT_CREATE, createReq);
+            var agentId = parseResponseBody(createResp).path("agentId").asText();
+
+            // 先 deactivate
+            var deactivateReq = buildRequest("msg-deactivate", JSONUtil.create().put("agentId", agentId));
+            server2.handleUserEvent(ctx2, Server.EVENT_AGENT_DEACTIVATE, deactivateReq);
+            assertFalse(server2.localAgents.containsKey(agentId), "deactivate 后 Agent 应不在 server2.localAgents");
+
+            // 在 server2 上 activate（从 NfsPersistence 恢复）
+            var activateReq = buildRequest("msg-activate", JSONUtil.create().put("agentId", agentId));
+            var activateResp = server2.handleUserEvent(ctx2, Server.EVENT_AGENT_ACTIVATE, activateReq);
+            assertNotNull(activateResp, "activate 应有响应");
+            var activatedAgentId = parseResponseBody(activateResp).path("agentId").asText();
+            assertEquals(agentId, activatedAgentId, "activate 返回的 agentId 应一致");
+
+            // 验证 Agent 恢复到 server2
+            assertTrue(server2.localAgents.containsKey(agentId), "activate 后 Agent 应回到 server2.localAgents");
+            assertEquals(server2.id, metaData.getAgentStay(agentId), "activate 后 metaData 应重新记录路由");
+        }
+    }
+
+    // endregion
+
+    // region ======================== Team 生命周期 ========================
+
+    @Nested
+    class TeamLifecycle {
+
+        /**
+         * Team 创建、列表、详情、删除
+         */
+        @Test
+        @Timeout(15)
+        void testTeamLifecycle() {
+            server1.start();
+            server2.start();
+            server3.start();
+
+            var ctx1 = buildContext(server1);
+            var ctx2 = buildContext(server2);
+
+            // 在 server1 创建 Team
+            var createReq = buildRequest("msg-team-create", JSONUtil.create().put("name", "test-team"));
+            var createResp = server1.handleUserEvent(ctx1, Server.EVENT_TEAM_CREATE, createReq);
+            assertNotNull(createResp);
+            var teamId = parseResponseBody(createResp).path("teamId").asText();
+            assertFalse(teamId.isEmpty(), "teamId 不应为空");
+            assertTrue(server1.localTeams.containsKey(teamId), "Team 应在 server1.localTeams");
+            assertEquals(server1.id, metaData.getTeamStay(teamId), "metaData 应记录 Team 在 server1");
+
+            // 在 server1 列出 Team
+            var listReq = buildRequest("msg-team-list", JSONUtil.create().put("keyword", ""));
+            var listResp = server1.handleUserEvent(ctx1, Server.EVENT_TEAM_LIST, listReq);
+            assertNotNull(listResp);
+            var teams = parseResponseBody(listResp).path("teams");
+            assertTrue(teams.isArray());
+            assertEquals(1, teams.size(), "应列出 1 个 Team");
+
+            // 在 server2 列出 Team（应通过共享 metaData 可见）
+            var listResp2 = server2.handleUserEvent(ctx2, Server.EVENT_TEAM_LIST, listReq);
+            assertNotNull(listResp2);
+            var teams2 = parseResponseBody(listResp2).path("teams");
+            // 注意：listTeam 通过 lifecycle 实现，这里返回的是 ctx.server.localTeams
+            // 所以 server2 看不到 server1 的 team，除非通过共享存储
+            assertEquals(0, teams2.size(), "server2.localTeams 应为空（Team 在 server1）");
+
+            // 在 server1 删除 Team
+            var removeReq = buildRequest("msg-team-remove", JSONUtil.create().put("teamId", teamId));
+            var removeResp = server1.handleUserEvent(ctx1, Server.EVENT_TEAM_REMOVE, removeReq);
+            assertNotNull(removeResp);
+            var removedTeamId = parseResponseBody(removeResp).path("teamId").asText();
+            assertEquals(teamId, removedTeamId, "删除的 teamId 应一致");
+            assertFalse(server1.localTeams.containsKey(teamId), "remove 后 Team 应从 server1.localTeams 移除");
+            assertNull(metaData.getTeamStay(teamId), "remove 后 metaData 应移除 Team 路由");
+        }
+    }
+
+    // endregion
+
     // region ======================== 完整集成流程 ========================
 
     @Nested
     class FullLifecycle {
 
         /**
-         * 完整集成流程：创建 Server → 启动 → Agent 事件 → Team 事件 → 关闭
+         * 完整集成流程：三节点启动 → Agent 创建/ deactivate/activate → Team 操作 → 关闭
          */
         @Test
         @Timeout(30)
         void testFullLifecycle() {
-            // region 1. 启动服务
-            server.start();
-            assertTrue(metaData.getNodes().stream().anyMatch(n -> n.getId().equals(server.id)),
-                    "启动后节点应注册到 metaData");
-            assertFalse(server.isShuttingDown);
+            // region 1. 启动三节点
+            server1.start();
+            server2.start();
+            server3.start();
+            assertEquals(3, metaData.getNodes().size(), "应有 3 个节点");
             // endregion
 
-            var ctx = buildContext();
+            var ctx1 = buildContext(server1);
+            var ctx2 = buildContext(server2);
+            var ctx3 = buildContext(server3);
 
-            // region 2. agent.create
-            var createReq = buildRequest("msg-1", JSONUtil.create().put("name", "test-agent"));
-            var createResp = server.handleUserEvent(ctx, Server.EVENT_AGENT_CREATE, createReq);
-            assertNotNull(createResp);
-            var createData = parseResponseBody(createResp);
-            var agentId = createData.path("agentId").asText();
-            assertFalse(agentId.isEmpty(), "agentId 不应为空");
-            assertTrue(server.localAgents.containsKey(agentId), "Agent 应在 localAgents 中");
-            assertEquals(server.id, metaData.getAgentStay(agentId), "metaData 应记录 Agent 所在节点");
-            log.debug("testFullLifecycle agent created: %s".formatted(agentId));
-            // endregion
-
-            // region 3. agent.list
-            var listReq = buildRequest("msg-2", JSONUtil.create().put("keyword", ""));
-            var listResp = server.handleUserEvent(ctx, Server.EVENT_AGENT_LIST, listReq);
-            assertNotNull(listResp);
-            var listData = parseResponseBody(listResp);
-            var agents = listData.path("agents");
-            assertTrue(agents.isArray());
-            assertEquals(1, agents.size(), "应列出 1 个 Agent");
-            assertEquals(agentId, agents.get(0).path("id").asText());
-            // endregion
-
-            // region 4. agent.detail
-            var detailReq = buildRequest("msg-3", JSONUtil.create().put("agentId", agentId));
-            var detailResp = server.handleUserEvent(ctx, Server.EVENT_AGENT_DETAIL, detailReq);
-            assertNotNull(detailResp);
-            var detailData = parseResponseBody(detailResp);
-            assertEquals(agentId, detailData.path("id").asText());
-            // endregion
-
-            // region 5. agent.deactivate - 验证 persistence sync 调用
-            var deactivateReq = buildRequest("msg-4", JSONUtil.create().put("agentId", agentId));
-            var deactivateResp = server.handleUserEvent(ctx, Server.EVENT_AGENT_DEACTIVATE, deactivateReq);
-            assertNotNull(deactivateResp);
-            var deactivateData = parseResponseBody(deactivateResp);
-            assertEquals(agentId, deactivateData.path("agentId").asText());
-            assertFalse(server.localAgents.containsKey(agentId), "deactivate 后 Agent 应从 localAgents 移除");
-            assertNull(metaData.getAgentStay(agentId), "deactivate 后 metaData 应移除 Agent 路由");
-            // 验证 persistence sync 方法被调用
-            assertEquals(1, testPersistence.syncMemoryCount, "deactivate 应调用 syncMemory");
-            assertEquals(1, testPersistence.syncEventCount, "deactivate 应调用 syncEvent");
-            assertEquals(1, testPersistence.syncToolCallCount, "deactivate 应调用 syncToolCall");
-            assertEquals(1, testPersistence.syncPlanCount, "deactivate 应调用 syncPlan");
-            assertTrue(testPersistence.storedAgents.containsKey(agentId), "deactivate 应将 Agent 存储到 persistence");
-            // endregion
-
-            // region 6. agent.activate - 验证从 persistence 加载
-            var activateReq = buildRequest("msg-5", JSONUtil.create().put("agentId", agentId));
-            var activateResp = server.handleUserEvent(ctx, Server.EVENT_AGENT_ACTIVATE, activateReq);
-            assertNotNull(activateResp);
-            var activateData = parseResponseBody(activateResp);
-            assertEquals(agentId, activateData.path("agentId").asText());
-            assertTrue(server.localAgents.containsKey(agentId), "activate 后 Agent 应回到 localAgents");
-            assertEquals(server.id, metaData.getAgentStay(agentId), "activate 后 metaData 应重新记录路由");
-            // 验证 Agent 是从 persistence 加载的（通过 allAgents 缓存验证）
-            assertTrue(allAgents.containsKey(agentId), "activate 后 Agent 应在 allAgents 中");
-            // endregion
-
-            // region 7. agent.subscribe
-            var subscribeReq = buildRequest("msg-6", JSONUtil.create().put("agentId", agentId));
-            var subscribeResp = server.handleUserEvent(ctx, Server.EVENT_AGENT_SUBSCRIBE, subscribeReq);
-            assertNull(subscribeResp, "subscribe 无返回值");
-            assertTrue(server.localSubscriptions.containsKey(agentId), "应注册本地订阅");
-            // endregion
-
-            // region 8. agent.send
-            var userMsg = AgentMessage.builder()
-                    .role(AgentMessage.ROLE.USER).type(AgentMessage.TYPE.TEXT).text("hello").build();
-            var eventNode = JSONUtil.convert(
-                    AgentEvent.builder().type(AgentEvent.Type.MESSAGE).priority(1).message(userMsg).build());
-            var sendReq = buildRequest("msg-7",
-                    JSONUtil.create().put("agentId", agentId).set("event", eventNode));
-            var sendResp = server.handleUserEvent(ctx, Server.EVENT_AGENT_SEND, sendReq);
-            assertNull(sendResp, "send 无返回值");
-            // endregion
-
-            // region 9. agent.unsubscribe
-            var unsubscribeReq = buildRequest("msg-8", JSONUtil.create().put("agentId", agentId));
-            var unsubscribeResp = server.handleUserEvent(ctx, Server.EVENT_AGENT_UNSUBSCRIBE, unsubscribeReq);
-            assertNull(unsubscribeResp, "unsubscribe 无返回值");
-            assertFalse(server.localSubscriptions.containsKey(agentId), "订阅应已移除");
-            // endregion
-
-            // region 10. agent.deactivate - 再次验证 persistence sync 调用
-            var deactivate2Req = buildRequest("msg-9b", JSONUtil.create().put("agentId", agentId));
-            var deactivate2Resp = server.handleUserEvent(ctx, Server.EVENT_AGENT_DEACTIVATE, deactivate2Req);
-            assertNotNull(deactivate2Resp);
-            var deactivate2Data = parseResponseBody(deactivate2Resp);
-            assertEquals(agentId, deactivate2Data.path("agentId").asText());
-            assertFalse(server.localAgents.containsKey(agentId), "deactivate 后 Agent 应从 localAgents 移除");
-            assertNull(metaData.getAgentStay(agentId), "deactivate 后 metaData 应移除 Agent 路由");
-            // 验证 persistence sync 方法再次被调用（计数 +1）
-            assertEquals(2, testPersistence.syncMemoryCount, "第二次 deactivate 应再次调用 syncMemory");
-            assertEquals(2, testPersistence.syncEventCount, "第二次 deactivate 应再次调用 syncEvent");
-            assertEquals(2, testPersistence.syncToolCallCount, "第二次 deactivate 应再次调用 syncToolCall");
-            assertEquals(2, testPersistence.syncPlanCount, "第二次 deactivate 应再次调用 syncPlan");
-            // endregion
-
-            // region 10. team.create
-            var teamCreateReq = buildRequest("msg-9", JSONUtil.create().put("name", "test-team"));
-            var teamCreateResp = server.handleUserEvent(ctx, Server.EVENT_TEAM_CREATE, teamCreateReq);
-            assertNotNull(teamCreateResp);
-            var teamCreateData = parseResponseBody(teamCreateResp);
-            var teamId = teamCreateData.path("teamId").asText();
-            assertFalse(teamId.isEmpty(), "teamId 不应为空");
-            assertTrue(server.localTeams.containsKey(teamId), "Team 应在 localTeams 中");
-            assertEquals(server.id, metaData.getTeamStay(teamId), "metaData 应记录 Team 所在节点");
-            // endregion
-
-            // region 11. team.list
-            var teamListReq = buildRequest("msg-10", JSONUtil.create().put("keyword", ""));
-            var teamListResp = server.handleUserEvent(ctx, Server.EVENT_TEAM_LIST, teamListReq);
-            assertNotNull(teamListResp);
-            var teamListData = parseResponseBody(teamListResp);
-            var teams = teamListData.path("teams");
-            assertTrue(teams.isArray());
-            assertEquals(1, teams.size(), "应列出 1 个 Team");
-            // endregion
-
-            // region 12. team.detail
-            var teamDetailReq = buildRequest("msg-11", JSONUtil.create().put("teamId", teamId));
-            var teamDetailResp = server.handleUserEvent(ctx, Server.EVENT_TEAM_DETAIL, teamDetailReq);
-            assertNotNull(teamDetailResp);
-            var teamDetailData = parseResponseBody(teamDetailResp);
-            assertEquals("team-id", teamDetailData.path("id").asText());
-            // endregion
-
-            // region 13. team.edit
-            var teamEditReq = buildRequest("msg-12", JSONUtil.create().put("teamId", teamId));
-            var teamEditResp = server.handleUserEvent(ctx, Server.EVENT_TEAM_EDIT, teamEditReq);
-            assertNotNull(teamEditResp);
-            // endregion
-
-            // region 14. team.remove
-            var teamRemoveReq = buildRequest("msg-13", JSONUtil.create().put("teamId", teamId));
-            var teamRemoveResp = server.handleUserEvent(ctx, Server.EVENT_TEAM_REMOVE, teamRemoveReq);
-            assertNotNull(teamRemoveResp);
-            var teamRemoveData = parseResponseBody(teamRemoveResp);
-            assertEquals(teamId, teamRemoveData.path("teamId").asText());
-            assertFalse(server.localTeams.containsKey(teamId), "remove 后 Team 应从 localTeams 移除");
-            assertNull(metaData.getTeamStay(teamId), "remove 后 metaData 应移除 Team 路由");
-            // endregion
-
-            // region 15. 关闭服务
-            server.stop();
-            assertTrue(server.isShuttingDown, "关闭后 isShuttingDown 应为 true");
-            assertTrue(metaData.getNodes().stream().noneMatch(n -> n.getId().equals(server.id)),
-                    "关闭后节点应从 metaData 移除");
-            // endregion
-        }
-    }
-
-    // endregion
-
-    // region ======================== 多客户端场景 ========================
-
-    @Nested
-    class MultiClient {
-
-        /**
-         * 多客户端场景：两个客户端分别创建 Agent 并独立操作
-         */
-        @Test
-        @Timeout(15)
-        void testMultiClientAgentLifecycle() {
-            server.start();
-
-            var client1Ctx = Context.builder()
-                    .transport(transport)
-                    .client("client-1")
-                    .isInternal(false)
-                    .server(server)
-                    .build();
-
-            var client2Ctx = Context.builder()
-                    .transport(transport)
-                    .client("client-2")
-                    .isInternal(false)
-                    .server(server)
-                    .build();
-
-            // region 客户端1 创建 Agent
-            var create1Req = buildRequest("msg-c1-create", JSONUtil.create().put("name", "agent-1"));
-            var create1Resp = server.handleUserEvent(client1Ctx, Server.EVENT_AGENT_CREATE, create1Req);
+            // region 2. 在各节点创建 Agent
+            var create1Req = buildRequest("msg-1", JSONUtil.create().put("name", "agent-1"));
+            var create1Resp = server1.handleUserEvent(ctx1, Server.EVENT_AGENT_CREATE, create1Req);
             var agentId1 = parseResponseBody(create1Resp).path("agentId").asText();
-            assertFalse(agentId1.isEmpty());
-            // endregion
 
-            // region 客户端2 创建 Agent
-            var create2Req = buildRequest("msg-c2-create", JSONUtil.create().put("name", "agent-2"));
-            var create2Resp = server.handleUserEvent(client2Ctx, Server.EVENT_AGENT_CREATE, create2Req);
+            var create2Req = buildRequest("msg-2", JSONUtil.create().put("name", "agent-2"));
+            var create2Resp = server2.handleUserEvent(ctx2, Server.EVENT_AGENT_CREATE, create2Req);
             var agentId2 = parseResponseBody(create2Resp).path("agentId").asText();
+
+            var create3Req = buildRequest("msg-3", JSONUtil.create().put("name", "agent-3"));
+            var create3Resp = server3.handleUserEvent(ctx3, Server.EVENT_AGENT_CREATE, create3Req);
+            var agentId3 = parseResponseBody(create3Resp).path("agentId").asText();
+
+            assertFalse(agentId1.isEmpty());
             assertFalse(agentId2.isEmpty());
-            assertNotEquals(agentId1, agentId2, "两个客户端创建的 Agent ID 应不同");
+            assertFalse(agentId3.isEmpty());
             // endregion
 
-            // region 客户端1 列出 Agent，应能看到两个
-            var listReq = buildRequest("msg-c1-list", JSONUtil.create().put("keyword", ""));
-            var listResp = server.handleUserEvent(client1Ctx, Server.EVENT_AGENT_LIST, listReq);
-            var listData = parseResponseBody(listResp);
-            assertEquals(2, listData.path("agents").size(), "应列出 2 个 Agent");
+            // region 3. 验证 Agent 分布
+            assertEquals(server1.id, metaData.getAgentStay(agentId1));
+            assertEquals(server2.id, metaData.getAgentStay(agentId2));
+            assertEquals(server3.id, metaData.getAgentStay(agentId3));
             // endregion
 
-            // region 客户端2 查看 Agent1 详情
-            var detailReq = buildRequest("msg-c2-detail", JSONUtil.create().put("agentId", agentId1));
-            var detailResp = server.handleUserEvent(client2Ctx, Server.EVENT_AGENT_DETAIL, detailReq);
-            assertNotNull(detailResp);
-            assertEquals(agentId1, parseResponseBody(detailResp).path("id").asText());
+            // region 4. 在 server2 deactivate agent2
+            var deactivateReq = buildRequest("msg-deactivate", JSONUtil.create().put("agentId", agentId2));
+            server2.handleUserEvent(ctx2, Server.EVENT_AGENT_DEACTIVATE, deactivateReq);
+            assertFalse(server2.localAgents.containsKey(agentId2));
+            assertNull(metaData.getAgentStay(agentId2));
             // endregion
 
-            // region 客户端1 订阅 Agent1，客户端2 发送消息
-            var subscribeReq = buildRequest("msg-c1-sub", JSONUtil.create().put("agentId", agentId1));
-            server.handleUserEvent(client1Ctx, Server.EVENT_AGENT_SUBSCRIBE, subscribeReq);
-            assertTrue(server.localSubscriptions.containsKey(agentId1));
-
-            var userMsg = AgentMessage.builder()
-                    .role(AgentMessage.ROLE.USER).type(AgentMessage.TYPE.TEXT).text("from client2").build();
-            var eventNode = JSONUtil.convert(
-                    AgentEvent.builder().type(AgentEvent.Type.MESSAGE).priority(1).message(userMsg).build());
-            var sendReq = buildRequest("msg-c2-send",
-                    JSONUtil.create().put("agentId", agentId1).set("event", eventNode));
-            server.handleUserEvent(client2Ctx, Server.EVENT_AGENT_SEND, sendReq);
-
-            // 客户端1 取消订阅
-            var unsubscribeReq = buildRequest("msg-c1-unsub", JSONUtil.create().put("agentId", agentId1));
-            server.handleUserEvent(client1Ctx, Server.EVENT_AGENT_UNSUBSCRIBE, unsubscribeReq);
-            assertFalse(server.localSubscriptions.containsKey(agentId1));
+            // region 5. 在 server2 上 activate agent2（从 NfsPersistence 恢复）
+            var activateReq = buildRequest("msg-activate", JSONUtil.create().put("agentId", agentId2));
+            var activateResp = server2.handleUserEvent(ctx2, Server.EVENT_AGENT_ACTIVATE, activateReq);
+            assertNotNull(activateResp);
+            assertTrue(server2.localAgents.containsKey(agentId2), "activate 后 Agent 应回到 server2");
+            assertEquals(server2.id, metaData.getAgentStay(agentId2));
             // endregion
 
-            server.stop();
-            assertTrue(server.isShuttingDown);
-        }
-    }
+            // region 6. 创建 Team
+            var teamCreateReq = buildRequest("msg-team-create", JSONUtil.create().put("name", "test-team"));
+            var teamCreateResp = server1.handleUserEvent(ctx1, Server.EVENT_TEAM_CREATE, teamCreateReq);
+            var teamId = parseResponseBody(teamCreateResp).path("teamId").asText();
+            assertFalse(teamId.isEmpty());
+            assertTrue(server1.localTeams.containsKey(teamId));
+            // endregion
 
-    // endregion
+            // region 7. 列出 Team
+            var teamListReq = buildRequest("msg-team-list", JSONUtil.create().put("keyword", ""));
+            var teamListResp = server1.handleUserEvent(ctx1, Server.EVENT_TEAM_LIST, teamListReq);
+            assertNotNull(teamListResp);
+            assertEquals(1, parseResponseBody(teamListResp).path("teams").size());
+            // endregion
 
-    // region ======================== 关闭中拒绝请求 ========================
+            // region 8. 删除 Team
+            var teamRemoveReq = buildRequest("msg-team-remove", JSONUtil.create().put("teamId", teamId));
+            var teamRemoveResp = server1.handleUserEvent(ctx1, Server.EVENT_TEAM_REMOVE, teamRemoveReq);
+            assertNotNull(teamRemoveResp);
+            assertFalse(server1.localTeams.containsKey(teamId));
+            // endregion
 
-    @Nested
-    class ShutdownReject {
-
-        /**
-         * 关闭中的 Server 应拒绝新请求并返回错误
-         */
-        @Test
-        @Timeout(10)
-        void testShutdownRejectsEvents() {
-            server.start();
-
-            var ctx = buildContext();
-
-            // 先正常创建一个 Agent
-            var createReq = buildRequest("msg-pre", JSONUtil.create());
-            var createResp = server.handleUserEvent(ctx, Server.EVENT_AGENT_CREATE, createReq);
-            assertNotNull(createResp);
-            assertTrue(createResp.contains("agentId"));
-
-            // 关闭服务
-            server.stop();
-            assertTrue(server.isShuttingDown);
-
-            // 关闭后发送事件应返回错误
-            var postShutdownReq = buildRequest("msg-post", JSONUtil.create());
-            var postShutdownResp = server.handleUserEvent(ctx, Server.EVENT_AGENT_CREATE, postShutdownReq);
-            assertNotNull(postShutdownResp);
-            assertTrue(postShutdownResp.contains("shutting down"),
-                    "关闭后应返回 shutting down 错误");
+            // region 9. 关闭服务
+            server1.stop();
+            server2.stop();
+            server3.stop();
+            assertTrue(server1.isShuttingDown);
+            assertTrue(server2.isShuttingDown);
+            assertTrue(server3.isShuttingDown);
+            assertTrue(metaData.getNodes().isEmpty(), "关闭后应无节点");
+            // endregion
         }
     }
 

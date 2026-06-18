@@ -1,7 +1,5 @@
 # 行为习惯
 * Todo 的内容不用理会
-* 函数的注释不要修改
-* 明确要求重构的时候，先删除函数内容，再重新开始写
 * 现有逻辑冲突的时候，不改Interface，改代码实现
 * 修改函数签名以后，要检查引用同步修改
 
@@ -17,9 +15,8 @@
 * 可以用函数接口的情况下，就不要用Class + override
 * 基础数据类型使用对应的封装类
 * 当判断条件为单个变量，使用switch语句
-* 类名BO结尾（以及其静态子类），必须有@Data  @Builder  @NoArgsConstructor  @AllArgsConstructor 四个注解
+* BO（以及其静态子类），必须有@Data  @Builder  @NoArgsConstructor  @AllArgsConstructor 四个注解
 * 通过异常优先退出的写法，降低代码层数
-* 带有泛型的类，初始化需要加{}
 * 对整个代码区域分块的注释，使用 region  endregion 标记
 * 当泛型类初始化的时候，使用匿名类写法 new Class<Type> {}，然后set属性
 * @Override 要换行
