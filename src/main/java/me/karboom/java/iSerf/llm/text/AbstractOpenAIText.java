@@ -52,7 +52,22 @@ public abstract class AbstractOpenAIText implements IText {
     /**
      * 解析响应
      */
-    protected abstract Output parseOutput(ObjectNode data, boolean isStream);
+    protected abstract Output parseOutput(ObjectNode data, boolean isStream, boolean isObject);
+
+    /**
+     * 清理 JSON 内容，去除 markdown 代码块标记等多余字符
+     */
+    protected String cleanJsonContent(String content) {
+        if (content == null || content.isEmpty()) {
+            return content;
+        }
+        // 去除开头的 ```json 或 ```
+        content = content.replaceAll("^```\\w*\\s*\\n?", "");
+        // 去除结尾的 ```
+        content = content.replaceAll("\\n?```\\s*$", "");
+        // 去除首尾空白
+        return content.trim();
+    }
 
     /**
      * Chat 接口路径
@@ -263,7 +278,7 @@ public abstract class AbstractOpenAIText implements IText {
                 var jsonLine = JSONUtil.parse(line);
                 var bodyNode = jsonLine.path("response").path("body");
                 if (!bodyNode.isMissingNode() && !bodyNode.isNull()) {
-                    var output = parseOutput((ObjectNode) bodyNode, false);
+                    var output = parseOutput((ObjectNode) bodyNode, false, false);
                     if (output != null) {
                         outputs.add(output);
                     }

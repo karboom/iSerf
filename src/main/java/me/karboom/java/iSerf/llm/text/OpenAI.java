@@ -46,8 +46,10 @@ public class OpenAI extends AbstractOpenAIText {
      */
     @Override
     public Flux<Output> send(List<AgentMessage> memory, Class<?> outputFormat, List<Tool<?>> tools) {
+        log.debug("<send> input params | memory.size=%s, outputFormat=%s, tools=%s".formatted(memory.size(), outputFormat != null ? outputFormat.getSimpleName() : null, tools != null ? tools.size() : null));
         return Flux.create(sink -> {
             var requestBody = buildRequestBody(memory, outputFormat, tools);
+            log.debug("<send> build request body | requestBody.length=%s".formatted(requestBody.length()));
 
             var request = new Request.Builder()
                     .url("%s/chat/completions".formatted(this.url))
@@ -59,22 +61,25 @@ public class OpenAI extends AbstractOpenAIText {
             var listener = new EventSourceListener() {
                 @Override
                 public void onOpen(EventSource eventSource, Response response) {
-                    System.out.println("open");
+                    log.debug("<onOpen> connection opened | code=%s".formatted(response.code()));
                 }
 
                 @Override
                 public void onEvent(EventSource eventSource, String id, String type, String data) {
-//                    System.out.println("source " + data);
+                    log.debug("<onEvent> received event | id=%s, type=%s".formatted(id, type));
                     if (data != null) {
                         if ("[DONE]".equals(data)) {
+                            log.debug("<onEvent> received done signal | data=DONE");
                             sink.complete();
                             return;
                         }
-                        var output = parseOutput(JSONUtil.parse(data), true);
+                        var output = parseOutput(JSONUtil.parse(data), true, false);
                         if (output != null) {
                             if (output.getError() != null) {
+                                log.debug("<onEvent> output error | error=%s".formatted(output.getError()));
                                 sink.error(new RuntimeException(output.getError()));
                             } else {
+                                log.debug("<onEvent> output parsed | choices=%s".formatted(output.choices != null ? output.choices.size() : 0));
                                 sink.next(output);
                             }
                         }
@@ -83,18 +88,21 @@ public class OpenAI extends AbstractOpenAIText {
 
                 @Override
                 public void onClosed(EventSource eventSource) {
-                    System.out.println("close");
+                    log.debug("<onClosed> connection closed |");
 //                    sink.complete();
                 }
 
                 @Override
                 public void onFailure(EventSource eventSource, Throwable t, Response response) {
+                    log.debug("<onFailure> connection failed | error=%s, responseCode=%s".formatted(t.getMessage(), response != null ? response.code() : null));
                     sink.error(t);
                 }
             };
 
             var factory = EventSources.createFactory(HttpUtil.getClient());
+            log.debug("<send> create factory |");
             var eventSource = factory.newEventSource(request, listener);
+            log.debug("<send> create event source | url=%s".formatted(request.url()));
 
             sink.onDispose(eventSource::cancel);
         });
@@ -102,6 +110,7 @@ public class OpenAI extends AbstractOpenAIText {
 
     @Override
     public Output query(List<AgentMessage> messages, Class<?> outputFormat) {
+        log.debug("<query> input params | messages.size=%s, outputFormat=%s".formatted(messages.size(), outputFormat != null ? outputFormat.getSimpleName() : null));
         var requestBody = buildRequestBody(messages, outputFormat, null);
         var requestJson = JSONUtil.parse(requestBody);
         requestJson.remove("stream");
@@ -115,15 +124,20 @@ public class OpenAI extends AbstractOpenAIText {
                 .build();
 
         try (var response = HttpUtil.getClient().newCall(request).execute()) {
+            log.debug("<query> response | response.code=%s".formatted(response.code()));
             if (!response.isSuccessful()) {
                 throw new RuntimeException("Query failed: " + response.code());
             }
             var responseBody = response.body();
+            log.debug("<query> response body | responseBody=%s".formatted(responseBody != null));
             if (responseBody == null) {
                 throw new RuntimeException("Query response is null");
             }
-            var responseJson = JSONUtil.parse(responseBody.string());
-            return parseOutput(responseJson, false);
+            var bodyString = responseBody.string();
+            log.debug("<query> response body length | bodyString.length=%s".formatted(bodyString.length()));
+            var responseJson = JSONUtil.parse(bodyString);
+            log.debug("<query> parse response | responseJson=%s".formatted(responseJson));
+            return parseOutput(responseJson, false, outputFormat != null);
         } catch (Exception e) {
             throw new RuntimeException("Query error", e);
         }
@@ -131,29 +145,35 @@ public class OpenAI extends AbstractOpenAIText {
 
     @Override
     protected String buildRequestBody(List<AgentMessage> memory, Class<?> outputFormat, List<Tool<?>> tools) {
+        log.debug("<buildRequestBody> input params | memory.size=%s, outputFormat=%s, tools=%s".formatted(memory.size(), outputFormat != null ? outputFormat.getSimpleName() : null, tools != null ? tools.size() : null));
         var body = JSONUtil.create();
         body.put("model", llmType);
         body.put("stream", true);
 
         if (outputFormat != null) {
+            log.debug("<buildRequestBody> set output format | outputFormat=%s".formatted(outputFormat.getSimpleName()));
             var responseFormat = JSONUtil.create();
             responseFormat.put("type", "json_schema");
 
             var jsonSchema = JSONUtil.create();
             jsonSchema.put("name", outputFormat.getSimpleName());
             jsonSchema.put("strict", true);
-            jsonSchema.set("schema", JSONUtil.parse(schemaGenerator.generateSchema(outputFormat).toString()));
+            var schema = schemaGenerator.generateSchema(outputFormat);
+            log.debug("<buildRequestBody> generate schema | result=%s".formatted(schema));
+            jsonSchema.set("schema", JSONUtil.parse(schema.toString()));
 
             responseFormat.set("json_schema", jsonSchema);
             body.set("response_format", responseFormat);
         }
 
         if (tools != null && !tools.isEmpty()) {
+            log.debug("<buildRequestBody> set tools | tools.size=%s".formatted(tools.size()));
             body.set("tools", buildToolsJson(tools));
         }
 
         var messagesArray = JSONUtil.createArray();
         for (var item : memory) {
+            log.debug("<buildRequestBody> process message | role=%s, type=%s".formatted(item.role, item.type));
             switch (item.role) {
                 case AgentMessage.ROLE.USER:
                     var userMessage = JSONUtil.create();
@@ -165,6 +185,7 @@ public class OpenAI extends AbstractOpenAIText {
                             break;
                         case AgentMessage.TYPE.IMAGE:
                             var content = JSONUtil.createArray();
+                            log.debug("<buildRequestBody> process image message | files.size=%s, text=%s".formatted(item.files != null ? item.files.size() : 0, item.getText() != null));
                             if (item.files != null) {
                                 for (var image : item.files) {
                                     content.add(JSONUtil.create()
@@ -180,6 +201,7 @@ public class OpenAI extends AbstractOpenAIText {
 
                         case AgentMessage.TYPE.AUDIO:
                             var audioContent = JSONUtil.createArray();
+                            log.debug("<buildRequestBody> process audio message | audio=%s, text=%s".formatted(item.audio != null, item.getText() != null));
                             if (item.audio != null) {
                                     audioContent.add(JSONUtil.create()
                                             .put("type", "input_audio")
@@ -194,6 +216,7 @@ public class OpenAI extends AbstractOpenAIText {
 
                         case AgentMessage.TYPE.VIDEO:
                             var videoContent = JSONUtil.createArray();
+                            log.debug("<buildRequestBody> process video message | video=%s, fps=%s, text=%s".formatted(item.video != null, item.getFps(), item.getText() != null));
                             if (item.video != null) {
                                 videoContent.add(JSONUtil.create()
                                         .put("type", "video_url")
@@ -214,6 +237,7 @@ public class OpenAI extends AbstractOpenAIText {
                 case AgentMessage.ROLE.ASSISTANT:
                     var assistantMessage = JSONUtil.create();
                     assistantMessage.put("role", "assistant");
+                    log.debug("<buildRequestBody> process assistant message | toolCalls.size=%s".formatted(item.toolCalls != null ? item.toolCalls.size() : 0));
 
                     if (item.toolCalls != null && !item.toolCalls.isEmpty()) {
                         var toolCalls = JSONUtil.createArray();
@@ -240,6 +264,7 @@ public class OpenAI extends AbstractOpenAIText {
                     break;
 
                 case AgentMessage.ROLE.TOOL:
+                    log.debug("<buildRequestBody> process tool message | toolCalls.size=%s".formatted(item.toolCalls != null ? item.toolCalls.size() : 0));
                     if (item.toolCalls != null) {
                         for (var toolCall : item.toolCalls) {
                             messagesArray.add(JSONUtil.create()
@@ -254,15 +279,21 @@ public class OpenAI extends AbstractOpenAIText {
         body.set("messages", messagesArray);
 
         if (llmConfig.containsKey("temperature")) {
-            body.put("temperature", ((Number) llmConfig.get("temperature")).doubleValue());
+            var temperature = ((Number) llmConfig.get("temperature")).doubleValue();
+            log.debug("<buildRequestBody> set temperature | temperature=%s".formatted(temperature));
+            body.put("temperature", temperature);
         }
 
         if (llmConfig.containsKey("max_tokens")) {
-            body.put("max_tokens", ((Number) llmConfig.get("max_tokens")).intValue());
+            var maxTokens = ((Number) llmConfig.get("max_tokens")).intValue();
+            log.debug("<buildRequestBody> set max tokens | maxTokens=%s".formatted(maxTokens));
+            body.put("max_tokens", maxTokens);
         }
 
         if (llmConfig.containsKey("top_p")) {
-            body.put("top_p", ((Number) llmConfig.get("top_p")).doubleValue());
+            var topP = ((Number) llmConfig.get("top_p")).doubleValue();
+            log.debug("<buildRequestBody> set top p | topP=%s".formatted(topP));
+            body.put("top_p", topP);
         }
 
         var streamOptions = JSONUtil.create();
@@ -270,20 +301,25 @@ public class OpenAI extends AbstractOpenAIText {
         body.set("stream_options", streamOptions);
 
         if (llmConfig.containsKey("thinking")) {
+            log.debug("<buildRequestBody> enable thinking | thinking=true");
             body.put("enable_thinking", true);
         }
 
+        log.debug("<buildRequestBody> body built | body.length=%s".formatted(body.toString().length()));
         return body.toString();
     }
 
     private ObjectNode buildParamNode(Tool.Parameter param) {
+        log.debug("<buildParamNode> input params | name=%s, type=%s".formatted(param.name, param.type));
         var paramNode = JSONUtil.create();
         paramNode.put("type", param.type);
         if (param.description != null) {
+            log.debug("<buildParamNode> set description | description=%s".formatted(param.description));
             paramNode.put("description", param.description);
         }
 
         if (param.properties != null && !param.properties.isEmpty()) {
+            log.debug("<buildParamNode> process properties | properties.size=%s".formatted(param.properties.size()));
             var properties = JSONUtil.create();
             var required = JSONUtil.createArray();
 
@@ -292,6 +328,7 @@ public class OpenAI extends AbstractOpenAIText {
                 properties.set(subParam.name, subParamNode);
 
                 if (subParam.required != null && subParam.required) {
+                    log.debug("<buildParamNode> add required | required=%s".formatted(subParam.name));
                     required.add(subParam.name);
                 }
             }
@@ -302,6 +339,7 @@ public class OpenAI extends AbstractOpenAIText {
             }
         }
 
+        log.debug("<buildParamNode> param built | name=%s, hasProperties=%s".formatted(param.name, paramNode.path("properties").isEmpty() ? false : true));
         return paramNode;
     }
 
@@ -309,38 +347,50 @@ public class OpenAI extends AbstractOpenAIText {
      * 解析响应body对象
      * @param data
      * @param isStream
+     * @param isObject 是否清理 JSON 内容（去除 markdown 代码块标记等）
      * @return
      */
     @Override
-    protected Output parseOutput(ObjectNode data, boolean isStream) {
+    protected Output parseOutput(ObjectNode data, boolean isStream, boolean isObject) {
+        log.debug("<parseOutput> input params | isStream=%s".formatted(isStream));
         var output = new Output();
 
         var idNode = data.path("id");
         if (!idNode.isMissingNode() && !idNode.isNull()) {
+            log.debug("<parseOutput> extract id | id=%s".formatted(idNode.asString()));
             output.setId(idNode.asString());
         }
         output.type = "chat.completion.chunk";
         output.isDelta = isStream;
 
         var choicesNode = data.path("choices");
+        log.debug("<parseOutput> check choices | choices.empty=%s".formatted(choicesNode.isEmpty()));
         if (!choicesNode.isEmpty()) {
             var outputChoices = new ArrayList<Output.Choice>();
             for (var choiceNode : choicesNode) {
                 var outputChoice = new Output.Choice();
 
                 var messageContentNode = choiceNode.path(isStream ? "delta": "message");
+                log.debug("<parseOutput> check message content | messageContentNode.empty=%s".formatted(messageContentNode.isEmpty()));
                 if (!messageContentNode.isEmpty()) {
                     var contentNode = messageContentNode.path("content");
                     if (!contentNode.isMissingNode() && !contentNode.isNull()) {
-                        outputChoice.text = contentNode.asString();
+                        var contentText = contentNode.asString();
+                        if (isObject) {
+                            contentText = cleanJsonContent(contentText);
+                        }
+                        log.debug("<parseOutput> extract content | content=%s, isObject=%s".formatted(contentText, isObject));
+                        outputChoice.text = contentText;
                     }
 
                     var reasoningContentNode = messageContentNode.path("reasoning_content");
                     if (!reasoningContentNode.isMissingNode() && !reasoningContentNode.isNull()) {
+                        log.debug("<parseOutput> extract reasoning content | reasoningContent=%s".formatted(reasoningContentNode.asText()));
                         outputChoice.thinking = reasoningContentNode.asText();
                     }
 
                     var toolCallsNode = messageContentNode.path("tool_calls");
+                    log.debug("<parseOutput> check tool calls | toolCallsNode.empty=%s".formatted(toolCallsNode.isEmpty()));
                     if (!toolCallsNode.isEmpty()) {
                         var toolCalls = new ArrayList<Output.ToolCall>();
 
@@ -368,6 +418,7 @@ public class OpenAI extends AbstractOpenAIText {
 
                 var finishReasonNode = choiceNode.path("finish_reason");
                 if (!finishReasonNode.isEmpty()) {
+                    log.debug("<parseOutput> extract finish reason | finishReason=%s".formatted(finishReasonNode.asText()));
                     outputChoice.finishReason = finishReasonNode.asText();
                 }
 
@@ -377,6 +428,7 @@ public class OpenAI extends AbstractOpenAIText {
         }
 
         var usageNode = data.path("usage");
+        log.debug("<parseOutput> check usage | usageNode.empty=%s".formatted(usageNode.isEmpty()));
         if (!usageNode.isEmpty()) {
             var usage = Output.Usage.builder()
                     .promptTokens(usageNode.path("prompt_tokens").asInt())
@@ -389,6 +441,7 @@ public class OpenAI extends AbstractOpenAIText {
             output.setUsage(usage);
         }
 
+        log.debug("<parseOutput> output parsed | id=%s, choices=%s, hasUsage=%s".formatted(output.getId(), output.choices != null ? output.choices.size() : 0, output.getUsage() != null));
         return output;
     }
 

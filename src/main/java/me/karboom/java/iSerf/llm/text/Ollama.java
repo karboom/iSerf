@@ -47,8 +47,10 @@ public class Ollama implements IText {
 
     @Override
     public Flux<Output> send(List<AgentMessage> messages, Class<?> outputFormat, List<Tool<?>> tools) {
+        log.debug("<send> input params | messages.size=%s, outputFormat=%s, tools=%s".formatted(messages.size(), outputFormat != null ? outputFormat.getSimpleName() : null, tools != null ? tools.size() : null));
         return Flux.create(sink -> {
             var requestBody = buildRequestBody(messages, outputFormat, tools, true);
+            log.debug("<send> build request body | requestBody.length=%s".formatted(requestBody.length()));
 
             var request = new Request.Builder()
                     .url("%s/api/chat".formatted(this.url))
@@ -59,12 +61,12 @@ public class Ollama implements IText {
             var listener = new EventSourceListener() {
                 @Override
                 public void onOpen(EventSource eventSource, Response response) {
-                    log.debug("send - Ollama NDJSON connection opened");
+                    log.debug("<onOpen> connection opened | code=%s".formatted(response.code()));
                 }
 
                 @Override
                 public void onEvent(EventSource eventSource, String id, String type, String data) {
-                    log.debug("send - Received NDJSON line: {}", data);
+                    log.debug("<onEvent> received event | id=%s, type=%s".formatted(id, type));
                     if (data != null && !data.trim().isEmpty()) {
                         try {
                             var json = JSONUtil.parse(data);
@@ -72,49 +74,57 @@ public class Ollama implements IText {
                             // Ollama 错误响应
                             var errorNode = json.path("error");
                             if (!errorNode.isMissingNode() && !errorNode.isNull()) {
+                                log.debug("<onEvent> error | error=%s".formatted(errorNode.asText()));
                                 sink.error(new RuntimeException(errorNode.asText()));
                                 return;
                             }
 
                             var doneNode = json.path("done");
                             if (doneNode.asBoolean(false)) {
-                                var output = parseOutput(json, true);
+                                var output = parseOutput(json, true, false);
                                 if (output != null) {
                                     sink.next(output);
                                 }
+                                log.debug("<onEvent> done |");
                                 sink.complete();
                                 return;
                             }
-                            var output = parseOutput(json, true);
+                            var output = parseOutput(json, true, false);
                             if (output != null && output.getChoices() != null && !output.getChoices().isEmpty()) {
+                                log.debug("<onEvent> output parsed | choices=%s".formatted(output.getChoices().size()));
                                 sink.next(output);
                             }
                         } catch (Exception e) {
-                            log.debug("send - Parse error: {}", e.getMessage());
+                            log.debug("<onEvent> parse error | error=%s".formatted(e.getMessage()));
                         }
                     }
                 }
 
                 @Override
                 public void onClosed(EventSource eventSource) {
-                    log.debug("send - NDJSON connection closed");
+                    log.debug("<onClosed> connection closed |");
                     sink.complete();
                 }
 
                 @Override
                 public void onFailure(EventSource eventSource, Throwable t, Response response) {
-                    log.debug("send - NDJSON connection failed: {}", t.getMessage());
+                    log.debug("<onFailure> connection failed | error=%s, responseCode=%s".formatted(t.getMessage(), response != null ? response.code() : null));
                     sink.error(t);
                 }
             };
 
             var factory = EventSources.createFactory(HttpUtil.getClient());
-            factory.newEventSource(request, listener);
+            log.debug("<send> create factory |");
+            var eventSource = factory.newEventSource(request, listener);
+            log.debug("<send> create event source | url=%s".formatted(request.url()));
+
+            sink.onDispose(eventSource::cancel);
         });
     }
 
     @Override
     public Output query(List<AgentMessage> messages, Class<?> outputFormat) {
+        log.debug("<query> input params | messages.size=%s, outputFormat=%s".formatted(messages.size(), outputFormat != null ? outputFormat.getSimpleName() : null));
         var requestBody = buildRequestBody(messages, outputFormat, null, false);
 
         var request = new Request.Builder()
@@ -124,15 +134,20 @@ public class Ollama implements IText {
                 .build();
 
         try (var response = HttpUtil.getClient().newCall(request).execute()) {
+            log.debug("<query> response | response.code=%s".formatted(response.code()));
             if (!response.isSuccessful()) {
                 throw new RuntimeException("Query failed: " + response.code());
             }
             var responseBody = response.body();
+            log.debug("<query> response body | responseBody=%s".formatted(responseBody != null));
             if (responseBody == null) {
                 throw new RuntimeException("Query response is null");
             }
-            var responseJson = JSONUtil.parse(responseBody.string());
-            return parseOutput(responseJson, false);
+            var bodyString = responseBody.string();
+            log.debug("<query> response body length | bodyString.length=%s".formatted(bodyString.length()));
+            var responseJson = JSONUtil.parse(bodyString);
+            log.debug("<query> parse response | responseJson=%s".formatted(responseJson));
+            return parseOutput(responseJson, false, outputFormat != null);
         } catch (Exception e) {
             throw new RuntimeException("Query error", e);
         }
@@ -154,11 +169,13 @@ public class Ollama implements IText {
     }
 
     private String buildRequestBody(List<AgentMessage> messages, Class<?> outputFormat, List<Tool<?>> tools, boolean stream) {
+        log.debug("<buildRequestBody> input params | messages.size=%s, outputFormat=%s, tools=%s, stream=%s".formatted(messages.size(), outputFormat != null ? outputFormat.getSimpleName() : null, tools != null ? tools.size() : null, stream));
         var body = JSONUtil.create();
         body.put("model", llmType);
         body.put("stream", stream);
 
         if (outputFormat != null) {
+            log.debug("<buildRequestBody> set output format | outputFormat=%s".formatted(outputFormat.getSimpleName()));
             body.put("format", "json");
         }
 
@@ -202,28 +219,34 @@ public class Ollama implements IText {
 
         var options = JSONUtil.create();
         if (llmConfig.containsKey("temperature")) {
+            log.debug("<buildRequestBody> set temperature | temperature=%s".formatted(llmConfig.get("temperature")));
             options.put("temperature", ((Number) llmConfig.get("temperature")).doubleValue());
         }
         if (llmConfig.containsKey("max_tokens")) {
+            log.debug("<buildRequestBody> set num_predict | max_tokens=%s".formatted(llmConfig.get("max_tokens")));
             options.put("num_predict", ((Number) llmConfig.get("max_tokens")).intValue());
         }
         if (llmConfig.containsKey("top_p")) {
+            log.debug("<buildRequestBody> set top_p | top_p=%s".formatted(llmConfig.get("top_p")));
             options.put("top_p", ((Number) llmConfig.get("top_p")).doubleValue());
         }
         if (!options.isEmpty()) {
             body.set("options", options);
         }
 
+        log.debug("<buildRequestBody> body built | body.length=%s".formatted(body.toString().length()));
         return body.toString();
     }
 
-    private Output parseOutput(ObjectNode data, boolean isStream) {
+    private Output parseOutput(ObjectNode data, boolean isStream, boolean isObject) {
+        log.debug("<parseOutput> input params | isStream=%s, isObject=%s".formatted(isStream, isObject));
         var output = new Output();
         output.type = "chat.completion.chunk";
         output.isDelta = isStream;
 
         var idNode = data.path("created_at");
         if (!idNode.isMissingNode() && !idNode.isNull()) {
+            log.debug("<parseOutput> extract id | id=%s".formatted(idNode.asText()));
             output.setId(idNode.asText());
         }
 
@@ -234,7 +257,12 @@ public class Ollama implements IText {
         var choice = new Output.Choice();
         
         if (!contentNode.isMissingNode() && !contentNode.isNull()) {
-            choice.text = contentNode.asText();
+            var contentText = contentNode.asText();
+            if (isObject) {
+                contentText = cleanJsonContent(contentText);
+            }
+            log.debug("<parseOutput> extract content | content=%s, isObject=%s".formatted(contentText, isObject));
+            choice.text = contentText;
         }
 
         var doneNode = data.path("done");
@@ -260,6 +288,22 @@ public class Ollama implements IText {
         choices.add(choice);
         output.choices = choices;
 
+        log.debug("<parseOutput> output parsed | id=%s, choices=%s, hasUsage=%s".formatted(output.getId(), output.choices != null ? output.choices.size() : 0, output.getUsage() != null));
         return output;
+    }
+
+    /**
+     * 清理 JSON 内容，去除 markdown 代码块标记等多余字符
+     */
+    private String cleanJsonContent(String content) {
+        if (content == null || content.isEmpty()) {
+            return content;
+        }
+        // 去除开头的 ```json 或 ```
+        content = content.replaceAll("^```\\w*\\s*\\n?", "");
+        // 去除结尾的 ```
+        content = content.replaceAll("\\n?```\\s*$", "");
+        // 去除首尾空白
+        return content.trim();
     }
 }

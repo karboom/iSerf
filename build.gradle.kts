@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "io.github.karboom"
-version = "0.75.25-alpha"
+version = "0.75.27-alpha"
 
 
 dependencies {
@@ -68,6 +68,8 @@ dependencies {
     api("org.openjdk.jol:jol-core:0.17")
 
     api("com.github.oshi:oshi-core:6.6.5")
+
+    api("ch.qos.logback:logback-classic:1.4.14")
 
 
 //    implementation("org.projectlombok:lombok:1.18.42")

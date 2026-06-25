@@ -248,7 +248,7 @@ public class Video {
                     .build();
 
             var analysisResult = audioLlm.query(List.of(message), AudioAnalysisResult.class);
-            var result = JSONUtil.convert(analysisResult.getChoices().getFirst().getText(), AudioAnalysisResult.class);
+            var result = JSONUtil.parse(analysisResult.getChoices().getFirst().getText(), AudioAnalysisResult.class);
             log.debug("splitAndTranscribeAudio analyzed segment: {}", segment.path.getFileName());
 
             var audioInfo = AudioInfo.builder()

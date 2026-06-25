@@ -44,8 +44,10 @@ public class OpenAIResponse extends AbstractOpenAIText {
      */
     @Override
     public Flux<Output> send(List<AgentMessage> memory, Class<?> outputFormat, List<Tool<?>> tools) {
+        log.debug("<send> input params | memory.size=%s, outputFormat=%s, tools=%s".formatted(memory.size(), outputFormat != null ? outputFormat.getSimpleName() : null, tools != null ? tools.size() : null));
         return Flux.create(sink -> {
             var requestBody = buildRequestBody(memory, outputFormat, tools);
+            log.debug("<send> build request body | requestBody.length=%s".formatted(requestBody.length()));
 
             var request = new Request.Builder()
                     .url("%s/responses".formatted(this.url))
@@ -57,22 +59,25 @@ public class OpenAIResponse extends AbstractOpenAIText {
             var listener = new EventSourceListener() {
                 @Override
                 public void onOpen(EventSource eventSource, Response response) {
-                    log.debug(" send response open ");
+                    log.debug("<onOpen> connection opened | code=%s".formatted(response.code()));
                 }
 
                 @Override
                 public void onEvent(EventSource eventSource, String id, String type, String data) {
-                    log.debug(" send response event type={} data={} ", type, data);
+                    log.debug("<onEvent> received event | id=%s, type=%s".formatted(id, type));
                     if (data != null) {
                         if ("[DONE]".equals(data)) {
+                            log.debug("<onEvent> received done signal | data=DONE");
                             sink.complete();
                             return;
                         }
-                        var output = parseOutput(JSONUtil.parse(data), true);
+                        var output = parseOutput(JSONUtil.parse(data), true, false);
                         if (output != null) {
                             if (output.getError() != null) {
+                                log.debug("<onEvent> output error | error=%s".formatted(output.getError()));
                                 sink.error(new RuntimeException(output.getError()));
                             } else {
+                                log.debug("<onEvent> output parsed | choices=%s".formatted(output.choices != null ? output.choices.size() : 0));
                                 sink.next(output);
                             }
                         }
@@ -81,18 +86,20 @@ public class OpenAIResponse extends AbstractOpenAIText {
 
                 @Override
                 public void onClosed(EventSource eventSource) {
-                    log.debug(" send response close ");
+                    log.debug("<onClosed> connection closed |");
                 }
 
                 @Override
                 public void onFailure(EventSource eventSource, Throwable t, Response response) {
-                    log.error(" send response failure ", t);
+                    log.debug("<onFailure> connection failed | error=%s, responseCode=%s".formatted(t.getMessage(), response != null ? response.code() : null));
                     sink.error(t);
                 }
             };
 
             var factory = EventSources.createFactory(HttpUtil.getClient());
+            log.debug("<send> create factory |");
             var eventSource = factory.newEventSource(request, listener);
+            log.debug("<send> create event source | url=%s".formatted(request.url()));
 
             sink.onDispose(eventSource::cancel);
         });
@@ -103,6 +110,7 @@ public class OpenAIResponse extends AbstractOpenAIText {
      */
     @Override
     public Output query(List<AgentMessage> messages, Class<?> outputFormat) {
+        log.debug("<query> input params | messages.size=%s, outputFormat=%s".formatted(messages.size(), outputFormat != null ? outputFormat.getSimpleName() : null));
         var requestBody = buildRequestBody(messages, outputFormat, null);
         var requestJson = JSONUtil.parse(requestBody);
         requestJson.remove("stream");
@@ -115,18 +123,23 @@ public class OpenAIResponse extends AbstractOpenAIText {
                 .build();
 
         try (var response = HttpUtil.getClient().newCall(request).execute()) {
+            log.debug("<query> response | response.code=%s".formatted(response.code()));
             if (!response.isSuccessful()) {
                 var body = response.body();
                 var bodyStr = body != null ? body.string() : "null";
-                log.error(" query failed code={} body={} ", response.code(), bodyStr);
+                log.error("<query> failed | code=%s, body=%s".formatted(response.code(), bodyStr));
                 throw ErrorUtil.make("Query failed: %s".formatted(response.code()));
             }
             var responseBody = response.body();
+            log.debug("<query> response body | responseBody=%s".formatted(responseBody != null));
             if (responseBody == null) {
                 throw ErrorUtil.make("Query response is null");
             }
-            var responseJson = JSONUtil.parse(responseBody.string());
-            return parseOutput(responseJson, false);
+            var bodyString = responseBody.string();
+            log.debug("<query> response body length | bodyString.length=%s".formatted(bodyString.length()));
+            var responseJson = JSONUtil.parse(bodyString);
+            log.debug("<query> parse response | responseJson=%s".formatted(responseJson));
+            return parseOutput(responseJson, false, outputFormat != null);
         } catch (Exception e) {
             throw ErrorUtil.make("Query error: %s".formatted(e.getMessage()));
         }
@@ -137,6 +150,7 @@ public class OpenAIResponse extends AbstractOpenAIText {
      */
     @Override
     protected String buildRequestBody(List<AgentMessage> memory, Class<?> outputFormat, List<Tool<?>> tools) {
+        log.debug("<buildRequestBody> input params | memory.size=%s, outputFormat=%s, tools=%s".formatted(memory.size(), outputFormat != null ? outputFormat.getSimpleName() : null, tools != null ? tools.size() : null));
         var body = JSONUtil.create();
         body.put("model", llmType);
         body.put("stream", true);
@@ -145,6 +159,7 @@ public class OpenAIResponse extends AbstractOpenAIText {
         body.set("input", input);
 
         if (outputFormat != null) {
+            log.debug("<buildRequestBody> set output format | outputFormat=%s".formatted(outputFormat.getSimpleName()));
             var text = JSONUtil.create();
             var format = JSONUtil.create();
             format.put("type", "json_schema");
@@ -160,27 +175,33 @@ public class OpenAIResponse extends AbstractOpenAIText {
         }
 
         if (tools != null && !tools.isEmpty()) {
+            log.debug("<buildRequestBody> set tools | tools.size=%s".formatted(tools.size()));
             body.set("tools", buildToolsJson(tools));
         }
 
         if (llmConfig.containsKey("temperature")) {
+            log.debug("<buildRequestBody> set temperature | temperature=%s".formatted(llmConfig.get("temperature")));
             body.put("temperature", ((Number) llmConfig.get("temperature")).doubleValue());
         }
 
         if (llmConfig.containsKey("max_tokens")) {
+            log.debug("<buildRequestBody> set max_output_tokens | max_tokens=%s".formatted(llmConfig.get("max_tokens")));
             body.put("max_output_tokens", ((Number) llmConfig.get("max_tokens")).intValue());
         }
 
         if (llmConfig.containsKey("top_p")) {
+            log.debug("<buildRequestBody> set top_p | top_p=%s".formatted(llmConfig.get("top_p")));
             body.put("top_p", ((Number) llmConfig.get("top_p")).doubleValue());
         }
 
         if (llmConfig.containsKey("thinking")) {
+            log.debug("<buildRequestBody> enable thinking | thinking=true");
             var reasoning = JSONUtil.create();
             reasoning.put("effort", "high");
             body.set("reasoning", reasoning);
         }
 
+        log.debug("<buildRequestBody> body built | body.length=%s".formatted(body.toString().length()));
         return body.toString();
     }
 
@@ -293,12 +314,14 @@ public class OpenAIResponse extends AbstractOpenAIText {
      * 解析响应
      */
     @Override
-    protected Output parseOutput(ObjectNode data, boolean isStream) {
+    protected Output parseOutput(ObjectNode data, boolean isStream, boolean isObject) {
+        log.debug("<parseOutput> input params | isStream=%s, isObject=%s".formatted(isStream, isObject));
         var output = new Output();
         output.isDelta = isStream;
 
         var idNode = data.path("id");
         if (!idNode.isMissingNode() && !idNode.isNull()) {
+            log.debug("<parseOutput> extract id | id=%s".formatted(idNode.asString()));
             output.setId(idNode.asString());
         }
 
@@ -306,10 +329,12 @@ public class OpenAIResponse extends AbstractOpenAIText {
 
         var errorNode = data.path("error");
         if (!errorNode.isMissingNode() && !errorNode.isNull()) {
+            log.debug("<parseOutput> extract error | error=%s".formatted(errorNode.path("message").asText()));
             output.setError(errorNode.path("message").asText());
         }
 
         var outputItems = data.path("output");
+        log.debug("<parseOutput> check output items | outputItems.empty=%s".formatted(outputItems.isEmpty()));
         if (!outputItems.isMissingNode() && !outputItems.isNull()) {
             var outputChoices = new ArrayList<Output.Choice>();
             var choice = new Output.Choice();
@@ -317,6 +342,7 @@ public class OpenAIResponse extends AbstractOpenAIText {
 
             for (var item : outputItems) {
                 var itemType = item.path("type").asText();
+                log.debug("<parseOutput> process output item | type=%s".formatted(itemType));
                 switch (itemType) {
                     case "message":
                         var contentItems = item.path("content");
@@ -326,13 +352,19 @@ public class OpenAIResponse extends AbstractOpenAIText {
                                 case "output_text":
                                     var textNode = contentItem.path("text");
                                     if (!textNode.isMissingNode() && !textNode.isNull()) {
-                                        choice.setText(textNode.asString());
+                                        var contentText = textNode.asString();
+                                        if (isObject) {
+                                            contentText = cleanJsonContent(contentText);
+                                        }
+                                        log.debug("<parseOutput> extract text | content=%s, isObject=%s".formatted(contentText, isObject));
+                                        choice.setText(contentText);
                                     }
                                     var reasoningNode = contentItem.path("annotations");
                                     break;
                                 case "refusal":
                                     var refusalNode = contentItem.path("refusal");
                                     if (!refusalNode.isMissingNode() && !refusalNode.isNull()) {
+                                        log.debug("<parseOutput> extract refusal | refusal=%s".formatted(refusalNode.asString()));
                                         choice.setText(refusalNode.asString());
                                     }
                                     break;
@@ -345,6 +377,7 @@ public class OpenAIResponse extends AbstractOpenAIText {
                                 .name(item.path("name").asString())
                                 .arguments(item.path("arguments").asString())
                                 .build();
+                        log.debug("<parseOutput> extract function call | name=%s, id=%s".formatted(toolCall.getName(), toolCall.getId()));
                         toolCalls.add(toolCall);
                         break;
                     case "reasoning":
@@ -353,6 +386,7 @@ public class OpenAIResponse extends AbstractOpenAIText {
                             for (var summaryItem : reasoningSummary) {
                                 var textNode = summaryItem.path("text");
                                 if (!textNode.isMissingNode() && !textNode.isNull()) {
+                                    log.debug("<parseOutput> extract reasoning | thinking=%s".formatted(textNode.asString()));
                                     choice.setThinking(textNode.asString());
                                 }
                             }
@@ -362,6 +396,7 @@ public class OpenAIResponse extends AbstractOpenAIText {
             }
 
             if (!toolCalls.isEmpty()) {
+                log.debug("<parseOutput> set tool calls | toolCalls.size=%s".formatted(toolCalls.size()));
                 choice.setToolCall(toolCalls);
             }
             outputChoices.add(choice);
@@ -369,6 +404,7 @@ public class OpenAIResponse extends AbstractOpenAIText {
         }
 
         var usageNode = data.path("usage");
+        log.debug("<parseOutput> check usage | usageNode.empty=%s".formatted(usageNode.isEmpty()));
         if (!usageNode.isMissingNode() && !usageNode.isNull()) {
             var usage = Output.Usage.builder()
                     .promptTokens(usageNode.path("input_tokens").asInt())
@@ -391,12 +427,14 @@ public class OpenAIResponse extends AbstractOpenAIText {
         var statusNode = data.path("status");
         if (!statusNode.isMissingNode() && !statusNode.isNull()) {
             var status = statusNode.asText();
+            log.debug("<parseOutput> extract status | status=%s".formatted(status));
             if ("completed".equals(status) || "failed".equals(status)) {
                 var finishChoice = output.getChoices().isEmpty() ? new Output.Choice() : output.getChoices().get(0);
                 finishChoice.setFinishReason(status);
             }
         }
 
+        log.debug("<parseOutput> output parsed | id=%s, choices=%s, hasUsage=%s".formatted(output.getId(), output.choices != null ? output.choices.size() : 0, output.getUsage() != null));
         return output;
     }
 }

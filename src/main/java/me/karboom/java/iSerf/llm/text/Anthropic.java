@@ -51,8 +51,10 @@ public class Anthropic implements IText {
      */
     @Override
     public Flux<Output> send(List<AgentMessage> memory, Class<?> outputFormat, List<Tool<?>> tools) {
+        log.debug("<send> input params | memory.size=%s, outputFormat=%s, tools=%s".formatted(memory.size(), outputFormat != null ? outputFormat.getSimpleName() : null, tools != null ? tools.size() : null));
         return Flux.create(sink -> {
             var requestBody = buildRequestBody(memory, outputFormat, tools, true);
+            log.debug("<send> build request body | requestBody.length=%s".formatted(requestBody.length()));
 
             var request = new Request.Builder()
                     .url("%s/messages".formatted(this.url))
@@ -75,12 +77,12 @@ public class Anthropic implements IText {
 
                 @Override
                 public void onOpen(EventSource eventSource, Response response) {
-                    log.debug(" send connection open ");
+                    log.debug("<onOpen> connection opened | code=%s".formatted(response.code()));
                 }
 
                 @Override
                 public void onEvent(EventSource eventSource, String id, String type, String data) {
-                    log.debug(" send event type={} data={} ", type, data);
+                    log.debug("<onEvent> received event | id=%s, type=%s".formatted(id, type));
                     if (data == null || data.trim().isEmpty()) {
                         return;
                     }
@@ -104,6 +106,7 @@ public class Anthropic implements IText {
                         case "content_block_start":
                             var blockNode = json.path("content_block");
                             currentBlockType = blockNode.path("type").asText();
+                            log.debug("<onEvent> content block start | type=%s".formatted(currentBlockType));
                             switch (currentBlockType) {
                                 case "text":
                                     textBuffer = blockNode.path("text").asText("");
@@ -166,6 +169,7 @@ public class Anthropic implements IText {
                                 output.setChoices(List.of(choice));
                             }
 
+                            log.debug("<onEvent> content block stop | type=%s, choices=%s".formatted(currentBlockType, output.getChoices() != null ? output.getChoices().size() : 0));
                             sink.next(output);
                             currentBlockType = null;
                             break;
@@ -199,12 +203,14 @@ public class Anthropic implements IText {
                                 finalOutput.setUsage(usage);
                             }
 
+                            log.debug("<onEvent> message stop | id=%s, stopReason=%s".formatted(messageId, stopReason));
                             sink.next(finalOutput);
                             sink.complete();
                             break;
 
                         case "error":
                             var errorMsg = json.path("error").path("message").asText("unknown error");
+                            log.debug("<onEvent> error | error=%s".formatted(errorMsg));
                             sink.error(new RuntimeException(errorMsg));
                             break;
 
@@ -215,18 +221,20 @@ public class Anthropic implements IText {
 
                 @Override
                 public void onClosed(EventSource eventSource) {
-                    log.debug(" send connection closed ");
+                    log.debug("<onClosed> connection closed |");
                 }
 
                 @Override
                 public void onFailure(EventSource eventSource, Throwable t, Response response) {
-                    log.error(" send connection failure ", t);
+                    log.debug("<onFailure> connection failed | error=%s, responseCode=%s".formatted(t.getMessage(), response != null ? response.code() : null));
                     sink.error(t);
                 }
             };
 
             var factory = EventSources.createFactory(HttpUtil.getClient());
+            log.debug("<send> create factory |");
             var eventSource = factory.newEventSource(request, listener);
+            log.debug("<send> create event source | url=%s".formatted(request.url()));
 
             sink.onDispose(eventSource::cancel);
         });
@@ -237,6 +245,7 @@ public class Anthropic implements IText {
      */
     @Override
     public Output query(List<AgentMessage> messages, Class<?> outputFormat) {
+        log.debug("<query> input params | messages.size=%s, outputFormat=%s".formatted(messages.size(), outputFormat != null ? outputFormat.getSimpleName() : null));
         var requestBody = buildRequestBody(messages, outputFormat, null, false);
 
         var request = new Request.Builder()
@@ -248,18 +257,23 @@ public class Anthropic implements IText {
                 .build();
 
         try (var response = HttpUtil.getClient().newCall(request).execute()) {
+            log.debug("<query> response | response.code=%s".formatted(response.code()));
             if (!response.isSuccessful()) {
                 var body = response.body();
                 var bodyStr = body != null ? body.string() : "null";
-                log.error(" query failed code={} body={} ", response.code(), bodyStr);
+                log.error("<query> failed | code=%s, body=%s".formatted(response.code(), bodyStr));
                 throw ErrorUtil.make("Query failed: %s".formatted(response.code()));
             }
             var responseBody = response.body();
+            log.debug("<query> response body | responseBody=%s".formatted(responseBody != null));
             if (responseBody == null) {
                 throw ErrorUtil.make("Query response is null");
             }
-            var responseJson = JSONUtil.parse(responseBody.string());
-            return parseOutput(responseJson, false);
+            var bodyString = responseBody.string();
+            log.debug("<query> response body length | bodyString.length=%s".formatted(bodyString.length()));
+            var responseJson = JSONUtil.parse(bodyString);
+            log.debug("<query> parse response | responseJson=%s".formatted(responseJson));
+            return parseOutput(responseJson, false, outputFormat != null);
         } catch (Exception e) {
             throw ErrorUtil.make("Query error: %s".formatted(e.getMessage()));
         }
@@ -293,6 +307,7 @@ public class Anthropic implements IText {
      * 构建请求体
      */
     private String buildRequestBody(List<AgentMessage> memory, Class<?> outputFormat, List<Tool<?>> tools, boolean stream) {
+        log.debug("<buildRequestBody> input params | memory.size=%s, outputFormat=%s, tools=%s, stream=%s".formatted(memory.size(), outputFormat != null ? outputFormat.getSimpleName() : null, tools != null ? tools.size() : null, stream));
         var body = JSONUtil.create();
         body.put("model", llmType);
         body.put("stream", stream);
@@ -305,15 +320,18 @@ public class Anthropic implements IText {
 
         var systemPrompt = extractSystemPrompt(memory);
         if (systemPrompt != null) {
+            log.debug("<buildRequestBody> set system prompt | systemPrompt.length=%s".formatted(systemPrompt.length()));
             body.put("system", systemPrompt);
         }
 
         var mergedTools = mergeOutputFormatTools(tools, outputFormat);
         if (mergedTools != null && !mergedTools.isEmpty()) {
+            log.debug("<buildRequestBody> set tools | tools.size=%s".formatted(mergedTools.size()));
             body.set("tools", buildToolsJson(mergedTools));
 
             if (tools == null || tools.isEmpty()) {
                 if (outputFormat != null) {
+                    log.debug("<buildRequestBody> set tool choice | outputFormat=%s".formatted(outputFormat.getSimpleName()));
                     var toolChoice = JSONUtil.create();
                     toolChoice.put("type", "tool");
                     toolChoice.put("name", "output_format");
@@ -323,14 +341,17 @@ public class Anthropic implements IText {
         }
 
         if (llmConfig.containsKey("temperature")) {
+            log.debug("<buildRequestBody> set temperature | temperature=%s".formatted(llmConfig.get("temperature")));
             body.put("temperature", ((Number) llmConfig.get("temperature")).doubleValue());
         }
 
         if (llmConfig.containsKey("top_p")) {
+            log.debug("<buildRequestBody> set top_p | top_p=%s".formatted(llmConfig.get("top_p")));
             body.put("top_p", ((Number) llmConfig.get("top_p")).doubleValue());
         }
 
         if (llmConfig.containsKey("thinking")) {
+            log.debug("<buildRequestBody> enable thinking | thinking=true");
             var thinking = JSONUtil.create();
             thinking.put("type", "enabled");
             thinking.put("budget_tokens", 16000);
@@ -339,6 +360,7 @@ public class Anthropic implements IText {
 
         body.set("messages", buildMessagesArray(memory));
 
+        log.debug("<buildRequestBody> body built | body.length=%s".formatted(body.toString().length()));
         return body.toString();
     }
 
@@ -519,12 +541,14 @@ public class Anthropic implements IText {
     /**
      * 解析非流式响应
      */
-    private Output parseOutput(ObjectNode data, boolean isStream) {
+    private Output parseOutput(ObjectNode data, boolean isStream, boolean isObject) {
+        log.debug("<parseOutput> input params | isStream=%s, isObject=%s".formatted(isStream, isObject));
         var output = new Output();
         output.isDelta = isStream;
 
         var idNode = data.path("id");
         if (!idNode.isMissingNode() && !idNode.isNull()) {
+            log.debug("<parseOutput> extract id | id=%s".formatted(idNode.asString()));
             output.setId(idNode.asString());
         }
 
@@ -532,11 +556,13 @@ public class Anthropic implements IText {
 
         var errorNode = data.path("error");
         if (!errorNode.isMissingNode() && !errorNode.isNull()) {
+            log.debug("<parseOutput> extract error | error=%s".formatted(errorNode.path("message").asText()));
             output.setError(errorNode.path("message").asText());
             return output;
         }
 
         var contentNode = data.path("content");
+        log.debug("<parseOutput> check content | contentNode.empty=%s".formatted(contentNode.isEmpty()));
         if (!contentNode.isMissingNode() && contentNode.isArray()) {
             var choice = new Output.Choice();
             var textContent = new StringBuilder();
@@ -545,6 +571,7 @@ public class Anthropic implements IText {
 
             for (var block : contentNode) {
                 var blockType = block.path("type").asText();
+                log.debug("<parseOutput> process content block | type=%s".formatted(blockType));
                 switch (blockType) {
                     case "text":
                         var textNode = block.path("text");
@@ -558,6 +585,7 @@ public class Anthropic implements IText {
                                 .name(block.path("name").asText())
                                 .arguments(block.path("input").toString())
                                 .build();
+                        log.debug("<parseOutput> extract tool call | name=%s, id=%s".formatted(toolCall.getName(), toolCall.getId()));
                         toolCalls.add(toolCall);
                         break;
                     case "thinking":
@@ -570,12 +598,19 @@ public class Anthropic implements IText {
             }
 
             if (textContent.length() > 0) {
-                choice.setText(textContent.toString());
+                var text = textContent.toString();
+                if (isObject) {
+                    text = cleanJsonContent(text);
+                }
+                log.debug("<parseOutput> extract text | content=%s, isObject=%s".formatted(text, isObject));
+                choice.setText(text);
             }
             if (thinkingContent.length() > 0) {
+                log.debug("<parseOutput> extract thinking | thinking.length=%s".formatted(thinkingContent.length()));
                 choice.setThinking(thinkingContent.toString());
             }
             if (!toolCalls.isEmpty()) {
+                log.debug("<parseOutput> set tool calls | toolCalls.size=%s".formatted(toolCalls.size()));
                 choice.setToolCall(toolCalls);
             }
 
@@ -584,6 +619,7 @@ public class Anthropic implements IText {
 
         var stopReasonNode = data.path("stop_reason");
         if (!stopReasonNode.isMissingNode() && !stopReasonNode.isNull()) {
+            log.debug("<parseOutput> extract stop reason | stopReason=%s".formatted(stopReasonNode.asText()));
             var choice = output.getChoices() != null && !output.getChoices().isEmpty()
                     ? output.getChoices().getFirst()
                     : new Output.Choice();
@@ -594,6 +630,7 @@ public class Anthropic implements IText {
         }
 
         var usageNode = data.path("usage");
+        log.debug("<parseOutput> check usage | usageNode.empty=%s".formatted(usageNode.isEmpty()));
         if (!usageNode.isMissingNode() && !usageNode.isNull()) {
             var usage = Output.Usage.builder()
                     .promptTokens(usageNode.path("input_tokens").asInt())
@@ -605,6 +642,22 @@ public class Anthropic implements IText {
             output.setUsage(usage);
         }
 
+        log.debug("<parseOutput> output parsed | id=%s, choices=%s, hasUsage=%s".formatted(output.getId(), output.choices != null ? output.choices.size() : 0, output.getUsage() != null));
         return output;
+    }
+
+    /**
+     * 清理 JSON 内容，去除 markdown 代码块标记等多余字符
+     */
+    private String cleanJsonContent(String content) {
+        if (content == null || content.isEmpty()) {
+            return content;
+        }
+        // 去除开头的 ```json 或 ```
+        content = content.replaceAll("^```\\w*\\s*\\n?", "");
+        // 去除结尾的 ```
+        content = content.replaceAll("\\n?```\\s*$", "");
+        // 去除首尾空白
+        return content.trim();
     }
 }
