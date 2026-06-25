@@ -1,6 +1,6 @@
 package me.karboom.java.iSerf.server;
 
-import me.karboom.java.iSerf.server.BO.Context;
+import me.karboom.java.iSerf.server.bo.Context;
 import me.karboom.java.iSerf.server.lifecycle.ITeamLifecycle;
 import me.karboom.java.iSerf.team.Team;
 import me.karboom.java.iSerf.util.JSONUtil;

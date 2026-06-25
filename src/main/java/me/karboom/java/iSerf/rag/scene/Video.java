@@ -1,14 +1,16 @@
 package me.karboom.java.iSerf.rag.scene;
 
 import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.llm.text.IText;
-import me.karboom.java.iSerf.rag.store.IStructStore;
+import me.karboom.java.iSerf.rag.bo.video.AudioAnalysisResult;
+import me.karboom.java.iSerf.rag.bo.video.AudioInfo;
+import me.karboom.java.iSerf.rag.bo.video.AudioSegment;
+import me.karboom.java.iSerf.rag.bo.video.FrameInfo;
+import me.karboom.java.iSerf.rag.bo.video.VideoInfo;
+import me.karboom.java.iSerf.rag.store.IStore;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import net.bramp.ffmpeg.FFmpeg;
@@ -29,63 +31,11 @@ import java.util.function.BiFunction;
 @AllArgsConstructor
 public class Video {
 
-    private final IStructStore<VideoInfo> videoStore;
-    private final IStructStore<FrameInfo> frameStore;
-    private final IStructStore<AudioInfo> audioStore;
+    private final IStore<VideoInfo> videoStore;
+    private final IStore<FrameInfo> frameStore;
+    private final IStore<AudioInfo> audioStore;
     private final IText llm;
     private final IText audioLlm;
-
-    @Data
-    @Builder
-    @AllArgsConstructor
-    @NoArgsConstructor
-    static public class VideoInfo {
-        public String id;
-
-        public LocalDateTime startTime;
-
-        public Integer fps;
-
-    }
-
-    @Data
-    @Builder
-    @AllArgsConstructor
-    @NoArgsConstructor
-    static public class FrameInfo {
-        public String id;
-        public String videoId;
-        public List<String> audioIds;
-
-        public String startMs;
-        public Integer endMs;
-
-        public String fileName;
-
-        public Object llm;
-    }
-
-    @Data
-    @Builder
-    @AllArgsConstructor
-    @NoArgsConstructor
-    static public class AudioInfo {
-        public String id;
-        public String type;
-        public String text;
-        public Integer startMs;
-        public Integer endMs;
-        public List<String> frameIds;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    static class AudioAnalysisResult {
-        public String type;
-        public String text;
-    }
 
     /**
      * 解析视频文件为结构化数据
@@ -315,16 +265,6 @@ public class Video {
 
         log.debug("splitAndTranscribeAudio completed: {} segments", audioInfos.size());
         return audioInfos;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    static class AudioSegment {
-        public Path path;
-        public Integer startMs;
-        public Integer endMs;
     }
 
 

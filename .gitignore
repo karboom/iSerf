@@ -54,3 +54,5 @@ bin/
 ### Mac OS ###
 .DS_Store
 .aider*
+
+src/test/java/**/demo/test/

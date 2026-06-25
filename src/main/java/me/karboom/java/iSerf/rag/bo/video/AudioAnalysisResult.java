@@ -1,4 +1,4 @@
-package me.karboom.java.iSerf.server.BO;
+package me.karboom.java.iSerf.rag.bo.video;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -9,8 +9,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class Message<T> {
-    public String msgId;
-
-    public T body;
+public class AudioAnalysisResult {
+    public String type;
+    public String text;
 }

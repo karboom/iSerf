@@ -4,14 +4,14 @@ import com.knuddels.jtokkit.api.Encoding;
 import com.knuddels.jtokkit.api.EncodingRegistry;
 import com.knuddels.jtokkit.api.EncodingType;
 import com.knuddels.jtokkit.Encodings;
-import lombok.Data;
-import lombok.Builder;
-import lombok.NoArgsConstructor;
-import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.llm.text.OpenAI;
-import me.karboom.java.iSerf.rag.store.IStructStore;
+import me.karboom.java.iSerf.rag.bo.markdown.MarkdownBuildOptions;
+import me.karboom.java.iSerf.rag.bo.markdown.MarkdownBuildResult;
+import me.karboom.java.iSerf.rag.bo.markdown.MarkdownTreeNode;
+import me.karboom.java.iSerf.rag.bo.markdown.MdToTreeTask;
+import me.karboom.java.iSerf.rag.store.IStore;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import tools.jackson.databind.node.ObjectNode;
@@ -33,75 +33,6 @@ import java.util.regex.Pattern;
 @Slf4j
 public class MarkdownTreeBuilder {
 
-    // ==================== 数据类 ====================
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class TreeNode {
-        private String title;
-        private Integer lineNum;
-        private Integer level;
-        private String text;
-        private String nodeId;
-        private Integer textTokenCount;
-        private String summary;
-        private List<TreeNode> nodes;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class BuildResult {
-        private String docName;
-        private String docDescription;
-        private List<TreeNode> structure;
-    }
-
-    @Data
-    @Builder
-    @AllArgsConstructor
-    @NoArgsConstructor
-    public static class BuildOptions {
-        private Boolean ifThinning;
-        private Integer minTokenThreshold;
-        private Boolean ifAddNodeSummary;
-        private Integer summaryTokenThreshold;
-        private Boolean ifAddNodeText;
-        private Boolean ifAddNodeId;
-        private Boolean ifAddDocDescription;
-        private String modelName;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class MdToTreeTask {
-        /**
-         * 任务状态常量类
-         */
-        public static class Status {
-            public static final String PENDING = "PENDING";
-            public static final String RUNNING = "RUNNING";
-            public static final String COMPLETED = "COMPLETED";
-            public static final String FAILED = "FAILED";
-            public static final String CANCELLED = "CANCELLED";
-        }
-
-        private String id;
-        private String mdPath;
-        private String status;
-        private String stage;
-        private Double progress;
-        private String message;
-        private BuildResult result;
-        private String errorMessage;
-        private BuildOptions options;
-    }
-
     // ==================== 正则表达式 ====================
 
     private static final Pattern HEADER_PATTERN = Pattern.compile("^(#{1,6})\\s+(.+)$");
@@ -118,13 +49,13 @@ public class MarkdownTreeBuilder {
 
     // ==================== 任务存储器 ====================
 
-    private final IStructStore<MdToTreeTask> structStore;
+    private final IStore<MdToTreeTask> structStore;
     private final OpenAI openAI;
 
     /**
      * 构造函数，传入结构化存储器实现
      */
-    public MarkdownTreeBuilder(IStructStore<MdToTreeTask> structStore, OpenAI openAI) {
+    public MarkdownTreeBuilder(IStore<MdToTreeTask> structStore, OpenAI openAI) {
         this.structStore = structStore;
         this.openAI = openAI;
     }
@@ -134,7 +65,7 @@ public class MarkdownTreeBuilder {
     /**
      * 主入口：Markdown 转树形结构（带进度追踪）
      */
-    public String mdToTree(String mdPath, BuildOptions options) {
+    public String mdToTree(String mdPath, MarkdownBuildOptions options) {
 
         var taskId = DataUtil.getFlakeId();
         // 如果没有任务 ID，创建临时任务
@@ -166,7 +97,7 @@ public class MarkdownTreeBuilder {
 
             // 提取节点（包含文本内容）
             log.debug("extractNodesFromMarkdown 提取节点...");
-            List<TreeNode> nodes = extractNodesFromMarkdown(markdownContent);
+            List<MarkdownTreeNode> nodes = extractNodesFromMarkdown(markdownContent);
             updateTaskProgress(taskId, MdToTreeTask.Status.RUNNING,
                     "EXTRACTING_NODES", 0.3, "提取节点完成，共 " + nodes.size() + " 个节点");
 
@@ -202,7 +133,7 @@ public class MarkdownTreeBuilder {
 
             // 构建树结构
             log.debug("buildTreeFromNodes 构建树结构...");
-            List<TreeNode> treeStructure = buildTreeFromNodes(nodes);
+            List<MarkdownTreeNode> treeStructure = buildTreeFromNodes(nodes);
             updateTaskProgress(taskId, MdToTreeTask.Status.RUNNING,
                     "BUILDING_TREE", 0.7, "构建树结构完成");
 
@@ -210,7 +141,7 @@ public class MarkdownTreeBuilder {
             // 7. 构建结果
             String docName = Paths.get(mdPath).getFileName().toString().replaceFirst("\\.[^.]+$", "");
 
-            BuildResult result = BuildResult.builder()
+            MarkdownBuildResult result = MarkdownBuildResult.builder()
                     .docName(docName)
                     .structure(treeStructure)
                     .build();
@@ -269,8 +200,8 @@ public class MarkdownTreeBuilder {
     /**
      * 从 Markdown 提取节点列表（包含文本内容和节点 ID）
      */
-    private List<TreeNode> extractNodesFromMarkdown(String content) {
-        List<TreeNode> nodeList = new ArrayList<>();
+    private List<MarkdownTreeNode> extractNodesFromMarkdown(String content) {
+        List<MarkdownTreeNode> nodeList = new ArrayList<>();
         List<String> lines = List.of(content.split("\n", -1));
         boolean inCodeBlock = false;
         int nodeCounter = 1;
@@ -298,7 +229,7 @@ public class MarkdownTreeBuilder {
                     String title = match.group(2).trim();
                     int level = match.group(1).length();
 
-                    TreeNode node = TreeNode.builder()
+                    MarkdownTreeNode node = MarkdownTreeNode.builder()
                             .title(title)
                             .lineNum(lineNum + 1)
                             .level(level)
@@ -311,7 +242,7 @@ public class MarkdownTreeBuilder {
 
         // 第二遍：提取节点文本内容
         for (int i = 0; i < nodeList.size(); i++) {
-            TreeNode node = nodeList.get(i);
+            MarkdownTreeNode node = nodeList.get(i);
             int startLine = node.getLineNum() - 1;
             int endLine = (i + 1 < nodeList.size()) ? nodeList.get(i + 1).getLineNum() - 1 : lines.size();
 
@@ -325,7 +256,7 @@ public class MarkdownTreeBuilder {
     /**
      * 查找所有子节点索引
      */
-    private List<Integer> findAllChildren(int parentIndex, int parentLevel, List<TreeNode> nodes) {
+    private List<Integer> findAllChildren(int parentIndex, int parentLevel, List<MarkdownTreeNode> nodes) {
         List<Integer> childrenIndices = new ArrayList<>();
 
         for (int i = parentIndex + 1; i < nodes.size(); i++) {
@@ -344,10 +275,10 @@ public class MarkdownTreeBuilder {
     /**
      * 更新节点 token 计数（包含子孙节点）
      */
-    private void updateNodeListWithTextTokenCount(List<TreeNode> nodes) {
+    private void updateNodeListWithTextTokenCount(List<MarkdownTreeNode> nodes) {
         // 从后向前遍历，确保子节点先被处理
         for (int i = nodes.size() - 1; i >= 0; i--) {
-            TreeNode currentNode = nodes.get(i);
+            MarkdownTreeNode currentNode = nodes.get(i);
             int currentLevel = currentNode.getLevel();
 
             String nodeText = currentNode.getText() != null ? currentNode.getText() : "";
@@ -368,8 +299,8 @@ public class MarkdownTreeBuilder {
     /**
      * 树剪枝：合并小节点
      */
-    private List<TreeNode> treeThinningForIndex(List<TreeNode> nodes, int minToken) {
-        List<TreeNode> result = new ArrayList<>(nodes);
+    private List<MarkdownTreeNode> treeThinningForIndex(List<MarkdownTreeNode> nodes, int minToken) {
+        List<MarkdownTreeNode> result = new ArrayList<>(nodes);
         List<Integer> nodesToRemove = new ArrayList<>();
 
         for (int i = result.size() - 1; i >= 0; i--) {
@@ -377,7 +308,7 @@ public class MarkdownTreeBuilder {
                 continue;
             }
 
-            TreeNode currentNode = result.get(i);
+            MarkdownTreeNode currentNode = result.get(i);
             int currentLevel = currentNode.getLevel();
             int totalTokens = currentNode.getTextTokenCount() != null ? currentNode.getTextTokenCount() : 0;
 
@@ -425,15 +356,15 @@ public class MarkdownTreeBuilder {
     /**
      * 构建树结构
      */
-    private List<TreeNode> buildTreeFromNodes(List<TreeNode> nodeList) {
+    private List<MarkdownTreeNode> buildTreeFromNodes(List<MarkdownTreeNode> nodeList) {
         if (nodeList.isEmpty()) {
             return new ArrayList<>();
         }
 
-        List<TreeNode> rootNodes = new ArrayList<>();
+        List<MarkdownTreeNode> rootNodes = new ArrayList<>();
         List<Object[]> stack = new ArrayList<>();
 
-        for (TreeNode node : nodeList) {
+        for (MarkdownTreeNode node : nodeList) {
             int currentLevel = node.getLevel();
 
             node.setNodes(new ArrayList<>());
@@ -446,7 +377,7 @@ public class MarkdownTreeBuilder {
             if (stack.isEmpty()) {
                 rootNodes.add(node);
             } else {
-                TreeNode parentNode = (TreeNode) stack.get(stack.size() - 1)[0];
+                MarkdownTreeNode parentNode = (MarkdownTreeNode) stack.get(stack.size() - 1)[0];
                 parentNode.getNodes().add(node);
             }
 
@@ -459,15 +390,15 @@ public class MarkdownTreeBuilder {
     /**
      * 生成节点摘要（使用 LLM，虚拟线程并发）
      */
-    private void generateSummaries(List<TreeNode> nodeList, Integer summaryTokenThreshold, String modelName) {
+    private void generateSummaries(List<MarkdownTreeNode> nodeList, Integer summaryTokenThreshold, String modelName) {
         if (summaryTokenThreshold == null) {
             summaryTokenThreshold = 200;
         }
         int threshold = summaryTokenThreshold;
         
         // 收集需要生成摘要的节点
-        List<TreeNode> nodesToSummarize = new ArrayList<>();
-        for (TreeNode node : nodeList) {
+        List<MarkdownTreeNode> nodesToSummarize = new ArrayList<>();
+        for (MarkdownTreeNode node : nodeList) {
             String text = node.getText() != null ? node.getText() : "";
             int tokenCount = countTokens(text);
             
@@ -487,7 +418,7 @@ public class MarkdownTreeBuilder {
         // 使用虚拟线程并发处理
         CountDownLatch latch = new CountDownLatch(nodesToSummarize.size());
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            for (TreeNode node : nodesToSummarize) {
+            for (MarkdownTreeNode node : nodesToSummarize) {
                 executor.execute(() -> {
                     try {
                         String summary = generateNodeSummary(node, modelName);
@@ -509,7 +440,7 @@ public class MarkdownTreeBuilder {
     /**
      * 使用 LLM 生成单个节点摘要
      */
-    private String generateNodeSummary(TreeNode node, String modelName) {
+    private String generateNodeSummary(MarkdownTreeNode node, String modelName) {
         var prompt = """
                 You are given a part of a document, your task is to generate a description of the partial document about what are main points covered in the partial document.
 
@@ -535,8 +466,8 @@ public class MarkdownTreeBuilder {
     /**
      * 从节点列表中删除指定字段
      */
-    private void removeFieldsFromNodes(List<TreeNode> nodes, String... fieldNames) {
-        for (TreeNode node : nodes) {
+    private void removeFieldsFromNodes(List<MarkdownTreeNode> nodes, String... fieldNames) {
+        for (MarkdownTreeNode node : nodes) {
             for (String fieldName : fieldNames) {
                 switch (fieldName) {
                     case "text" -> node.setText(null);
@@ -550,7 +481,7 @@ public class MarkdownTreeBuilder {
     /**
      * 生成文档描述（使用 LLM）
      */
-    private String generateDocDescription(List<TreeNode> treeStructure, String modelName) {
+    private String generateDocDescription(List<MarkdownTreeNode> treeStructure, String modelName) {
         var cleanStructure = createCleanStructureForDescription(treeStructure);
         
         var prompt = """
@@ -579,7 +510,7 @@ public class MarkdownTreeBuilder {
     /**
      * 创建用于文档描述生成的简洁结构
      */
-    private List<Object> createCleanStructureForDescription(List<TreeNode> treeStructure) {
+    private List<Object> createCleanStructureForDescription(List<MarkdownTreeNode> treeStructure) {
         var result = new ArrayList<Object>();
         for (var node : treeStructure) {
             result.add(createCleanNode(node));
@@ -587,7 +518,7 @@ public class MarkdownTreeBuilder {
         return result;
     }
 
-    private Object createCleanNode(TreeNode node) {
+    private Object createCleanNode(MarkdownTreeNode node) {
         var cleanNode = new java.util.LinkedHashMap<String, Object>();
         cleanNode.put("title", node.getTitle());
         cleanNode.put("nodeId", node.getNodeId());
@@ -619,11 +550,11 @@ public class MarkdownTreeBuilder {
     /**
      * 清理树结构用于输出
      */
-    public List<TreeNode> cleanTreeForOutput(List<TreeNode> treeNodes) {
-        List<TreeNode> cleanedNodes = new ArrayList<>();
+    public List<MarkdownTreeNode> cleanTreeForOutput(List<MarkdownTreeNode> treeNodes) {
+        List<MarkdownTreeNode> cleanedNodes = new ArrayList<>();
 
-        for (TreeNode node : treeNodes) {
-            TreeNode cleanedNode = TreeNode.builder()
+        for (MarkdownTreeNode node : treeNodes) {
+            MarkdownTreeNode cleanedNode = MarkdownTreeNode.builder()
                     .title(node.getTitle())
                     .nodeId(node.getNodeId())
                     .text(node.getText())
@@ -644,19 +575,19 @@ public class MarkdownTreeBuilder {
     /**
      * 将树结构转换为 JSON
      */
-    public ObjectNode treeToJson(List<TreeNode> treeStructure) {
+    public ObjectNode treeToJson(List<MarkdownTreeNode> treeStructure) {
         return JSONUtil.convert(treeStructure);
     }
 
     /**
      * 打印目录结构
      */
-    public void printToc(List<TreeNode> treeStructure) {
+    public void printToc(List<MarkdownTreeNode> treeStructure) {
         printTocRecursive(treeStructure, 0);
     }
 
-    private void printTocRecursive(List<TreeNode> nodes, int depth) {
-        for (TreeNode node : nodes) {
+    private void printTocRecursive(List<MarkdownTreeNode> nodes, int depth) {
+        for (MarkdownTreeNode node : nodes) {
             String indent = "  ".repeat(depth);
             System.out.println(indent + "├── " + node.getTitle() + " (L" + node.getLevel() + ")");
             if (node.getNodes() != null && !node.getNodes().isEmpty()) {

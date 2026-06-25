@@ -1,18 +1,14 @@
 package me.karboom.java.iSerf.server;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
 import me.karboom.java.iSerf.agent.AgentEvent;
 import me.karboom.java.iSerf.persistence.IAgentPersistence;
 import me.karboom.java.iSerf.config.Config;
-import me.karboom.java.iSerf.server.BO.Context;
-import me.karboom.java.iSerf.server.BO.Message;
-import me.karboom.java.iSerf.server.BO.OutMessageBody;
-import me.karboom.java.iSerf.server.BO.TransportClientRecord;
+import me.karboom.java.iSerf.server.bo.Context;
+import me.karboom.java.iSerf.server.bo.Message;
+import me.karboom.java.iSerf.server.bo.OutMessageBody;
+import me.karboom.java.iSerf.server.bo.TransportClientRecord;
 import me.karboom.java.iSerf.server.lifecycle.IAgentLifecycle;
 import me.karboom.java.iSerf.server.lifecycle.ITeamLifecycle;
 import me.karboom.java.iSerf.team.Team;

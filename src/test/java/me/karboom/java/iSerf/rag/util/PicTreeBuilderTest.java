@@ -3,6 +3,11 @@ package me.karboom.java.iSerf.rag.util;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.llm.text.OpenAI;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
+import me.karboom.java.iSerf.rag.bo.pic.PicBuildResult;
+import me.karboom.java.iSerf.rag.bo.pic.PicInfo;
+import me.karboom.java.iSerf.rag.bo.pic.PicInfoContent;
+import me.karboom.java.iSerf.rag.bo.pic.PicInfoTitle;
+import me.karboom.java.iSerf.rag.bo.pic.PicTreeNode;
 import me.karboom.java.iSerf.util.JSONUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,7 +53,7 @@ class PicTreeBuilderTest {
             // 调用 parseImage 方法（通过反射，因为它是 private 方法）
             var parseImageMethod = PicTreeBuilder.class.getDeclaredMethod("parseImage", Path.class);
             parseImageMethod.setAccessible(true);
-            var picInfo = (PicTreeBuilder.PicInfo) parseImageMethod.invoke(picTreeBuilder, imagePath);
+            var picInfo = (PicInfo) parseImageMethod.invoke(picTreeBuilder, imagePath);
 
             // 验证结果
             assertNotNull(picInfo, "PicInfo 不应为空");
@@ -479,15 +484,15 @@ class PicTreeBuilderTest {
                     """;
 
             // 解析 JSON 为 PicInfo
-            var picInfo = JSONUtil.parse(jsonStr, PicTreeBuilder.PicInfo.class);
+            var picInfo = JSONUtil.parse(jsonStr, PicInfo.class);
 
             // 构造 PicInfo 数组
-            var picInfos = new PicTreeBuilder.PicInfo[]{picInfo};
+            var picInfos = new PicInfo[]{picInfo};
 
             // 调用 buildTree 方法（通过反射）
-            var buildTreeMethod = PicTreeBuilder.class.getDeclaredMethod("buildTree", PicTreeBuilder.PicInfo[].class);
+            var buildTreeMethod = PicTreeBuilder.class.getDeclaredMethod("buildTree", PicInfo[].class);
             buildTreeMethod.setAccessible(true);
-            var treeNodes = (ArrayList<PicTreeBuilder.TreeNode>) buildTreeMethod.invoke(picTreeBuilder, (Object) picInfos);
+            var treeNodes = (ArrayList<PicTreeNode>) buildTreeMethod.invoke(picTreeBuilder, (Object) picInfos);
 
             // 验证结果
             assertNotNull(treeNodes, "树形结构不应为空");

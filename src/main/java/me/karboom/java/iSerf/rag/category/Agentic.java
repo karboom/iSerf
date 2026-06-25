@@ -5,8 +5,11 @@ import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.llm.text.OpenAI;
 import io.lettuce.core.RedisClient;
-import me.karboom.java.iSerf.rag.store.IStructStore;
-import me.karboom.java.iSerf.rag.store.RedisStructStore;
+import me.karboom.java.iSerf.rag.bo.agentic.IndexHit;
+import me.karboom.java.iSerf.rag.bo.markdown.MarkdownBuildOptions;
+import me.karboom.java.iSerf.rag.bo.markdown.MdToTreeTask;
+import me.karboom.java.iSerf.rag.store.IStore;
+import me.karboom.java.iSerf.rag.store.MilvusStore;
 import me.karboom.java.iSerf.rag.util.MarkdownTreeBuilder;
 import me.karboom.java.iSerf.util.JSONUtil;
 import tools.jackson.databind.node.ObjectNode;
@@ -23,23 +26,14 @@ import java.util.Map;
 public class Agentic {
     public String dir;
     public RedisClient redisClient;
-    public RedisStructStore<MarkdownTreeBuilder.MdToTreeTask> structStore;
+    public MilvusStore<MdToTreeTask> structStore;
     public MarkdownTreeBuilder builder;
 
-    public Agentic(IStructStore structStore) {
+    public Agentic(IStore structStore) {
         this.builder = new MarkdownTreeBuilder(
             structStore,
             new OpenAI("qwen-plus", Map.of("temperature", 0.0), System.getenv("OPENAI_API_KEY"), System.getenv("OPENAI_BASE_URL"), 3)
         );
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class IndexHit {
-        public String thinking;
-        public List<String> nodeIds;
     }
 
     /**
@@ -52,7 +46,7 @@ public class Agentic {
         log.debug("buildIndex filePath: {}", filePath);
 
 
-        var options = MarkdownTreeBuilder.BuildOptions.builder()
+        var options = MarkdownBuildOptions.builder()
                 .ifThinning(false)
                 .minTokenThreshold(100)
                 .ifAddNodeSummary(true)
@@ -106,10 +100,10 @@ public class Agentic {
                 """.formatted(query, indexContent);
 
         var messages = List.of(AgentMessage.builder().text(prompt).role(AgentMessage.ROLE.USER).type(AgentMessage.TYPE.TEXT).build());
-        var output = llm.query(messages, Agentic.IndexHit.class);
+        var output = llm.query(messages, IndexHit.class);
 
         var content = output.getChoices().get(0).getText();
-        var hitJson = JSONUtil.parse(content, Agentic.IndexHit.class);
+        var hitJson = JSONUtil.parse(content, IndexHit.class);
         var nodeIds = hitJson.nodeIds;
 
         if (nodeIds == null || nodeIds.isEmpty()) {

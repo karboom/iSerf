@@ -6,7 +6,7 @@ import com.hivemq.client.mqtt.mqtt5.Mqtt5Client;
 import com.hivemq.client.mqtt.mqtt5.message.publish.Mqtt5Publish;
 import com.hivemq.embedded.EmbeddedHiveMQ;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.server.BO.Context;
+import me.karboom.java.iSerf.server.bo.Context;
 import me.karboom.java.iSerf.server.Server;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;

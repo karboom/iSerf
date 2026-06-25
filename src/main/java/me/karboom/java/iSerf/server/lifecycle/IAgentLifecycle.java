@@ -1,7 +1,7 @@
 package me.karboom.java.iSerf.server.lifecycle;
 
 import me.karboom.java.iSerf.agent.Agent;
-import me.karboom.java.iSerf.server.BO.Context;
+import me.karboom.java.iSerf.server.bo.Context;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.util.List;

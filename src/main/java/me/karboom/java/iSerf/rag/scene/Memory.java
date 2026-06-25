@@ -1,15 +1,13 @@
 package me.karboom.java.iSerf.rag.scene;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.llm.embedding.IEmbedding;
 import me.karboom.java.iSerf.llm.embedding.Input;
-import me.karboom.java.iSerf.rag.store.IVectorStore;
+import me.karboom.java.iSerf.rag.bo.memory.MemoryExtractResult;
+import me.karboom.java.iSerf.rag.bo.memory.VectorItem;
+import me.karboom.java.iSerf.rag.store.IStore;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 
@@ -26,53 +24,13 @@ import java.util.stream.Collectors;
 @Slf4j
 public class Memory {
 
-    @Data
-    @AllArgsConstructor
-    @NoArgsConstructor
-    @Builder
-    static public class ExtractResult {
-        @Data
-        @AllArgsConstructor
-        @NoArgsConstructor
-        @Builder
-        static public class Item {
-            public String content;
-            public String category;
-            public List<String> tags;
-            public String sourceQuote;
-        }
-
-        public List<Item> items;
-
-    }
-
-    /**
-     * 要存到数据库里面的元素
-     */
-    @Data
-    @AllArgsConstructor
-    @NoArgsConstructor
-    @Builder
-    static public class VectorItem {
-        public String id;
-        public String userId;
-
-        public String content;
-        public String category;
-        public String sourceQuote;
-
-        public List<Float> vector;
-    }
-
-
-
     private final me.karboom.java.iSerf.llm.text.IText llm;
     private final IEmbedding embedding;
-    public IVectorStore<VectorItem> vectorStore;
+    public IStore<VectorItem> vectorStore;
     private String prompt;
 
     @SneakyThrows
-    public Memory(me.karboom.java.iSerf.llm.text.IText llm, IEmbedding embedding, IVectorStore<VectorItem> vectorStore) {
+    public Memory(me.karboom.java.iSerf.llm.text.IText llm, IEmbedding embedding, IStore<VectorItem> vectorStore) {
         this.llm = llm;
         this.embedding = embedding;
         this.vectorStore = vectorStore;
@@ -149,9 +107,9 @@ public class Memory {
                         .build()
         );
 
-        var llmOutput = llm.query(messageList, ExtractResult.class);
+        var llmOutput = llm.query(messageList, MemoryExtractResult.class);
         var text = llmOutput.getChoices().getFirst().getText();
-        var extractResult = JSONUtil.parse(text, ExtractResult.class);
+        var extractResult = JSONUtil.parse(text, MemoryExtractResult.class);
 
         if (extractResult == null || extractResult.items == null || extractResult.items.isEmpty()) {
             log.debug("update: No items extracted");

@@ -6,7 +6,7 @@ import me.karboom.java.iSerf.agent.AgentMetadata;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 
 import me.karboom.java.iSerf.llm.text.OpenAI;
-import me.karboom.java.iSerf.server.BO.Context;
+import me.karboom.java.iSerf.server.bo.Context;
 import me.karboom.java.iSerf.server.lifecycle.IAgentLifecycle;
 import me.karboom.java.iSerf.util.JSONUtil;
 import tools.jackson.databind.node.ObjectNode;

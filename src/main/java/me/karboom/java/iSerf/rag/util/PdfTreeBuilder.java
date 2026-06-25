@@ -4,14 +4,18 @@ import com.knuddels.jtokkit.api.Encoding;
 import com.knuddels.jtokkit.api.EncodingRegistry;
 import com.knuddels.jtokkit.api.EncodingType;
 import com.knuddels.jtokkit.Encodings;
-import lombok.Data;
-import lombok.Builder;
-import lombok.NoArgsConstructor;
-import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.llm.text.OpenAI;
-import me.karboom.java.iSerf.rag.store.IStructStore;
+import me.karboom.java.iSerf.rag.bo.pdf.PdfBuildOptions;
+import me.karboom.java.iSerf.rag.bo.pdf.PdfBuildResult;
+import me.karboom.java.iSerf.rag.bo.pdf.PdfPage;
+import me.karboom.java.iSerf.rag.bo.pdf.PdfPageAnalysis;
+import me.karboom.java.iSerf.rag.bo.pdf.PdfSectionStart;
+import me.karboom.java.iSerf.rag.bo.pdf.PdfToTreeTask;
+import me.karboom.java.iSerf.rag.bo.pdf.PdfTocItem;
+import me.karboom.java.iSerf.rag.bo.pdf.PdfTreeNode;
+import me.karboom.java.iSerf.rag.store.IStore;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import tools.jackson.databind.node.ObjectNode;
@@ -37,136 +41,6 @@ import org.apache.pdfbox.Loader;
 @Slf4j
 public class PdfTreeBuilder {
 
-    // ==================== 数据类 ====================
-
-    /**
-     * PDF 页面分析结果 - LLM 一次性提取的所有信息
-     */
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class PageAnalysis {
-        private String isTocPage;                    // "yes"/"no" - 该页是否为目录页
-        private List<TocItem> tocItems;              // 从该页提取的目录项列表
-        private List<SectionStart> sectionStarts;    // 该页开始的章节列表
-    }
-
-    /**
-     * 目录项
-     */
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class TocItem {
-        private String structure;                    // 层级结构 "1.2.3"
-        private String title;                        // 章节标题
-        private Integer page;                        // 目录中记录的页码 (如果有)
-        private Integer physicalIndex;               // 实际物理页码 (从标签提取)
-    }
-
-    /**
-     * 章节起始信息
-     */
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class SectionStart {
-        private String structure;                    // 层级结构 "1.2.3"
-        private String title;                        // 章节标题
-        private Integer physicalIndex;               // 章节起始物理页码
-    }
-
-    /**
-     * PDF 页面
-     */
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class PdfPage {
-        private Integer physicalIndex;               // 物理页码 X (对应<physical_index_X>)
-        private String content;                      // 页面文本内容
-        private Integer tokenCount;                  // token 数量
-        private PageAnalysis analysis;               // LLM 一次性提取的结果
-    }
-
-    /**
-     * 树节点
-     */
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class TreeNode {
-        private String title;
-        private String structure;                    // 层级结构 "1.2.3"
-        private Integer physicalIndex;               // 起始物理页码
-        private String text;                         // 节点文本内容
-        private String nodeId;
-        private Integer textTokenCount;
-        private String summary;
-        private List<TreeNode> nodes;                // 子节点
-    }
-
-    /**
-     * 构建结果
-     */
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class BuildResult {
-        private String docName;
-        private String docDescription;
-        private List<TreeNode> structure;
-    }
-
-    /**
-     * 构建选项
-     */
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class BuildOptions {
-        private Boolean ifAddNodeSummary;
-        private Integer summaryTokenThreshold;
-        private Boolean ifAddNodeText;
-        private Boolean ifAddNodeId;
-        private Boolean ifAddDocDescription;
-        private String modelName;
-        private Integer tocCheckPageNum;             // 最多检查多少页目录
-    }
-
-    /**
-     * 任务状态
-     */
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class PdfToTreeTask {
-        public static class Status {
-            public static final String PENDING = "PENDING";
-            public static final String RUNNING = "RUNNING";
-            public static final String COMPLETED = "COMPLETED";
-            public static final String FAILED = "FAILED";
-        }
-
-        private String id;
-        private String pdfPath;
-        private String status;
-        private String stage;
-        private Double progress;
-        private String message;
-        private BuildResult result;
-        private String errorMessage;
-        private BuildOptions options;
-    }
-
     // ==================== 正则表达式 ====================
 
     private static final Pattern PHYSICAL_INDEX_PATTERN = Pattern.compile("<physical_index_(\\d+)>");
@@ -182,13 +56,13 @@ public class PdfTreeBuilder {
 
     // ==================== 成员变量 ====================
 
-    private final IStructStore<PdfToTreeTask> structStore;
+    private final IStore<PdfToTreeTask> structStore;
     private final OpenAI openAI;
 
     /**
      * 构造函数，传入结构化存储器实现
      */
-    public PdfTreeBuilder(IStructStore<PdfToTreeTask> structStore, OpenAI openAI) {
+    public PdfTreeBuilder(IStore<PdfToTreeTask> structStore, OpenAI openAI) {
         this.structStore = structStore;
         this.openAI = openAI;
     }
@@ -201,7 +75,7 @@ public class PdfTreeBuilder {
      * @param options 构建选项
      * @return 任务 ID
      */
-    public String pdfToTree(String pdfPath, BuildOptions options) {
+    public String pdfToTree(String pdfPath, PdfBuildOptions options) {
         String taskId = DataUtil.getFlakeId();
         
         PdfToTreeTask task = PdfToTreeTask.builder()
@@ -228,12 +102,12 @@ public class PdfTreeBuilder {
             // 3. 合并目录项
             updateTaskProgress(taskId, PdfToTreeTask.Status.RUNNING,
                     "MERGING_TOC_ITEMS", 0.5, "合并目录项...");
-            List<TocItem> allTocItems = mergeTocItems(pages);
+            List<PdfTocItem> allTocItems = mergeTocItems(pages);
 
             // 4. 收集章节起始信息
             updateTaskProgress(taskId, PdfToTreeTask.Status.RUNNING,
                     "COLLECTING_SECTION_STARTS", 0.6, "收集章节起始信息...");
-            List<SectionStart> allSectionStarts = collectSectionStarts(pages);
+            List<PdfSectionStart> allSectionStarts = collectSectionStarts(pages);
 
             // 5. 匹配物理页码到目录项
             updateTaskProgress(taskId, PdfToTreeTask.Status.RUNNING,
@@ -243,7 +117,7 @@ public class PdfTreeBuilder {
             // 6. 构建树结构
             updateTaskProgress(taskId, PdfToTreeTask.Status.RUNNING,
                     "BUILDING_TREE", 0.8, "构建树结构...");
-            List<TreeNode> treeStructure = buildTreeFromTocItems(allTocItems);
+            List<PdfTreeNode> treeStructure = buildTreeFromTocItems(allTocItems);
 
             // 7. 可选：添加节点摘要
             if (Boolean.TRUE.equals(options.getIfAddNodeSummary())) {
@@ -259,7 +133,7 @@ public class PdfTreeBuilder {
             }
 
             // 9. 可选：生成文档描述
-            BuildResult result = BuildResult.builder()
+            PdfBuildResult result = PdfBuildResult.builder()
                     .docName("pdf_document")
                     .structure(treeStructure)
                     .build();
@@ -358,7 +232,7 @@ public class PdfTreeBuilder {
                 for (PdfPage page : batch) {
                     executor.execute(() -> {
                         try {
-                            PageAnalysis analysis = analyzeSinglePage(page, modelName);
+                            PdfPageAnalysis analysis = analyzeSinglePage(page, modelName);
                             page.setAnalysis(analysis);
                         } finally {
                             latch.countDown();
@@ -378,7 +252,7 @@ public class PdfTreeBuilder {
     /**
      * 使用 LLM 分析单个页面
      */
-    private PageAnalysis analyzeSinglePage(PdfPage page, String modelName) {
+    private PdfPageAnalysis analyzeSinglePage(PdfPage page, String modelName) {
         String prompt = """
                 You are an expert in extracting hierarchical tree structure from documents.
                 You are given a page from a PDF document. Your task is to:
@@ -424,14 +298,14 @@ public class PdfTreeBuilder {
             ObjectNode jsonNode = JSONUtil.parse(responseText);
             
             String isTocPage = jsonNode.path("isTocPage").asText("no");
-            List<TocItem> tocItems = new ArrayList<>();
-            List<SectionStart> sectionStarts = new ArrayList<>();
+            List<PdfTocItem> tocItems = new ArrayList<>();
+            List<PdfSectionStart> sectionStarts = new ArrayList<>();
             
             if (jsonNode.has("tocItems") && !jsonNode.path("tocItems").isMissingNode()) {
                 var tocItemsNode = jsonNode.path("tocItems");
                 if (tocItemsNode.isArray()) {
                     for (var itemNode : tocItemsNode) {
-                        TocItem item = TocItem.builder()
+                        PdfTocItem item = PdfTocItem.builder()
                                 .structure(itemNode.path("structure").isTextual() ? itemNode.path("structure").asText() : null)
                                 .title(itemNode.path("title").asText())
                                 .page(itemNode.path("page").isInt() ? itemNode.path("page").asInt() : null)
@@ -445,7 +319,7 @@ public class PdfTreeBuilder {
                 var sectionStartsNode = jsonNode.path("sectionStarts");
                 if (sectionStartsNode.isArray()) {
                     for (var sectionNode : sectionStartsNode) {
-                        SectionStart section = SectionStart.builder()
+                        PdfSectionStart section = PdfSectionStart.builder()
                                 .structure(sectionNode.path("structure").isTextual() ? sectionNode.path("structure").asText() : null)
                                 .title(sectionNode.path("title").asText())
                                 .physicalIndex(page.getPhysicalIndex())
@@ -455,7 +329,7 @@ public class PdfTreeBuilder {
                 }
             }
             
-            return PageAnalysis.builder()
+            return PdfPageAnalysis.builder()
                     .isTocPage(isTocPage)
                     .tocItems(tocItems)
                     .sectionStarts(sectionStarts)
@@ -463,7 +337,7 @@ public class PdfTreeBuilder {
                     
         } catch (Exception e) {
             log.error("analyzeSinglePage 解析 LLM 响应失败", e);
-            return PageAnalysis.builder()
+            return PdfPageAnalysis.builder()
                     .isTocPage("no")
                     .tocItems(new ArrayList<>())
                     .sectionStarts(new ArrayList<>())
@@ -474,8 +348,8 @@ public class PdfTreeBuilder {
     /**
      * 合并所有目录项
      */
-    private List<TocItem> mergeTocItems(List<PdfPage> pages) {
-        List<TocItem> allTocItems = new ArrayList<>();
+    private List<PdfTocItem> mergeTocItems(List<PdfPage> pages) {
+        List<PdfTocItem> allTocItems = new ArrayList<>();
         
         for (PdfPage page : pages) {
             if (page.getAnalysis() != null && "yes".equals(page.getAnalysis().getIsTocPage())) {
@@ -492,8 +366,8 @@ public class PdfTreeBuilder {
     /**
      * 收集所有章节起始信息
      */
-    private List<SectionStart> collectSectionStarts(List<PdfPage> pages) {
-        List<SectionStart> allSectionStarts = new ArrayList<>();
+    private List<PdfSectionStart> collectSectionStarts(List<PdfPage> pages) {
+        List<PdfSectionStart> allSectionStarts = new ArrayList<>();
         
         for (PdfPage page : pages) {
             if (page.getAnalysis() != null && page.getAnalysis().getSectionStarts() != null) {
@@ -508,17 +382,17 @@ public class PdfTreeBuilder {
     /**
      * 匹配物理页码到目录项
      */
-    private void matchPhysicalIndicesToToc(List<TocItem> tocItems, List<SectionStart> sectionStarts) {
+    private void matchPhysicalIndicesToToc(List<PdfTocItem> tocItems, List<PdfSectionStart> sectionStarts) {
         // 创建 title 到 physicalIndex 的映射
         Map<String, Integer> titleToPhysicalIndex = new HashMap<>();
-        for (SectionStart section : sectionStarts) {
+        for (PdfSectionStart section : sectionStarts) {
             if (section.getTitle() != null && section.getPhysicalIndex() != null) {
                 titleToPhysicalIndex.put(section.getTitle(), section.getPhysicalIndex());
             }
         }
         
         // 为目录项填充 physicalIndex
-        for (TocItem item : tocItems) {
+        for (PdfTocItem item : tocItems) {
             if (item.getTitle() != null && titleToPhysicalIndex.containsKey(item.getTitle())) {
                 item.setPhysicalIndex(titleToPhysicalIndex.get(item.getTitle()));
             } else if (item.getPage() != null) {
@@ -537,16 +411,16 @@ public class PdfTreeBuilder {
     /**
      * 从目录项构建树结构
      */
-    private List<TreeNode> buildTreeFromTocItems(List<TocItem> tocItems) {
+    private List<PdfTreeNode> buildTreeFromTocItems(List<PdfTocItem> tocItems) {
         if (tocItems.isEmpty()) {
             return new ArrayList<>();
         }
         
-        List<TreeNode> rootNodes = new ArrayList<>();
+        List<PdfTreeNode> rootNodes = new ArrayList<>();
         List<Object[]> stack = new ArrayList<>();
         
-        for (TocItem item : tocItems) {
-            TreeNode node = TreeNode.builder()
+        for (PdfTocItem item : tocItems) {
+            PdfTreeNode node = PdfTreeNode.builder()
                     .title(item.getTitle())
                     .structure(item.getStructure())
                     .physicalIndex(item.getPhysicalIndex())
@@ -563,7 +437,7 @@ public class PdfTreeBuilder {
             if (stack.isEmpty()) {
                 rootNodes.add(node);
             } else {
-                TreeNode parentNode = (TreeNode) stack.get(stack.size() - 1)[0];
+                PdfTreeNode parentNode = (PdfTreeNode) stack.get(stack.size() - 1)[0];
                 parentNode.getNodes().add(node);
             }
             
@@ -587,7 +461,7 @@ public class PdfTreeBuilder {
     /**
      * 生成节点摘要（使用 LLM，虚拟线程并发）
      */
-    private void generateSummaries(List<TreeNode> nodeList, List<PdfPage> pages, 
+    private void generateSummaries(List<PdfTreeNode> nodeList, List<PdfPage> pages, 
             Integer summaryTokenThreshold, String modelName) {
         if (summaryTokenThreshold == null) {
             summaryTokenThreshold = 200;
@@ -595,8 +469,8 @@ public class PdfTreeBuilder {
         int threshold = summaryTokenThreshold;
         
         // 收集需要生成摘要的节点
-        List<TreeNode> nodesToSummarize = new ArrayList<>();
-        for (TreeNode node : nodeList) {
+        List<PdfTreeNode> nodesToSummarize = new ArrayList<>();
+        for (PdfTreeNode node : nodeList) {
             String text = getNodeText(node, pages);
             int tokenCount = countTokens(text);
             
@@ -616,7 +490,7 @@ public class PdfTreeBuilder {
         
         CountDownLatch latch = new CountDownLatch(nodesToSummarize.size());
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            for (TreeNode node : nodesToSummarize) {
+            for (PdfTreeNode node : nodesToSummarize) {
                 executor.execute(() -> {
                     try {
                         String summary = generateNodeSummary(node, modelName);
@@ -638,7 +512,7 @@ public class PdfTreeBuilder {
     /**
      * 获取节点文本内容
      */
-    private String getNodeText(TreeNode node, List<PdfPage> pages) {
+    private String getNodeText(PdfTreeNode node, List<PdfPage> pages) {
         if (node.getPhysicalIndex() == null || pages.isEmpty()) {
             return node.getTitle();
         }
@@ -660,7 +534,7 @@ public class PdfTreeBuilder {
     /**
      * 查找下一个有 physicalIndex 的节点
      */
-    private int findNextPhysicalIndex(TreeNode currentNode, List<PdfPage> pages) {
+    private int findNextPhysicalIndex(PdfTreeNode currentNode, List<PdfPage> pages) {
         // 简单实现：返回最后一页
         return pages.stream().mapToInt(PdfPage::getPhysicalIndex).max().orElse(currentNode.getPhysicalIndex());
     }
@@ -668,7 +542,7 @@ public class PdfTreeBuilder {
     /**
      * 使用 LLM 生成单个节点摘要
      */
-    private String generateNodeSummary(TreeNode node, String modelName) {
+    private String generateNodeSummary(PdfTreeNode node, String modelName) {
         String text = node.getText() != null ? node.getText() : "";
         
         var prompt = """
@@ -696,8 +570,8 @@ public class PdfTreeBuilder {
     /**
      * 从节点列表中删除指定字段
      */
-    private void removeFieldsFromNodes(List<TreeNode> nodes, String... fieldNames) {
-        for (TreeNode node : nodes) {
+    private void removeFieldsFromNodes(List<PdfTreeNode> nodes, String... fieldNames) {
+        for (PdfTreeNode node : nodes) {
             for (String fieldName : fieldNames) {
                 switch (fieldName) {
                     case "text" -> node.setText(null);
@@ -714,7 +588,7 @@ public class PdfTreeBuilder {
     /**
      * 生成文档描述（使用 LLM）
      */
-    private String generateDocDescription(List<TreeNode> treeStructure, String modelName) {
+    private String generateDocDescription(List<PdfTreeNode> treeStructure, String modelName) {
         var cleanStructure = createCleanStructureForDescription(treeStructure);
         
         var prompt = """
@@ -743,7 +617,7 @@ public class PdfTreeBuilder {
     /**
      * 创建用于文档描述生成的简洁结构
      */
-    private List<Object> createCleanStructureForDescription(List<TreeNode> treeStructure) {
+    private List<Object> createCleanStructureForDescription(List<PdfTreeNode> treeStructure) {
         var result = new ArrayList<Object>();
         for (var node : treeStructure) {
             result.add(createCleanNode(node));
@@ -751,7 +625,7 @@ public class PdfTreeBuilder {
         return result;
     }
 
-    private Object createCleanNode(TreeNode node) {
+    private Object createCleanNode(PdfTreeNode node) {
         var cleanNode = new java.util.LinkedHashMap<String, Object>();
         cleanNode.put("title", node.getTitle());
         cleanNode.put("structure", node.getStructure());
@@ -786,19 +660,19 @@ public class PdfTreeBuilder {
     /**
      * 将树结构转换为 JSON
      */
-    public ObjectNode treeToJson(List<TreeNode> treeStructure) {
+    public ObjectNode treeToJson(List<PdfTreeNode> treeStructure) {
         return JSONUtil.convert(treeStructure);
     }
 
     /**
      * 打印目录结构
      */
-    public void printToc(List<TreeNode> treeStructure) {
+    public void printToc(List<PdfTreeNode> treeStructure) {
         printTocRecursive(treeStructure, 0);
     }
 
-    private void printTocRecursive(List<TreeNode> nodes, int depth) {
-        for (TreeNode node : nodes) {
+    private void printTocRecursive(List<PdfTreeNode> nodes, int depth) {
+        for (PdfTreeNode node : nodes) {
             String indent = "  ".repeat(depth);
             String info = node.getTitle();
             if (node.getPhysicalIndex() != null) {

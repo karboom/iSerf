@@ -1,4 +1,4 @@
-package me.karboom.java.iSerf.server.BO;
+package me.karboom.java.iSerf.server.bo;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

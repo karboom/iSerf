@@ -1,8 +1,9 @@
 package me.karboom.java.iSerf.rag.category;
 
-import io.lettuce.core.RedisClient;
+import io.milvus.v2.client.ConnectConfig;
+import io.milvus.v2.client.MilvusClientV2;
 import me.karboom.java.iSerf.rag.category.Agentic;
-import me.karboom.java.iSerf.rag.store.RedisStructStore;
+import me.karboom.java.iSerf.rag.store.MilvusStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -21,8 +22,12 @@ public class AgenticTest {
 
     @BeforeEach
     void setUp() {
-        var redisClient = RedisClient.create("redis://localhost");
-        var structStore = new RedisStructStore<>(redisClient, "task:doc:%s"){};
+        var uri = System.getenv("MILVUS_URI");
+        if (uri == null || uri.isEmpty()) {
+            uri = "http://localhost:19530";
+        }
+        var milvusClient = new MilvusClientV2(ConnectConfig.builder().uri(uri).build());
+        var structStore = new MilvusStore<>(milvusClient, "test_doc_task");
         agentic = new Agentic(structStore);
     }
 

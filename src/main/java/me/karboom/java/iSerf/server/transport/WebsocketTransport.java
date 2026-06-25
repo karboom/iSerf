@@ -2,10 +2,9 @@ package me.karboom.java.iSerf.server.transport;
 
 import com.corundumstudio.socketio.*;
 import lombok.extern.slf4j.Slf4j;
-import me.karboom.java.iSerf.server.BO.Context;
+import me.karboom.java.iSerf.server.bo.Context;
 import me.karboom.java.iSerf.server.Server;
 import me.karboom.java.iSerf.util.DataUtil;
-import me.karboom.java.iSerf.util.JSONUtil;
 
 import java.util.Set;
 

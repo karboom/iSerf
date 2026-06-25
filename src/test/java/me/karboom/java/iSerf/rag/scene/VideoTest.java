@@ -1,16 +1,21 @@
 package me.karboom.java.iSerf.rag.scene;
 
-import io.lettuce.core.RedisClient;
+import io.milvus.v2.client.ConnectConfig;
+import io.milvus.v2.client.MilvusClientV2;
 import me.karboom.java.iSerf.llm.text.OpenAI;
-import me.karboom.java.iSerf.rag.store.RedisStructStore;
+import me.karboom.java.iSerf.rag.bo.video.AudioInfo;
+import me.karboom.java.iSerf.rag.bo.video.FrameInfo;
+import me.karboom.java.iSerf.rag.bo.video.VideoInfo;
+import me.karboom.java.iSerf.rag.store.MilvusStore;
 import me.karboom.java.iSerf.rag.util.ImgCompare;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import lombok.*;
 
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 
@@ -34,21 +39,24 @@ public class VideoTest {
         public String scene;
     }
 
-    private RedisClient redisClient;
-    private RedisStructStore<Video.VideoInfo> videoStore;
-    private RedisStructStore<Video.FrameInfo> frameStore;
-    private RedisStructStore<Video.AudioInfo> audioStore;
+    private MilvusClientV2 milvusClient;
+    private MilvusStore<VideoInfo> videoStore;
+    private MilvusStore<FrameInfo> frameStore;
+    private MilvusStore<AudioInfo> audioStore;
     private Video video;
     private OpenAI llm;
     private OpenAI audioLlm;
-    private static final String KEY_PREFIX = "test:video:%s";
 
     @BeforeEach
     void setUp() {
-        redisClient = RedisClient.create("redis://localhost");
-        videoStore = new RedisStructStore<Video.VideoInfo>(redisClient, KEY_PREFIX){};
-        frameStore = new RedisStructStore<Video.FrameInfo>(redisClient, KEY_PREFIX){};
-        audioStore = new RedisStructStore<Video.AudioInfo>(redisClient, KEY_PREFIX){};
+        var uri = System.getenv("MILVUS_URI");
+        if (uri == null || uri.isEmpty()) {
+            uri = "http://localhost:19530";
+        }
+        milvusClient = new MilvusClientV2(ConnectConfig.builder().uri(uri).build());
+        videoStore = new MilvusStore<>(milvusClient, "test_video");
+        frameStore = new MilvusStore<>(milvusClient, "test_frame");
+        audioStore = new MilvusStore<>(milvusClient, "test_audio");
         llm = getLlm();
         audioLlm = getAudioLlm();
         video = new Video(videoStore, frameStore, audioStore, llm, audioLlm);
@@ -56,12 +64,12 @@ public class VideoTest {
 
     @AfterEach
     void tearDown() {
-        if (redisClient != null) {
-            redisClient.shutdown();
+        if (milvusClient != null) {
+            milvusClient.close();
         }
     }
 
-    public OpenAI getLlm() {
+    private OpenAI getLlm() {
         var apiKey = System.getenv("OPENAI_API_KEY");
         var url = System.getenv("OPENAI_API_URL");
 
@@ -76,7 +84,7 @@ public class VideoTest {
         return new OpenAI("qwen-plus", llmConfig, apiKey, url, 1);
     }
 
-    public OpenAI getAudioLlm() {
+    private OpenAI getAudioLlm() {
         var apiKey = System.getenv("OPENAI_API_KEY");
         var url = System.getenv("OPENAI_API_URL");
 
@@ -88,18 +96,23 @@ public class VideoTest {
         llmConfig.put("temperature", 0.7);
         llmConfig.put("top_p", 0.9);
 
-        return new OpenAI("qwen3-omni-flas", llmConfig, apiKey, url, 1);
+        return new OpenAI("qwen3-omni-flash", llmConfig, apiKey, url, 1);
     }
 
-    @Test
-    void testParseVideo() {
-        assertTimeoutPreemptively(Duration.ofMinutes(10), () -> {
-            var testVideoPath = java.nio.file.Paths.get("src/test/resources/rag/scene/video/test-1.mp4");
+    // region parseVideo
+    @Nested
+    class ParseVideo {
+
+        @Test
+        @Timeout(value = 10 * 60)
+        @SneakyThrows
+        void testParseVideo() {
+            var testVideoPath = Path.of("src/test/resources/rag/scene/video/test-1.mp4");
             var outputDir = Path.of(System.getProperty("java.io.tmpdir"), "test_video_parse");
             java.nio.file.Files.createDirectories(outputDir);
 
             var imgCompare = new ImgCompare();
-            video.parseVideo(testVideoPath, outputDir, Integer.valueOf(2), imgCompare::hashCompare, Boolean.TRUE, FrameDesc.class);
+            video.parseVideo(testVideoPath, outputDir, 2, imgCompare::hashCompare, Boolean.TRUE, FrameDesc.class);
 
             var videoInfos = videoStore.getByIds(List.of());
             assertNotNull(videoInfos);
@@ -112,36 +125,69 @@ public class VideoTest {
             var audioInfos = audioStore.getByIds(List.of());
             assertNotNull(audioInfos);
 
-            System.out.println("解析完成：视频数=" + videoInfos.size() + ", 帧数=" + frameInfos.size() + ", 音频数=" + audioInfos.size());
-        });
-    }
-
-    @Test
-    void testDetectSilence() throws Exception {
-        var testAudioPath = Path.of("src/test/resources/rag/scene/video/test-1.wav");
-
-        var silences = assertTimeoutPreemptively(Duration.ofMinutes(2), () -> {
-            return video.detectSilence(testAudioPath);
-        });
-
-        assertNotNull(silences, "静音片段列表不应为空");
-
-        System.out.println("检测到静音片段数量: " + silences.size());
-        for (var i = 0; i < silences.size(); i++) {
-            var segment = silences.get(i);
-            System.out.println("片段 " + (i + 1) + ": 开始=" + segment[0] + "ms, 结束=" + segment[1] + "ms, 持续=" + (segment[1] - segment[0]) + "ms");
+            log.debug(" testParseVideo 解析完成：视频数={}, 帧数={}, 音频数={}", videoInfos.size(), frameInfos.size(), audioInfos.size());
         }
 
-        if (!silences.isEmpty()) {
-            var firstSilence = silences.get(0);
-            assertTrue(firstSilence[0] >= 0, "开始时间应大于等于0");
-            assertTrue(firstSilence[1] > firstSilence[0], "结束时间应大于开始时间");
+        @Test
+        @Timeout(value = 2 * 60)
+        @SneakyThrows
+        void testParseVideo_nonExistentFile() {
+            var testVideoPath = Path.of("src/test/resources/rag/scene/video/non-existent.mp4");
+            var outputDir = Path.of(System.getProperty("java.io.tmpdir"), "test_video_parse_error");
+            java.nio.file.Files.createDirectories(outputDir);
+
+            var imgCompare = new ImgCompare();
+            assertThrows(Exception.class, () ->
+                    video.parseVideo(testVideoPath, outputDir, 2, imgCompare::hashCompare, Boolean.TRUE, FrameDesc.class)
+            );
         }
     }
+    // endregion
 
-    @Test
-    void testParseAudio() {
-        assertTimeoutPreemptively(Duration.ofMinutes(10), () -> {
+    // region detectSilence
+    @Nested
+    class DetectSilence {
+
+        @Test
+        @Timeout(value = 2 * 60)
+        void testDetectSilence() {
+            var testAudioPath = Path.of("src/test/resources/rag/scene/video/test-1.wav");
+
+            var silences = video.detectSilence(testAudioPath);
+
+            assertNotNull(silences, "静音片段列表不应为空");
+
+            log.debug(" testDetectSilence 检测到静音片段数量: {}", silences.size());
+            for (var i = 0; i < silences.size(); i++) {
+                var segment = silences.get(i);
+                log.debug(" testDetectSilence 片段 {}: 开始={}ms, 结束={}ms, 持续={}ms", i + 1, segment[0], segment[1], segment[1] - segment[0]);
+            }
+
+            if (!silences.isEmpty()) {
+                var firstSilence = silences.get(0);
+                assertTrue(firstSilence[0] >= 0, "开始时间应大于等于0");
+                assertTrue(firstSilence[1] > firstSilence[0], "结束时间应大于开始时间");
+            }
+        }
+
+        @Test
+        @Timeout(value = 2 * 60)
+        void testDetectSilence_nonExistentFile() {
+            var testAudioPath = Path.of("src/test/resources/rag/scene/video/non-existent.wav");
+
+            assertThrows(Exception.class, () -> video.detectSilence(testAudioPath));
+        }
+    }
+    // endregion
+
+    // region parseAudio
+    @Nested
+    class ParseAudio {
+
+        @Test
+        @Timeout(value = 10 * 60)
+        @SneakyThrows
+        void testParseAudio() {
             var testVideoPath = Path.of("src/test/resources/rag/scene/video/test-1.mp4");
             var outputDir = Path.of(System.getProperty("java.io.tmpdir"), "test_parse_audio_" + System.currentTimeMillis());
             java.nio.file.Files.createDirectories(outputDir);
@@ -159,11 +205,20 @@ public class VideoTest {
             assertNotNull(audioInfo.getEndMs(), "结束时间不应为空");
             assertNotNull(audioInfo.getFrameIds(), "帧 ID 列表不应为空");
 
-            log.debug("testSplitAndTranscribeAudio audioId: {}, type: {}, text: {}, startMs: {}, endMs: {}", 
+            log.debug(" testParseAudio audioId: {}, type: {}, text: {}, startMs: {}, endMs: {}",
                     audioInfo.getId(), audioInfo.getType(), audioInfo.getText(), audioInfo.getStartMs(), audioInfo.getEndMs());
+        }
 
-            System.out.println("音频转录完成：音频数=" + audioInfos.size());
-            System.out.println("第一个音频片段：id=" + audioInfo.getId() + ", type=" + audioInfo.getType() + ", text=" + audioInfo.getText());
-        });
+        @Test
+        @Timeout(value = 2 * 60)
+        @SneakyThrows
+        void testParseAudio_nonExistentFile() {
+            var testVideoPath = Path.of("src/test/resources/rag/scene/video/non-existent.mp4");
+            var outputDir = Path.of(System.getProperty("java.io.tmpdir"), "test_parse_audio_error");
+            java.nio.file.Files.createDirectories(outputDir);
+
+            assertThrows(Exception.class, () -> video.parseAudio(testVideoPath, outputDir));
+        }
     }
+    // endregion
 }

@@ -5,8 +5,9 @@ import io.milvus.v2.client.MilvusClientV2;
 import io.milvus.v2.service.collection.request.CreateCollectionReq;
 import me.karboom.java.iSerf.llm.embedding.Dashscope;
 import me.karboom.java.iSerf.llm.text.OpenAI;
+import me.karboom.java.iSerf.rag.bo.memory.VectorItem;
 import me.karboom.java.iSerf.rag.scene.Memory;
-import me.karboom.java.iSerf.rag.store.MilvusVectorStore;
+import me.karboom.java.iSerf.rag.store.MilvusStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -54,7 +55,7 @@ public class MemoryTest {
         var embedding = new Dashscope("text-embedding-v3", new HashMap<>(), apiKey);
 
         // 初始化 VectorStore
-        var vectorStore = new MilvusVectorStore<Memory.VectorItem>(milvusClient, COLLECTION_NAME){};
+        var vectorStore = new MilvusStore<VectorItem>(milvusClient, COLLECTION_NAME){};
 
 
         CreateCollectionReq createCollectionReq = CreateCollectionReq.builder()

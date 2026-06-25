@@ -1,6 +1,6 @@
 package me.karboom.java.iSerf.server.lifecycle;
 
-import me.karboom.java.iSerf.server.BO.Context;
+import me.karboom.java.iSerf.server.bo.Context;
 import me.karboom.java.iSerf.team.Team;
 import tools.jackson.databind.node.ObjectNode;
 

@@ -1,9 +1,14 @@
 package me.karboom.java.iSerf.rag.util;
 
-import lombok.*;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.llm.text.OpenAI;
+import me.karboom.java.iSerf.rag.bo.pic.PicBuildResult;
+import me.karboom.java.iSerf.rag.bo.pic.PicInfo;
+import me.karboom.java.iSerf.rag.bo.pic.PicInfoContent;
+import me.karboom.java.iSerf.rag.bo.pic.PicInfoTitle;
+import me.karboom.java.iSerf.rag.bo.pic.PicTreeNode;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import org.apache.pdfbox.Loader;
@@ -32,61 +37,6 @@ public class PicTreeBuilder {
 
     public PicTreeBuilder(OpenAI openAI) {
         this.openAI = openAI;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class TreeNode {
-        public String title;
-        public Integer level;
-        public String text;
-        public String nodeId;
-        public String summary;
-        public List<TreeNode> nodes;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class BuildResult {
-        public String docName;
-        public String docDescription;
-        public List<TreeNode> structure;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class PicInfo {
-        public Boolean isToc;
-
-        public List<PicInfoTitle> titles;
-
-        public List<PicInfoContent> contents;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class PicInfoTitle {
-        public String title;
-        public String fatherTitle;
-//        public String grandFatherTitle;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class PicInfoContent {
-        public String title;
-        public String text;
-        public String summary;
     }
 
     // ==================== 正则表达式 ====================
@@ -144,9 +94,9 @@ public class PicTreeBuilder {
     /**
      * 解析图片为树形结构
      * 1. 每一页图片通过 llm.query 转为 PicInfo （提示词要求：1. 角标文本用xxx[xxx]形式 2.内嵌图片不开标题 3.无标题就认为标题是 无 4.左右分栏的情况下注意解析顺序）
-     * 2. 通过 PicInfo 构建 TreeNode
+     * 2. 通过 PicInfo 构建 PicTreeNode
      */
-    public BuildResult parsePics(Path dir) {
+    public PicBuildResult parsePics(Path dir) {
         log.debug("parsePics 开始解析目录：{}", dir);
 
         try {
@@ -199,7 +149,7 @@ public class PicTreeBuilder {
 
             // 构建结果
             var docName = dir.getFileName() != null ? dir.getFileName().toString() : dir.toString();
-            var result = BuildResult.builder()
+            var result = PicBuildResult.builder()
                     .docName(docName)
                     .structure(treeNodes)
                     .build();
@@ -296,7 +246,7 @@ public class PicTreeBuilder {
      * 4. level字段最后根据树形结构生成
      */
     @SneakyThrows
-    private List<TreeNode> buildTree(PicInfo[] picInfos) {
+    private List<PicTreeNode> buildTree(PicInfo[] picInfos) {
         log.debug("buildTree 开始构建树形结构，picInfos 数量：{}", picInfos.length);
 
         if (picInfos == null || picInfos.length == 0) {
@@ -349,10 +299,10 @@ public class PicTreeBuilder {
         }
 
         // 步骤 2: 构建标题树
-        // 使用 Map 来存储 title -> TreeNode 的映射
-        var titleToNodeMap = new java.util.HashMap<String, TreeNode>();
+        // 使用 Map 来存储 title -> PicTreeNode 的映射
+        var titleToNodeMap = new java.util.HashMap<String, PicTreeNode>();
         // 存储根节点列表
-        var rootNodes = new ArrayList<TreeNode>();
+        var rootNodes = new ArrayList<PicTreeNode>();
 
         // 检测是否存在目录页
         var hasToc = false;
@@ -382,7 +332,7 @@ public class PicTreeBuilder {
                         }
 
                         // 创建新节点
-                        var newNode = TreeNode.builder()
+                        var newNode = PicTreeNode.builder()
                                 .title(title)
                                 .nodes(new ArrayList<>())
                                 .nodeId(DataUtil.getFlakeId())
@@ -398,7 +348,7 @@ public class PicTreeBuilder {
                             var fatherNode = titleToNodeMap.get(fatherTitle);
                             if (fatherNode == null) {
                                 // 父节点不存在，创建虚拟根节点
-                                fatherNode = TreeNode.builder()
+                                fatherNode = PicTreeNode.builder()
                                         .title(fatherTitle)
                                         .nodes(new ArrayList<>())
                                         .nodeId(DataUtil.getFlakeId())
@@ -413,7 +363,7 @@ public class PicTreeBuilder {
             }
         } else {
             // 没有目录页：遍历所有 info 的 content 生成树节点（每个 title 作为一个节点）
-            TreeNode lastNode = null;
+            PicTreeNode lastNode = null;
             for (var picInfo : picInfos) {
                 if (picInfo.getContents() != null) {
                     for (var content : picInfo.getContents()) {
@@ -428,7 +378,7 @@ public class PicTreeBuilder {
                         }
 
                         // 创建新节点
-                        var newNode = TreeNode.builder()
+                        var newNode = PicTreeNode.builder()
                                 .title(title)
                                 .nodes(new ArrayList<>())
                                 .nodeId(DataUtil.getFlakeId())
@@ -452,12 +402,12 @@ public class PicTreeBuilder {
         // 步骤 3: 关联内容到树节点
         // 遍历所有 info 的 content，根据 title 搜索树节点，如果匹配到复制内容到树节点
         // 如果未匹配，追随它的上一个 content 或者上一个 info 的最后一个 content 对应的树节点，添加为兄弟树节点
-        TreeNode lastMatchedNode = null;
+        PicTreeNode lastMatchedNode = null;
         for (var picInfo : picInfos) {
             if (!Boolean.TRUE.equals(picInfo.getIsToc()) && picInfo.getContents() != null) {
                 for (var content : picInfo.getContents()) {
                     var title = content.getTitle();
-                    TreeNode targetNode = null;
+                    PicTreeNode targetNode = null;
                     
                     // 首先尝试根据 title 查找树节点
                     if (title != null && !"无".equals(title)) {
@@ -467,7 +417,7 @@ public class PicTreeBuilder {
                     // 如果未匹配到，追随上一个匹配的树节点，添加为兄弟节点
                     if (targetNode == null && lastMatchedNode != null) {
                         // 创建新节点作为 lastMatchedNode 的兄弟节点
-                        targetNode = TreeNode.builder()
+                        targetNode = PicTreeNode.builder()
                                 .title(title)
                                 .text(content.getText())
                                 .summary(content.getSummary())
@@ -508,7 +458,7 @@ public class PicTreeBuilder {
     /**
      * 递归设置 level 字段
      */
-    private void setLevelRecursive(List<TreeNode> nodes, int level) {
+    private void setLevelRecursive(List<PicTreeNode> nodes, int level) {
         if (nodes == null) {
             return;
         }
@@ -523,7 +473,7 @@ public class PicTreeBuilder {
     /**
      * 查找节点在树中的父节点
      */
-    private TreeNode findParentNode(List<TreeNode> rootNodes, TreeNode targetNode) {
+    private PicTreeNode findParentNode(List<PicTreeNode> rootNodes, PicTreeNode targetNode) {
         for (var node : rootNodes) {
             if (node == targetNode) {
                 return null; // 目标是根节点
@@ -548,11 +498,11 @@ public class PicTreeBuilder {
     /**
      * 打印目录结构
      */
-    public void printToc(List<TreeNode> treeStructure) {
+    public void printToc(List<PicTreeNode> treeStructure) {
         printTocRecursive(treeStructure, 0);
     }
 
-    private void printTocRecursive(List<TreeNode> nodes, int depth) {
+    private void printTocRecursive(List<PicTreeNode> nodes, int depth) {
         for (var node : nodes) {
             var indent = "  ".repeat(depth);
             System.out.println(indent + "├── " + node.getTitle() + " (L" + node.getLevel() + ")");
