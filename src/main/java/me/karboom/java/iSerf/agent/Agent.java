@@ -331,7 +331,18 @@ public class Agent {
         return broadcast.subscribe(consumer);
     }
 
-    private Mono<Tuple3<AgentMessage, List<Output>, AgentMessage>> fluxHandle(Flux<Output> flux, Class format, AgentEvent event) {
+    /**
+     * 处理 LLM 流式响应，纯累积 + 通过 observer 通知生命周期事件
+     *
+     * @param flux     LLM 流式输出
+     * @param format   返回格式（可选）
+     * @param event    触发事件
+     * @param observer 流生命周期观察者，决定 emit / 记忆存储等副作用
+     * @return (最终文本消息, 工具调用列表, 最终文本消息) 的三元组
+     */
+    private Mono<Tuple3<AgentMessage, List<Output>, AgentMessage>> fluxHandle(Flux<Output> flux, Class format, AgentEvent event, StreamObserver observer) {
+        observer.onStart();
+
         return flux
                 .publishOn(Schedulers.fromExecutor(this.eventPool))
                 .reduce(Tuples.of(
@@ -343,7 +354,6 @@ public class Agent {
                     var toolCall = acc.getT2();
                     var contentItem = acc.getT3();
 
-                    var usage = chunk.getUsage();
                     var choices = chunk.getChoices();
 
                     if (choices != null) {
@@ -354,67 +364,43 @@ public class Agent {
                         var content = delta.getText();
 
                         if (thinking != null && !thinking.toString().equals("null")) {
-                            thinkingItem.setId(UUID.randomUUID().toString()); // 为thinkingItem设置ID
+                            thinkingItem.setId(UUID.randomUUID().toString());
                             thinkingItem.setText(thinkingItem.getText() + thinking);
-
-                            var thinkingSegment = AgentMessage.builder().role(AgentMessage.ROLE.ASSISTANT).type(AgentMessage.TYPE.THINKING).text(thinking.toString()).isSegment(1).build();
-
-                            sink.tryEmitNext(thinkingSegment);
                         } else if (toolCalls != null) {
-                            // Todo toolcall返回不及预期的时候，有可能先出问题再出toolCall
-                            // Todo toolcall可能被循环触发
                             if (thinkingItem.getId() != null) {
-                                // thinking阶段结束，更新thinkingItem为非片段并发送
-                                sink.tryEmitNext(thinkingItem);
-                                memoryManager.add(thinkingItem);
-                                persistence.addMemory(this);
+                                observer.onThinking(thinkingItem);
+                                thinkingItem.setId(null);
                             }
-                            // 将当前chunk添加到toolCall列表中用于后续处理
                             toolCall.add(chunk);
+                            observer.onToolCalls(toolCall);
                         } else if (content != null) {
-
                             if (thinkingItem.getId() != null) {
-                                // thinking阶段结束，更新thinkingItem为非片段并发送
-                                sink.tryEmitNext(thinkingItem);
-                                memoryManager.add(thinkingItem);
-                                persistence.addMemory(this);
+                                observer.onThinking(thinkingItem);
                                 thinkingItem.setId(null);
                             }
 
-                            var contentText = content;
-
                             contentItem.setId(UUID.randomUUID().toString());
-                            contentItem.setText(contentItem.getText() + contentText);
-
-
+                            contentItem.setText(contentItem.getText() + content);
                             if (format == null) {
-                                var contentItemSegment = AgentMessage.builder().id(UUID.randomUUID().toString()).role(contentItem.getRole()).type(AgentMessage.TYPE.TEXT).text(contentText).isSegment(1).build();
-                                sink.tryEmitNext(contentItemSegment);
+                                observer.onContentChunk(content.toString());
                             }
-                        } else {
-                            // 其他情况，可能需要处理其他类型的响应
-                            // 目前暂不处理
                         }
-
-                    } else if (usage != null) {
+                    } else if (chunk.getUsage() != null) {
                         if (contentItem.getId() != null) {
+                            var usage = chunk.getUsage();
                             var usageBuilder = AgentMessage.Usage.builder()
                                     .total((int) usage.getTotalTokens())
                                     .promptTotal((int) usage.getPromptTokens())
                                     .completionTotal((int) usage.getCompletionTokens())
                                     .completionThinking(usage.getThinkingTokens())
                                     .build();
-
                             contentItem.setUsage(usageBuilder);
-
                             if (format != null) {
                                 contentItem.setFormatted(JSONUtil.parse(contentItem.getText(), format));
                             }
-                            sink.tryEmitNext(contentItem);
-                            memoryManager.add(contentItem);
+                            observer.onContent(contentItem);
+                            contentItem.setId(null);
                         }
-                    } else {
-
                     }
 
                     return acc;
@@ -463,6 +449,105 @@ public class Agent {
 
         return builder.build();
     }
+
+    /**
+     * 即时调用，不更新记忆，支持并发
+     * 用于团队任务等场景，每次调用独立上下文，不影响 Agent 自身记忆
+     * 支持工具调用和多轮 LLM 对话
+     *
+     * @param message 用户消息
+     * @param format  返回格式（可选）
+     * @return LLM 最终回复
+     */
+    public AgentMessage invoke(AgentMessage message, Class<?> format) {
+        if (message.getText() == null || message.getText().isBlank()) {
+            throw ErrorUtil.make("invoke message text is empty");
+        }
+
+        log.debug("invoke message text: %s".formatted(message.getText()));
+
+        var systemMessage = AgentMessage.builder()
+                .role(AgentMessage.ROLE.SYSTEM)
+                .text(this.memoryManager.getSystemPrompt())
+                .build();
+
+        var messages = new ArrayList<>(List.of(systemMessage, message));
+
+        // 循环处理工具调用的多轮对话
+        while (true) {
+            var flux = llmProvider.get(toolHandler.getTools(), format, null).send(messages, format, toolHandler.getTools());
+            var result = fluxHandle(flux, format, null, StreamObserver.SILENT).block();
+
+            var toolCallHolder = result.getT2();
+
+            if (toolCallHolder.isEmpty()) {
+                // 最终文本结果
+                return result.getT3();
+            }
+
+            var calls = toolHandler.merge(toolCallHolder);
+            var callResult = toolHandler.invoke(this, calls.getFirst());
+
+            // 按结果类型分组处理
+            var directCalls = new ArrayList<AgentMessage.ToolCall>();
+            var errorCalls = new ArrayList<AgentMessage.ToolCall>();
+            var llmCalls = new ArrayList<AgentMessage.ToolCall>();
+
+            for (var call : callResult) {
+                if (call.result.getDirect() != null) {
+                    directCalls.add(call);
+                } else if (call.result.getError() != null) {
+                    errorCalls.add(call);
+                } else if (call.result.getLlm() != null) {
+                    llmCalls.add(call);
+                }
+            }
+
+            // 处理DIRECT类型：将工具结果追加到本地消息列表，继续下一轮
+            if (!directCalls.isEmpty()) {
+                for (var call : directCalls) {
+                    var toolMessage = AgentMessage.builder()
+                            .id(UUID.randomUUID().toString())
+                            .role(AgentMessage.ROLE.TOOL)
+                            .type(AgentMessage.TYPE.TEXT)
+                            .text(call.getResult().getDirect().toString())
+                            .build();
+                    messages.add(toolMessage);
+                }
+                continue;
+            }
+
+            // 处理ERROR类型：直接返回错误
+            if (!errorCalls.isEmpty()) {
+                log.error("invoke tool call error");
+                return AgentMessage.builder()
+                        .id(UUID.randomUUID().toString())
+                        .role(AgentMessage.ROLE.ASSISTANT)
+                        .type(AgentMessage.TYPE.ERROR)
+                        .text("工具调用出错，请稍后重试")
+                        .isSegment(0)
+                        .build();
+            }
+
+            // 处理LLM类型：将工具调用和结果追加到本地消息列表，继续下一轮
+            if (!llmCalls.isEmpty()) {
+                var messageInvoke = AgentMessage.builder()
+                        .role(AgentMessage.ROLE.ASSISTANT)
+                        .type(AgentMessage.TYPE.TEXT)
+                        .toolCalls(llmCalls)
+                        .build();
+
+                var messageRes = AgentMessage.builder()
+                        .role(AgentMessage.ROLE.TOOL)
+                        .toolCalls(llmCalls)
+                        .build();
+
+                messages.add(messageInvoke);
+                messages.add(messageRes);
+            }
+        }
+    }
+
     // endregion
 
 
@@ -498,7 +583,37 @@ public class Agent {
 
         var flux = llmProvider.get(toolHandler.getTools(), format, null).send(memoryManager.getMessagesForLLM(), format, toolHandler.getTools());
 
-        fluxHandle(flux, format, event)
+        var observer = new StreamObserver() {
+            @Override
+            public void onThinking(AgentMessage message) {
+                sink.tryEmitNext(message);
+                memoryManager.add(message);
+                persistence.addMemory(Agent.this);
+            }
+
+            @Override
+            public void onToolCalls(List<Output> toolCallChunks) {
+            }
+
+            @Override
+            public void onContentChunk(String delta) {
+                sink.tryEmitNext(AgentMessage.builder()
+                        .id(UUID.randomUUID().toString())
+                        .role(AgentMessage.ROLE.ASSISTANT)
+                        .type(AgentMessage.TYPE.TEXT)
+                        .text(delta)
+                        .isSegment(1)
+                        .build());
+            }
+
+            @Override
+            public void onContent(AgentMessage message) {
+                sink.tryEmitNext(message);
+                memoryManager.add(message);
+            }
+        };
+
+        fluxHandle(flux, format, event, observer)
                 .flatMapMany(holder -> {
                     var toolCallHolder = holder.getT2();
 
@@ -579,7 +694,7 @@ public class Agent {
                             // Todo 这里的 tools 参数是否可以去掉，节省 token
                             var newFlux = llmProvider.get(toolHandler.getTools(), null, null).send(memoryManager.getMessagesForLLM(), null, toolHandler.getTools());
 
-                            return fluxHandle(newFlux, format, event).thenMany(Flux.empty());
+                            return fluxHandle(newFlux, format, event, observer).thenMany(Flux.empty());
                         } else {
                             return Flux.empty();
                         }
@@ -642,6 +757,8 @@ public class Agent {
                 : null;
         this.send(originalMessage, format);
     }
+
+
 
     private void loadFromPersistence() {
         var snapshot = persistence.load(this.metadata);
