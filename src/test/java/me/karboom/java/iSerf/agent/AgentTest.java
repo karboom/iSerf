@@ -573,4 +573,82 @@ class AgentTest {
             System.out.println("call 返回结果: " + result.getText());
         });
     }
+
+    // region ========== retry / redoFrom ==========
+
+    /**
+     * 测试 retry - 无消息时抛出异常
+     */
+    @Test
+    void testRetryNoMessages() {
+        var agent = createTestAgent("test-retry-empty", "");
+        assertThrows(Exception.class, () -> agent.retry(), "无消息时 retry 应抛出异常");
+    }
+
+    /**
+     * 测试 retry - 验证方法可以正常调用
+     */
+    @Test
+    void testRetryMethodCallable() {
+        var agent = createTestAgent("test-retry-event", "");
+        agent.run();
+
+        // 手动添加一些消息到 memory
+        agent.getMemoryManager().add(AgentMessage.builder()
+                .role(AgentMessage.ROLE.USER)
+                .text("测试消息")
+                .eventId("test-event-id")
+                .build());
+
+        // 调用 retry 不应抛出异常
+        assertDoesNotThrow(() -> agent.retry(), "retry 不应抛出异常");
+
+        agent.stop();
+    }
+
+    /**
+     * 测试 redoFrom - 验证方法可以正常调用
+     */
+    @Test
+    void testRedoFromMethodCallable() {
+        var agent = createTestAgent("test-redo-event", "");
+        agent.run();
+
+        // 调用 redoFrom 不应抛出异常（事件会被处理，但找不到目标会报错）
+        assertDoesNotThrow(() -> agent.redoFrom("specific-event-id"), "redoFrom 不应抛出异常");
+
+        agent.stop();
+    }
+
+    /**
+     * 测试 redoFrom - 不存在的 eventId 抛出异常
+     */
+    @Test
+    void testRedoFromNonExistentEventId() {
+        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+            var agent = createTestAgent("test-redo-nonexistent", "");
+            agent.run();
+
+            var errorReceived = new AtomicInteger(0);
+            agent.subscribe(item -> {
+                if (item.getType().equals(AgentMessage.TYPE.ERROR)) {
+                    errorReceived.incrementAndGet();
+                }
+            });
+
+            // 使用不存在的 eventId
+            agent.redoFrom("non-existent-event-id");
+
+            // 等待错误处理
+            while (errorReceived.get() < 1) {
+                Thread.sleep(100);
+            }
+
+            assertEquals(1, errorReceived.get(), "应收到错误消息");
+
+            agent.stop();
+        });
+    }
+
+    // endregion
 }

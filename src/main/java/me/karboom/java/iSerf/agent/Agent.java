@@ -36,7 +36,6 @@ import java.util.function.Consumer;
 
 /**
  * Agent 基类
- * Todo 增加一个retry方法？方便直接重试上一条
  * Todo 文件读取改异步
  */
 @Slf4j
@@ -169,6 +168,10 @@ public class Agent {
                             // 记忆压缩后全量刷盘
                             persistence.syncMemory(this);
                         }
+
+                        case AgentEvent.Type.REDO -> {
+                            handleRedo(event);
+                        }
                     }
 
                 } catch (Exception e) {
@@ -237,7 +240,7 @@ public class Agent {
         }
 
         var type = event.getType();
-        var validTypes = Set.of(AgentEvent.Type.ORGANIZE_MEMORY, AgentEvent.Type.MESSAGE);
+        var validTypes = Set.of(AgentEvent.Type.ORGANIZE_MEMORY, AgentEvent.Type.MESSAGE, AgentEvent.Type.REDO);
         if (!validTypes.contains(type)) {
             throw ErrorUtil.make("trigger invalid event type: %s".formatted(type));
         }
@@ -252,6 +255,12 @@ public class Agent {
             message.setRole(AgentMessage.ROLE.USER);
             message.setId(DataUtil.getFlakeId());
             message.setIsForgotten(0);
+        }
+
+        if (AgentEvent.Type.REDO.equals(type)) {
+            if (event.getRedoEventId() == null) {
+                throw ErrorUtil.make("trigger REDO event missing redoEventId field");
+            }
         }
 
         event.setId(DataUtil.getFlakeId());
@@ -284,6 +293,37 @@ public class Agent {
 
     public void send(String message) {
         send(message, null);
+    }
+
+    /**
+     * 重试最后一条用户消息
+     * 将 REDO 事件放入队列，由 event loop 串行处理
+     */
+    public void retry() {
+        var lastUserMessage = memoryManager.getMessagesRaw().stream()
+                .filter(msg -> AgentMessage.ROLE.USER.equals(msg.getRole()))
+                .reduce((first, second) -> second)
+                .orElse(null);
+
+        if (lastUserMessage == null) {
+            throw ErrorUtil.make("retry no user message found");
+        }
+
+        redoFrom(lastUserMessage.getEventId());
+    }
+
+    /**
+     * 从指定 eventId 开始重做
+     * 删除该轮及之后的所有记忆，重新触发用户消息
+     *
+     * @param eventId 起始事件的 ID
+     */
+    public void redoFrom(String eventId) {
+        this.trigger(AgentEvent.builder()
+                .priority(1)
+                .type(AgentEvent.Type.REDO)
+                .redoEventId(eventId)
+                .build());
     }
 
     // Todo 支持3个入参的版本
@@ -554,6 +594,53 @@ public class Agent {
         persistence.addMemory(this);
 
         memoryManager.checkAndOrganize(this);
+    }
+
+    /**
+     * 处理重做事件
+     * 1. 找到目标 USER 消息
+     * 2. 删除该轮及之后的所有记忆
+     * 3. 全量刷盘
+     * 4. 重新触发用户消息
+     */
+    private void handleRedo(AgentEvent event) {
+        var targetEventId = event.getRedoEventId();
+        var messages = memoryManager.getMessagesRaw();
+
+        // 找到目标 USER 消息
+        var targetMessage = messages.stream()
+                .filter(msg -> targetEventId.equals(msg.getEventId())
+                        && AgentMessage.ROLE.USER.equals(msg.getRole()))
+                .findFirst()
+                .orElse(null);
+
+        if (targetMessage == null) {
+            throw ErrorUtil.make("redo target event not found: %s".formatted(targetEventId));
+        }
+
+        log.debug("handleRedo targetEventId: %s".formatted(targetEventId));
+
+        // 深拷贝原始消息
+        var originalMessage = AgentMessage.builder()
+                .type(targetMessage.getType())
+                .text(targetMessage.getText())
+                .files(targetMessage.getFiles())
+                .video(targetMessage.getVideo())
+                .audio(targetMessage.getAudio())
+                .formatted(targetMessage.getFormatted())
+                .build();
+
+        // 删除该轮及之后的所有记忆
+        memoryManager.removeFromEventId(targetEventId);
+
+        // 全量刷盘
+        persistence.syncMemory(this);
+
+        // 重新触发
+        var format = originalMessage.getFormatted() != null
+                ? originalMessage.getFormatted().getClass()
+                : null;
+        this.send(originalMessage, format);
     }
 
     private void loadFromPersistence() {

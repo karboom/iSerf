@@ -41,6 +41,23 @@ public class MemoryManager {
         messages.removeIf(msg -> eventId.equals(msg.getEventId()));
     }
 
+    /**
+     * 删除指定 eventId 及之后的所有消息
+     *
+     * @param eventId 起始事件的 ID
+     */
+    public void removeFromEventId(String eventId) {
+        var index = messages.stream()
+                .filter(msg -> eventId.equals(msg.getEventId()))
+                .findFirst()
+                .map(messages::indexOf)
+                .orElse(-1);
+
+        if (index >= 0) {
+            messages.subList(index, messages.size()).clear();
+        }
+    }
+
     public int size() {
         return messages.size();
     }

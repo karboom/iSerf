@@ -7,6 +7,7 @@ import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.llmProvider.FixedLlmProvider;
 import me.karboom.java.iSerf.llm.text.OpenAITest;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -282,6 +283,70 @@ class MemoryManagerTest {
         var sizeBefore = memoryManager.size();
         memoryManager.checkAndOrganize(testAgent);
         assertEquals(sizeBefore, memoryManager.size(), "null usage 不应触发压缩");
+    }
+
+    // endregion
+
+    // region ========== removeFromEventId ==========
+
+    @Nested
+    class RemoveFromEventIdTest {
+
+        @Test
+        void testRemoveFromFirstEvent() {
+            memoryManager.add(AgentMessage.builder().text("msg1").eventId("evt-1").role(AgentMessage.ROLE.USER).build());
+            memoryManager.add(AgentMessage.builder().text("msg2").eventId("evt-1").role(AgentMessage.ROLE.ASSISTANT).build());
+            memoryManager.add(AgentMessage.builder().text("msg3").eventId("evt-2").role(AgentMessage.ROLE.USER).build());
+            memoryManager.add(AgentMessage.builder().text("msg4").eventId("evt-2").role(AgentMessage.ROLE.ASSISTANT).build());
+
+            memoryManager.removeFromEventId("evt-1");
+
+            assertEquals(0, memoryManager.size());
+        }
+
+        @Test
+        void testRemoveFromMiddleEvent() {
+            memoryManager.add(AgentMessage.builder().text("msg1").eventId("evt-1").role(AgentMessage.ROLE.USER).build());
+            memoryManager.add(AgentMessage.builder().text("msg2").eventId("evt-1").role(AgentMessage.ROLE.ASSISTANT).build());
+            memoryManager.add(AgentMessage.builder().text("msg3").eventId("evt-2").role(AgentMessage.ROLE.USER).build());
+            memoryManager.add(AgentMessage.builder().text("msg4").eventId("evt-2").role(AgentMessage.ROLE.ASSISTANT).build());
+            memoryManager.add(AgentMessage.builder().text("msg5").eventId("evt-3").role(AgentMessage.ROLE.USER).build());
+            memoryManager.add(AgentMessage.builder().text("msg6").eventId("evt-3").role(AgentMessage.ROLE.ASSISTANT).build());
+
+            memoryManager.removeFromEventId("evt-2");
+
+            assertEquals(2, memoryManager.size());
+            assertTrue(memoryManager.getMessagesRaw().stream().allMatch(m -> "evt-1".equals(m.getEventId())));
+        }
+
+        @Test
+        void testRemoveFromLastEvent() {
+            memoryManager.add(AgentMessage.builder().text("msg1").eventId("evt-1").role(AgentMessage.ROLE.USER).build());
+            memoryManager.add(AgentMessage.builder().text("msg2").eventId("evt-1").role(AgentMessage.ROLE.ASSISTANT).build());
+            memoryManager.add(AgentMessage.builder().text("msg3").eventId("evt-2").role(AgentMessage.ROLE.USER).build());
+            memoryManager.add(AgentMessage.builder().text("msg4").eventId("evt-2").role(AgentMessage.ROLE.ASSISTANT).build());
+
+            memoryManager.removeFromEventId("evt-2");
+
+            assertEquals(2, memoryManager.size());
+            assertTrue(memoryManager.getMessagesRaw().stream().allMatch(m -> "evt-1".equals(m.getEventId())));
+        }
+
+        @Test
+        void testRemoveFromNonExistentEvent() {
+            memoryManager.add(AgentMessage.builder().text("msg1").eventId("evt-1").build());
+            memoryManager.add(AgentMessage.builder().text("msg2").eventId("evt-2").build());
+
+            memoryManager.removeFromEventId("evt-non-existent");
+
+            assertEquals(2, memoryManager.size(), "不存在的 eventId 不应影响现有消息");
+        }
+
+        @Test
+        void testRemoveFromEmptyList() {
+            memoryManager.removeFromEventId("evt-1");
+            assertEquals(0, memoryManager.size());
+        }
     }
 
     // endregion
