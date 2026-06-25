@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "io.github.karboom"
-version = "0.75.24-alpha"
+version = "0.75.25-alpha"
 
 
 dependencies {

@@ -198,7 +198,7 @@ public class Team {
                                                     请执行上述任务并返回结果。
                                                     """.formatted(task.getId(), task.getDesc());
 
-                                            var result = targetAgent.call(
+                                            var result = targetAgent.invoke(
                                                     AgentMessage.builder()
                                                             .role(AgentMessage.ROLE.USER)
                                                             .type(AgentMessage.TYPE.TEXT)
@@ -277,7 +277,7 @@ public class Team {
                     // 开虚拟线程调用任务负责人
                     Thread.ofVirtual().name("comment-" + commentTask.getId()).start(() -> {
                         try {
-                            var result = taskAgent.call(
+                            var result = taskAgent.invoke(
                                     AgentMessage.builder()
                                             .role(AgentMessage.ROLE.USER)
                                             .type(AgentMessage.TYPE.TEXT)

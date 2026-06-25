@@ -547,12 +547,12 @@ class AgentTest {
     }
 
     /**
-     * 测试 call 方法 - 直接调用智能体，不新增记忆
+     * 测试 invoke 方法 - 直接调用智能体，不新增记忆
      */
     @Test
-    void testCall() {
+    void testInvoke() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
-            var agent = createTestAgent("test-call-agent", "你是一个有用的助手");
+            var agent = createTestAgent("test-invoke-agent", "你是一个有用的助手");
 
             var memorySizeBefore = agent.getMemoryManager().size();
 
@@ -562,15 +562,15 @@ class AgentTest {
                     .text("你好，请用一句话介绍你自己")
                     .build();
 
-            var result = agent.call(userMessage, null);
+            var result = agent.invoke(userMessage, null);
 
-            assertNotNull(result, "call 返回结果不应为空");
+            assertNotNull(result, "invoke 返回结果不应为空");
             assertEquals(AgentMessage.ROLE.ASSISTANT, result.getRole(), "返回消息的角色应为 ASSISTANT");
             assertNotNull(result.getText(), "返回消息的文本不应为空");
             assertTrue(result.getText().length() > 0, "返回消息的文本长度应大于0");
-            assertEquals(memorySizeBefore, agent.getMemoryManager().size(), "call 不应新增记忆");
+            assertEquals(memorySizeBefore, agent.getMemoryManager().size(), "invoke 不应新增记忆");
 
-            System.out.println("call 返回结果: " + result.getText());
+            System.out.println("invoke 返回结果: " + result.getText());
         });
     }
 

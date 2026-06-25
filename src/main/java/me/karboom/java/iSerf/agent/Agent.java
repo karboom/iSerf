@@ -348,7 +348,7 @@ public class Agent {
                 .reduce(Tuples.of(
                         AgentMessage.builder().role(AgentMessage.ROLE.ASSISTANT).type(AgentMessage.TYPE.THINKING).text("").isSegment(0).build(),
                         new ArrayList<>(),
-                        AgentMessage.builder().role(AgentMessage.ROLE.ASSISTANT).type(AgentMessage.TYPE.TEXT).text("").isSegment(0).isForgotten(0).eventId(event.getId()).build()
+                        AgentMessage.builder().role(AgentMessage.ROLE.ASSISTANT).type(AgentMessage.TYPE.TEXT).text("").isSegment(0).isForgotten(0).eventId(event != null ? event.getId() : null).build()
                 ), (acc, chunk) -> {
                     var thinkingItem = acc.getT1();
                     var toolCall = acc.getT2();
@@ -405,49 +405,6 @@ public class Agent {
 
                     return acc;
                 });
-    }
-
-    /**
-     * 直接调用智能体，执行临时需求
-     * - 拼接系统提示词、message
-     * - 调用llm.query，然后将结果转为Message
-     */
-    @SneakyThrows
-    public AgentMessage call(AgentMessage message, Class<?> format) {
-        log.debug("call message text: %s".formatted(message.getText()));
-
-        var systemMessage = AgentMessage.builder()
-                .role(AgentMessage.ROLE.SYSTEM)
-                .text(this.memoryManager.getSystemPrompt())
-                .build();
-
-        var messages = List.of(systemMessage, message);
-
-        var result = llmProvider.get(null, format, null).query(messages, format);
-        var choices = result.getChoices();
-        if (choices == null || choices.isEmpty()) {
-            throw ErrorUtil.make("call query result choices is empty");
-        }
-
-        var text = choices.get(0).getText();
-        if (text == null || text.isBlank()) {
-            throw ErrorUtil.make("call query result text is empty");
-        }
-
-        log.debug("call result text length: %s".formatted(text.length()));
-
-        var builder = AgentMessage.builder()
-                .id(UUID.randomUUID().toString())
-                .role(AgentMessage.ROLE.ASSISTANT)
-                .type(AgentMessage.TYPE.TEXT)
-                .text(text)
-                .isSegment(0);
-
-        if (format != null) {
-            builder.formatted(JSONUtil.parse(text, format));
-        }
-
-        return builder.build();
     }
 
     /**
