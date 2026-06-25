@@ -5,9 +5,10 @@ import lombok.*;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.llm.text.OpenAI;
-import me.karboom.java.iSerf.rag.bo.video.AudioInfo;
+import me.karboom.java.iSerf.rag.bo.audio.AudioInfo;
 import me.karboom.java.iSerf.rag.bo.video.FrameInfo;
 import me.karboom.java.iSerf.rag.bo.video.VideoInfo;
+import me.karboom.java.iSerf.rag.scene.Audio;
 import me.karboom.java.iSerf.rag.scene.Video;
 import me.karboom.java.iSerf.rag.store.MemoryStore;
 import me.karboom.java.iSerf.util.JSONUtil;
@@ -116,6 +117,7 @@ public class CourseParser {
     private MemoryStore<FrameInfo> frameStore;
     private MemoryStore<AudioInfo> audioStore;
     private Video video;
+    private Audio audio;
     private OpenAI llm;
 
     // endregion
@@ -137,7 +139,9 @@ public class CourseParser {
             var outputDir = Path.of(System.getProperty("java.io.tmpdir"), "course_analysis_demo_" + System.currentTimeMillis());
             Files.createDirectories(outputDir);
 
-            var audioInfos = video.parseAudio(testVideoPath, outputDir);
+            var audioFile = outputDir.resolve("audio.wav");
+            video.extractAudio(testVideoPath, audioFile);
+            var audioInfos = audio.parseAudio(audioFile, outputDir);
             log.info("音频提取完成，共 {} 个片段", audioInfos.size());
 
             // 2. 构建分析上下文
@@ -182,7 +186,8 @@ public class CourseParser {
         audioStore = new MemoryStore<>();
         llm = createLlm();
         var audioLlm = createAudioLlm();
-        video = new Video(videoStore, frameStore, audioStore, llm, audioLlm);
+        audio = new Audio(audioStore, audioLlm);
+        video = new Video(videoStore, frameStore, llm, audio);
     }
 
     private OpenAI createLlm() {

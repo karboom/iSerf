@@ -55,4 +55,4 @@ bin/
 .DS_Store
 .aider*
 
-src/test/java/**/demo/test/
+*.env

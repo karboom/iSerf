@@ -1,4 +1,4 @@
-package me.karboom.java.iSerf.rag.bo.video;
+package me.karboom.java.iSerf.rag.bo.audio;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
