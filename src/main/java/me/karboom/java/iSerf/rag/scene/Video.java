@@ -21,16 +21,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Semaphore;
 import java.util.function.BiFunction;
 
 @Slf4j
 @AllArgsConstructor
 public class Video {
-
-    private static final int MAX_CONCURRENT_ANALYSES = 5;
 
     private final IStore<VideoInfo> videoStore;
     private final IStore<FrameInfo> frameStore;
@@ -150,34 +145,10 @@ public class Video {
                 .sorted()
                 .toList();
 
-        var frameResults = new Object[filterFrameFiles.size()];
-        var latch = new CountDownLatch(filterFrameFiles.size());
-        var semaphore = new Semaphore(MAX_CONCURRENT_ANALYSES);
-
-        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            for (var i = 0; i < filterFrameFiles.size(); i++) {
-                var index = i;
-                var frameFile = filterFrameFiles.get(index);
-                executor.execute(() -> {
-                    try {
-                        semaphore.acquire();
-                        frameResults[index] = analyzeFrame(frameFile, videoId, fps, frameDesc);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    } finally {
-                        semaphore.release();
-                        latch.countDown();
-                    }
-                });
-            }
-            latch.await();
-        }
-
         var frameInfos = new ArrayList<FrameInfo>();
-        for (var result : frameResults) {
-            if (result != null) {
-                frameInfos.add((FrameInfo) result);
-            }
+        for (var frameFile : filterFrameFiles) {
+            frameInfos.add(analyzeFrame(frameFile, videoId, fps, frameDesc));
+            Thread.sleep(1000);
         }
 
         frameStore.create(frameInfos);

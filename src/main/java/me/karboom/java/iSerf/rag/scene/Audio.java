@@ -9,6 +9,7 @@ import me.karboom.java.iSerf.rag.bo.audio.AudioAnalysisResult;
 import me.karboom.java.iSerf.rag.bo.audio.AudioInfo;
 import me.karboom.java.iSerf.rag.bo.audio.AudioSegment;
 import me.karboom.java.iSerf.rag.store.IStore;
+import cn.hutool.core.exceptions.ExceptionUtil;
 import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import net.bramp.ffmpeg.FFmpeg;
@@ -22,16 +23,11 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @AllArgsConstructor
 public class Audio {
-
-    private static final int MAX_CONCURRENT_ANALYSES = 5;
 
     private final IStore<AudioInfo> audioStore;
     private final IText audioLlm;
@@ -51,45 +47,21 @@ public class Audio {
         Files.createDirectories(outputDir);
         Files.createDirectories(splitAudioDir);
 
-        log.debug("<parseAudio> processing audio | path,{}", audioFile);
+        log.debug("<parseAudio> processing audio | audioFile={},outputDir={}", audioFile, outputDir);
 
         var silenceSegments = detectSilence(audioFile);
-        log.debug("<parseAudio> detected silence segments | count,{}", silenceSegments.size());
+        log.debug("<parseAudio> detected silence segments | count={}", silenceSegments.size());
 
         var audioSegments = extractAudioSegments(audioFile, silenceSegments, splitAudioDir);
-        log.debug("<parseAudio> split into audio segments | count,{}", audioSegments.size());
-
-        var segmentResults = new Object[audioSegments.size()];
-        var latch = new CountDownLatch(audioSegments.size());
-        var semaphore = new Semaphore(MAX_CONCURRENT_ANALYSES);
-
-        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            for (var i = 0; i < audioSegments.size(); i++) {
-                var index = i;
-                var segment = audioSegments.get(index);
-                executor.execute(() -> {
-                    try {
-                        semaphore.acquire();
-                        segmentResults[index] = analyzeSegment(segment);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    } finally {
-                        semaphore.release();
-                        latch.countDown();
-                    }
-                });
-            }
-            latch.await();
-        }
+        log.debug("<parseAudio> split into audio segments | count={}", audioSegments.size());
 
         var audioInfos = new ArrayList<AudioInfo>();
-        for (var result : segmentResults) {
-            if (result != null) {
-                audioInfos.addAll((ArrayList<AudioInfo>) result);
-            }
+        for (var segment : audioSegments) {
+            audioInfos.addAll(analyzeSegment(segment));
+            Thread.sleep(1000);
         }
 
-        log.debug("<parseAudio> completed | segments,{}", audioInfos.size());
+        log.debug("<parseAudio> completed | count={}", audioInfos.size());
         audioStore.create(audioInfos);
         return audioInfos;
     }
@@ -115,7 +87,7 @@ public class Audio {
                 break;
             } catch (Exception e) {
                 lastError = e;
-                log.debug("<analyzeSegment> JSON parse failed, retrying | segment,{},retry,{}", segment.path.getFileName(), retry + 1);
+                log.error("<analyzeSegment> JSON parse failed | {}", ExceptionUtil.stacktraceToString(e));
             }
         }
         if (result == null || result.getElements() == null || result.getElements().isEmpty()) {
@@ -124,7 +96,7 @@ public class Audio {
                     .elements(List.of(AudioAnalysisResult.Segment.builder().type("error").text(errorText).build()))
                     .build();
         }
-        log.debug("<analyzeSegment> analyzed segment | file,{},count,{}", segment.path.getFileName(), result.getElements().size());
+        log.debug("<analyzeSegment> analyzed segment | file={},count={}", segment.path.getFileName(), result.getElements().size());
 
         var audioInfos = new ArrayList<AudioInfo>();
         for (var item : result.getElements()) {
@@ -144,6 +116,7 @@ public class Audio {
 
     @SneakyThrows
     public ArrayList<Long[]> detectSilence(Path audioFile) {
+        log.debug("<detectSilence> detecting silence | audioFile={}", audioFile);
         var silences = new ArrayList<Long[]>();
 
         var process = new ProcessBuilder(
@@ -176,10 +149,12 @@ public class Audio {
         }
 
         process.waitFor(60, TimeUnit.SECONDS);
+        log.debug("<detectSilence> silence detection completed | count={}", silences.size());
         return silences;
     }
 
     private ArrayList<AudioSegment> extractAudioSegments(Path audioFile, ArrayList<Long[]> silences, Path outputDir) throws Exception {
+        log.debug("<extractAudioSegments> extracting segments | audioFile={},silenceCount={}", audioFile, silences.size());
         var segments = new ArrayList<AudioSegment>();
 
         var ffprobe = new FFprobe();
@@ -222,7 +197,7 @@ public class Audio {
             var durationSec = (endMs - startMs) / 1000.0;
 
             if (durationSec < 0.5) {
-                log.debug("<extractAudioSegments> skipping segment (too short) | startMs,{},endMs,{}", startMs, endMs);
+                log.debug("<extractAudioSegments> skipping segment (too short) | startMs={},endMs={}", startMs, endMs);
                 continue;
             }
 
@@ -235,7 +210,7 @@ public class Audio {
                     .done();
 
             ffmpeg.run(ffmpegBuilder);
-            log.debug("<extractAudioSegments> extracted segment | startMs,{},endMs,{}", startMs, endMs);
+            log.debug("<extractAudioSegments> extracted segment | startMs={},endMs={}", startMs, endMs);
 
             segments.add(AudioSegment.builder()
                     .path(outputFile)
@@ -244,6 +219,7 @@ public class Audio {
                     .build());
         }
 
+        log.debug("<extractAudioSegments> extraction completed | count={}", segments.size());
         return segments;
     }
 }
