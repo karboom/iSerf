@@ -22,11 +22,16 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @AllArgsConstructor
 public class Audio {
+
+    private static final int MAX_CONCURRENT_ANALYSES = 5;
 
     private final IStore<AudioInfo> audioStore;
     private final IText audioLlm;
@@ -54,51 +59,86 @@ public class Audio {
         var audioSegments = extractAudioSegments(audioFile, silenceSegments, splitAudioDir);
         log.debug("<parseAudio> split into audio segments | count,{}", audioSegments.size());
 
+        var segmentResults = new Object[audioSegments.size()];
+        var latch = new CountDownLatch(audioSegments.size());
+        var semaphore = new Semaphore(MAX_CONCURRENT_ANALYSES);
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (var i = 0; i < audioSegments.size(); i++) {
+                var index = i;
+                var segment = audioSegments.get(index);
+                executor.execute(() -> {
+                    try {
+                        semaphore.acquire();
+                        segmentResults[index] = analyzeSegment(segment);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    } finally {
+                        semaphore.release();
+                        latch.countDown();
+                    }
+                });
+            }
+            latch.await();
+        }
+
         var audioInfos = new ArrayList<AudioInfo>();
-        for (var segment : audioSegments) {
-            var audioBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(segment.path));
-            var audioUrl = "data:audio/wav;base64,%s".formatted(audioBase64);
-
-            var message = AgentMessage.builder()
-                    .role(AgentMessage.ROLE.USER)
-                    .type(AgentMessage.TYPE.AUDIO)
-                    .audio((audioUrl))
-                    .text("请分析这段音频内容，识别语音类型（如对话、音乐、噪音等）和文字内容")
-                    .build();
-
-            AudioAnalysisResult result = null;
-            for (var retry = 0; retry < 3; retry++) {
-                try {
-                    var analysisResult = audioLlm.query(List.of(message), AudioAnalysisResult.class);
-                    result = JSONUtil.parse(analysisResult.getChoices().getFirst().getText(), AudioAnalysisResult.class);
-                    break;
-                } catch (Exception e) {
-                    log.debug("<parseAudio> JSON parse failed, retrying | segment,{},retry,{}", segment.path.getFileName(), retry + 1);
-                }
-            }
-            if (result == null || result.getElements() == null || result.getElements().isEmpty()) {
-                result = AudioAnalysisResult.builder()
-                        .elements(List.of(AudioAnalysisResult.Segment.builder().type("error").text("").build()))
-                        .build();
-            }
-            log.debug("<parseAudio> analyzed segment | file,{},count,{}", segment.path.getFileName(), result.getElements().size());
-
-            for (var item : result.getElements()) {
-                var audioInfo = AudioInfo.builder()
-                        .id(DataUtil.getFlakeId())
-                        .type(item.getType())
-                        .text(item.getText())
-                        .startMs(segment.startMs)
-                        .endMs(segment.endMs)
-                        .frameIds(new ArrayList<>())
-                        .build();
-
-                audioInfos.add(audioInfo);
+        for (var result : segmentResults) {
+            if (result != null) {
+                audioInfos.addAll((ArrayList<AudioInfo>) result);
             }
         }
 
         log.debug("<parseAudio> completed | segments,{}", audioInfos.size());
         audioStore.create(audioInfos);
+        return audioInfos;
+    }
+
+    @SneakyThrows
+    private ArrayList<AudioInfo> analyzeSegment(AudioSegment segment) {
+        var audioBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(segment.path));
+        var audioUrl = "data:audio/wav;base64,%s".formatted(audioBase64);
+
+        var message = AgentMessage.builder()
+                .role(AgentMessage.ROLE.USER)
+                .type(AgentMessage.TYPE.AUDIO)
+                .audio((audioUrl))
+                .text("请分析这段音频内容，识别语音类型（如对话、音乐、噪音等）和文字内容")
+                .build();
+
+        AudioAnalysisResult result = null;
+        Exception lastError = null;
+        for (var retry = 0; retry < 3; retry++) {
+            try {
+                var analysisResult = audioLlm.query(List.of(message), AudioAnalysisResult.class);
+                result = JSONUtil.parse(analysisResult.getChoices().getFirst().getText(), AudioAnalysisResult.class);
+                break;
+            } catch (Exception e) {
+                lastError = e;
+                log.debug("<analyzeSegment> JSON parse failed, retrying | segment,{},retry,{}", segment.path.getFileName(), retry + 1);
+            }
+        }
+        if (result == null || result.getElements() == null || result.getElements().isEmpty()) {
+            var errorText = lastError != null ? lastError.getMessage() : "analysis result is empty";
+            result = AudioAnalysisResult.builder()
+                    .elements(List.of(AudioAnalysisResult.Segment.builder().type("error").text(errorText).build()))
+                    .build();
+        }
+        log.debug("<analyzeSegment> analyzed segment | file,{},count,{}", segment.path.getFileName(), result.getElements().size());
+
+        var audioInfos = new ArrayList<AudioInfo>();
+        for (var item : result.getElements()) {
+            var audioInfo = AudioInfo.builder()
+                    .id(DataUtil.getFlakeId())
+                    .type(item.getType())
+                    .text(item.getText())
+                    .startMs(segment.startMs)
+                    .endMs(segment.endMs)
+                    .frameIds(new ArrayList<>())
+                    .build();
+
+            audioInfos.add(audioInfo);
+        }
         return audioInfos;
     }
 

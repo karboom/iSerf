@@ -21,11 +21,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.function.BiFunction;
 
 @Slf4j
 @AllArgsConstructor
 public class Video {
+
+    private static final int MAX_CONCURRENT_ANALYSES = 5;
 
     private final IStore<VideoInfo> videoStore;
     private final IStore<FrameInfo> frameStore;
@@ -145,35 +150,34 @@ public class Video {
                 .sorted()
                 .toList();
 
+        var frameResults = new Object[filterFrameFiles.size()];
+        var latch = new CountDownLatch(filterFrameFiles.size());
+        var semaphore = new Semaphore(MAX_CONCURRENT_ANALYSES);
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (var i = 0; i < filterFrameFiles.size(); i++) {
+                var index = i;
+                var frameFile = filterFrameFiles.get(index);
+                executor.execute(() -> {
+                    try {
+                        semaphore.acquire();
+                        frameResults[index] = analyzeFrame(frameFile, videoId, fps, frameDesc);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    } finally {
+                        semaphore.release();
+                        latch.countDown();
+                    }
+                });
+            }
+            latch.await();
+        }
+
         var frameInfos = new ArrayList<FrameInfo>();
-        for (var frameFile : filterFrameFiles) {
-            var fileName = frameFile.getFileName().toString();
-            var frameId = DataUtil.getFlakeId();
-            var startMs = Integer.parseInt(fileName.split("_")[0]) * 1000 / fps;
-
-            var imageBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(frameFile));
-            var imageUrl = "data:image/jpeg;base64,%s".formatted(imageBase64);
-
-            var message = AgentMessage.builder()
-                    .role(AgentMessage.ROLE.USER)
-                    .type(AgentMessage.TYPE.IMAGE)
-                    .files(List.of(imageUrl))
-                    .text("请描述这张图片的内容，提取关键信息")
-                    .build();
-
-            var output = llm.query(List.of(message), frameDesc);
-
-            var frameInfo = FrameInfo.builder()
-                    .id(frameId)
-                    .videoId(videoId)
-                    .audioIds(new ArrayList<>())
-                    .startMs(String.valueOf(startMs))
-                    .fileName(fileName)
-                    .llm(output)
-                    .build();
-
-            frameInfos.add(frameInfo);
-            log.debug("<parseVideo> analyzed frame | file,{}", fileName);
+        for (var result : frameResults) {
+            if (result != null) {
+                frameInfos.add((FrameInfo) result);
+            }
         }
 
         frameStore.create(frameInfos);
@@ -188,6 +192,36 @@ public class Video {
         }
 
         log.debug("<parseVideo> completed | frames,{},audios,{}", frameInfos.size(), audioInfos.size());
+    }
+
+    @SneakyThrows
+    private FrameInfo analyzeFrame(Path frameFile, String videoId, Integer fps, Class<?> frameDesc) {
+        var fileName = frameFile.getFileName().toString();
+        var frameId = DataUtil.getFlakeId();
+        var startMs = Integer.parseInt(fileName.split("_")[0]) * 1000 / fps;
+
+        var imageBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(frameFile));
+        var imageUrl = "data:image/jpeg;base64,%s".formatted(imageBase64);
+
+        var message = AgentMessage.builder()
+                .role(AgentMessage.ROLE.USER)
+                .type(AgentMessage.TYPE.IMAGE)
+                .files(List.of(imageUrl))
+                .text("请描述这张图片的内容，提取关键信息")
+                .build();
+
+        var output = llm.query(List.of(message), frameDesc);
+
+        log.debug("<analyzeFrame> analyzed frame | file,{}", fileName);
+
+        return FrameInfo.builder()
+                .id(frameId)
+                .videoId(videoId)
+                .audioIds(new ArrayList<>())
+                .startMs(String.valueOf(startMs))
+                .fileName(fileName)
+                .llm(output)
+                .build();
     }
 
     /**
