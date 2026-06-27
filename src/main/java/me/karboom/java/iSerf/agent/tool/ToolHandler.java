@@ -1,6 +1,13 @@
 package me.karboom.java.iSerf.agent.tool;
 
+import cn.hutool.core.exceptions.ExceptionUtil;
 import cn.hutool.core.util.StrUtil;
+import io.modelcontextprotocol.client.McpClient;
+import io.modelcontextprotocol.client.transport.ServerParameters;
+import io.modelcontextprotocol.client.transport.StdioClientTransport;
+import io.modelcontextprotocol.client.transport.WebClientStreamableHttpTransport;
+import io.modelcontextprotocol.json.jackson.JacksonMcpJsonMapper;
+import io.modelcontextprotocol.spec.McpSchema;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.Agent;
@@ -10,13 +17,16 @@ import me.karboom.java.iSerf.util.*;
 import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.time.Duration;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * 工具调用处理器
@@ -76,6 +86,7 @@ public class ToolHandler {
 
             if (matchedTool == null) {
                 result.setLlm("Tool not found: " + call.name);
+                call.result = result;
                 continue;
             }
 
@@ -114,17 +125,14 @@ public class ToolHandler {
                     case Tool.TYPE.MCP_HTTP:
                         // 调用 HTTP 工具
                     {
-                        result.setLlm ("{\"content\":\"HTTP tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
-
+                        result = invokeMcpHttp(matchedTool, call.arguments);
                     }
                     break;
 
                     case Tool.TYPE.MCP_CLI:
                         // 调用 CLI 工具
                     {
-
-                        result.setLlm("{\"content\":\"CLI tool '%s' called with args: %s\"}".formatted(matchedTool.getName(), call.arguments.toString()));
-
+                        result = invokeMcpCli(matchedTool, call.arguments);
                     }
                     break;
                     default:
@@ -428,6 +436,188 @@ public class ToolHandler {
     // endregion
 
     // region ========== 辅助方法 ==========
+
+    /**
+     * 调用 MCP HTTP 工具
+     * 通过 HTTP 协议连接 MCP Server 并调用工具
+     *
+     * @param tool      MCP HTTP 工具
+     * @param arguments 调用参数
+     * @return 调用结果
+     */
+    @SneakyThrows
+    private CallResult invokeMcpHttp(Tool tool, Object arguments) {
+        log.debug("<invokeMcpHttp> calling MCP HTTP tool | name={},url={}", tool.getName(), tool.getUrl());
+
+        // 构建 WebClient
+        var webClientBuilder = WebClient.builder()
+                .baseUrl(tool.getUrl())
+                .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(1024 * 1024));
+
+        // 添加自定义请求头
+        if (tool.getHeaders() != null) {
+            @SuppressWarnings("unchecked")
+            var headers = (HashMap<String, String>) tool.getHeaders();
+            for (Map.Entry<String, String> entry : headers.entrySet()) {
+                webClientBuilder.defaultHeader(entry.getKey(), entry.getValue());
+            }
+        }
+
+        // 创建传输层
+        var transport = WebClientStreamableHttpTransport.builder(webClientBuilder).build();
+
+        // 创建 MCP 客户端并调用工具
+        try (var client = McpClient.sync(transport)
+                .requestTimeout(Duration.ofSeconds(30))
+                .build()) {
+            client.initialize();
+
+            // 转换参数
+            var args = convertArguments(arguments);
+
+            // 调用工具
+            var request = new McpSchema.CallToolRequest(tool.getName(), args);
+            var mcpResult = client.callTool(request);
+
+            log.debug("<invokeMcpHttp> MCP tool call completed | name={},isError={}", tool.getName(), mcpResult.isError());
+
+            // 提取结果内容
+            var content = extractContent(mcpResult);
+
+            if (Boolean.TRUE.equals(mcpResult.isError())) {
+                return CallResult.builder()
+                        .llm(content)
+                        .error(new RuntimeException("MCP tool error: " + content))
+                        .build();
+            }
+
+            return CallResult.builder()
+                    .llm(content)
+                    .build();
+        } catch (Exception e) {
+            log.error("<invokeMcpHttp> failed to call MCP HTTP tool | {}", ExceptionUtil.stacktraceToString(e));
+            return CallResult.builder()
+                    .llm("MCP HTTP tool call failed: " + e.getMessage())
+                    .error(new RuntimeException(e))
+                    .build();
+        }
+    }
+
+    /**
+     * 调用 MCP CLI 工具
+     * 通过 stdio 协议连接 MCP Server 并调用工具
+     *
+     * @param tool      MCP CLI 工具
+     * @param arguments 调用参数
+     * @return 调用结果
+     */
+    @SneakyThrows
+    private CallResult invokeMcpCli(Tool tool, Object arguments) {
+        log.debug("<invokeMcpCli> calling MCP CLI tool | name={},command={}", tool.getName(), tool.getCommand());
+
+        // 构建命令行参数
+        var command = tool.getCommand();
+        var args = new ArrayList<String>();
+
+        // 解析环境参数（command 可能包含参数）
+        var commandParts = command.split("\\s+");
+        var mainCommand = commandParts[0];
+        for (int i = 1; i < commandParts.length; i++) {
+            args.add(commandParts[i]);
+        }
+
+        // 添加 environment 中的参数
+        if (tool.getEnvironment() != null) {
+            @SuppressWarnings("unchecked")
+            var env = (HashMap<String, String>) tool.getEnvironment();
+            for (Map.Entry<String, String> entry : env.entrySet()) {
+                args.add(entry.getKey());
+                if (entry.getValue() != null && !entry.getValue().isEmpty()) {
+                    args.add(entry.getValue());
+                }
+            }
+        }
+
+        // 创建 ServerParameters
+        var serverParams = ServerParameters.builder(mainCommand)
+                .args(args)
+                .build();
+
+        // 创建传输层
+        var transport = new StdioClientTransport(serverParams, new JacksonMcpJsonMapper(new com.fasterxml.jackson.databind.ObjectMapper()));
+
+        // 创建 MCP 客户端并调用工具
+        try (var client = McpClient.sync(transport)
+                .requestTimeout(Duration.ofSeconds(30))
+                .build()) {
+            client.initialize();
+
+            // 转换参数
+            var callArgs = convertArguments(arguments);
+
+            // 调用工具
+            var request = new McpSchema.CallToolRequest(tool.getName(), callArgs);
+            var mcpResult = client.callTool(request);
+
+            log.debug("<invokeMcpCli> MCP tool call completed | name={},isError={}", tool.getName(), mcpResult.isError());
+
+            // 提取结果内容
+            var content = extractContent(mcpResult);
+
+            if (Boolean.TRUE.equals(mcpResult.isError())) {
+                return CallResult.builder()
+                        .llm(content)
+                        .error(new RuntimeException("MCP tool error: " + content))
+                        .build();
+            }
+
+            return CallResult.builder()
+                    .llm(content)
+                    .build();
+        } catch (Exception e) {
+            log.error("<invokeMcpCli> failed to call MCP CLI tool | {}", ExceptionUtil.stacktraceToString(e));
+            return CallResult.builder()
+                    .llm("MCP CLI tool call failed: " + e.getMessage())
+                    .error(new RuntimeException(e))
+                    .build();
+        }
+    }
+
+    /**
+     * 转换调用参数为 Map<String, Object>
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> convertArguments(Object arguments) {
+        if (arguments == null) {
+            return new HashMap<>();
+        }
+        if (arguments instanceof Map) {
+            return (Map<String, Object>) arguments;
+        }
+        // 如果是 ObjectNode，转换为 Map
+        if (arguments instanceof ObjectNode objectNode) {
+            return JSONUtil.convert(objectNode, HashMap.class);
+        }
+        return new HashMap<>();
+    }
+
+    /**
+     * 从 MCP CallToolResult 提取文本内容
+     */
+    private String extractContent(McpSchema.CallToolResult result) {
+        if (result.content() == null || result.content().isEmpty()) {
+            return "";
+        }
+
+        return result.content().stream()
+                .map(content -> {
+                    if (content instanceof McpSchema.TextContent textContent) {
+                        return textContent.text();
+                    }
+                    return content.toString();
+                })
+                .collect(Collectors.joining("\n"));
+    }
 
     /**
      * 构建类名路径，不带后缀名，格式为 IDirectory/驼峰toolName/从info.json解析current字段/首字母大写驼峰toolName
