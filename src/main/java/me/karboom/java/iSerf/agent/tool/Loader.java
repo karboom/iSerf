@@ -1,5 +1,6 @@
 package me.karboom.java.iSerf.agent.tool;
 
+import cn.hutool.core.exceptions.ExceptionUtil;
 import cn.hutool.core.util.StrUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.client.McpClient;
@@ -7,6 +8,7 @@ import io.modelcontextprotocol.client.transport.*;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.util.CodeUtil;
+import me.karboom.java.iSerf.util.ErrorUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import me.karboom.java.iSerf.util.YAMLUtil;
 import tools.jackson.databind.node.ArrayNode;
@@ -19,6 +21,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -348,59 +351,102 @@ public class Loader {
      * @param args    命令行参数
      * @return 工具列表
      */
-    public List<Tool> fromMCPCli(String command, HashMap<String, String> args) {
-        List<Tool> tools = new ArrayList<Tool>();
-        
+    public List<Tool<?>> fromMCPCli(String command, HashMap<String, String> args) {
+        log.debug("<fromMCPCli> start | command={},args={}", command, JSONUtil.stringify(args));
+
+        var tools = new ArrayList<Tool<?>>();
+        Process process = null;
+
         try {
             // 构建命令行
             var commandList = new ArrayList<String>();
             commandList.add(command);
-            
+
             if (args != null) {
                 for (Map.Entry<String, String> entry : args.entrySet()) {
                     commandList.add(entry.getKey());
                     commandList.add(entry.getValue());
                 }
             }
-            
+
             // 启动进程
             var processBuilder = new ProcessBuilder(commandList);
-            processBuilder.redirectErrorStream(true);
-            var process = processBuilder.start();
-            
-            // 发送 list_tools 请求
-            try (var os = process.getOutputStream()) {
-                var request = createMCPRequest("tools/list", new HashMap<>());
-                os.write(request.getBytes(StandardCharsets.UTF_8));
-                os.flush();
-            }
-            
-            // 读取响应
-            var response = new StringBuilder();
-            try (var reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-                var line = "";
-                while ((line = reader.readLine()) != null) {
-                    response.append(line);
-                }
-            }
-            
+            processBuilder.redirectErrorStream(false);
+            process = processBuilder.start();
+
+            var os = process.getOutputStream();
+            var reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+
+            // 1. 发送 initialize 请求
+            var initRequest = createMCPRequest("initialize", new HashMap<>() {{
+                put("protocolVersion", "2024-11-05");
+                put("capabilities", new HashMap<>());
+                put("clientInfo", new HashMap<>() {{
+                    put("name", "iSerf");
+                    put("version", "1.0.0");
+                }});
+            }});
+            writeMCPMessage(os, initRequest);
+
+            // 读取 initialize 响应
+            var initResponse = readMCPMessage(reader);
+            log.debug("<fromMCPCli> initialize response | {}", initResponse);
+
+            // 2. 发送 initialized 通知
+            var initializedNotification = createMCPNotification("notifications/initialized", new HashMap<>());
+            writeMCPMessage(os, initializedNotification);
+
+            // 3. 发送 tools/list 请求
+            var listToolsRequest = createMCPRequest("tools/list", new HashMap<>());
+            writeMCPMessage(os, listToolsRequest);
+
+            // 读取 tools/list 响应
+            var toolsResponse = readMCPMessage(reader);
+            log.debug("<fromMCPCli> tools/list response | {}", toolsResponse);
+
+            // 关闭流
+            os.close();
+            reader.close();
+
             // 等待进程结束
             var finished = process.waitFor(timeout, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
-                throw new RuntimeException("MCP CLI timeout after " + timeout + " seconds");
+                throw ErrorUtil.make("MCP CLI timeout after %s seconds".formatted(timeout));
             }
-            
+
             // 解析响应
-            tools = parseMCPToolsResponse(response.toString(), "mcp-cli", command, args);
-            
+            tools = parseMCPToolsResponse(toolsResponse, Tool.TYPE.MCP_CLI, command, args);
+
         } catch (Exception e) {
-            System.err.println("Error loading MCP tools from CLI: " + e.getMessage());
-            e.printStackTrace();
+            log.error("<fromMCPCli> failed to load MCP tools | {}", ExceptionUtil.stacktraceToString(e));
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
         }
-        
+
+        log.debug("<fromMCPCli> done | toolCount={}", tools.size());
         return tools;
+    }
+
+    /**
+     * 写入 MCP 消息（JSON-RPC + 换行符）
+     */
+    private void writeMCPMessage(java.io.OutputStream os, String message) throws Exception {
+        os.write((message + "\n").getBytes(StandardCharsets.UTF_8));
+        os.flush();
+    }
+
+    /**
+     * 读取 MCP 消息（逐行读取直到获取有效 JSON）
+     */
+    private String readMCPMessage(BufferedReader reader) throws Exception {
+        var line = reader.readLine();
+        if (line == null) {
+            throw ErrorUtil.make("MCP CLI: unexpected end of stream");
+        }
+        return line;
     }
 
     /**
@@ -410,15 +456,17 @@ public class Loader {
      * @param headers HTTP 请求头
      * @return 工具列表
      */
-    public List<Tool> fromMCPHttp(String url, HashMap<String, Object> headers) {
-        List<Tool> tools = new ArrayList<>();
-        
+    public List<Tool<?>> fromMCPHttp(String url, HashMap<String, Object> headers) {
+        log.debug("<fromMCPHttp> start | url={},headers={}", url, JSONUtil.stringify(headers));
+
+        var tools = new ArrayList<Tool<?>>();
+
         try {
             // 创建 WebClient
             var webClientBuilder = WebClient.builder()
                     .baseUrl(url)
                     .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(1024 * 1024));
-            
+
             // 添加自定义请求头
             if (headers != null) {
                 for (var entry : headers.entrySet()) {
@@ -426,56 +474,56 @@ public class Loader {
                 }
             }
 
+            // 转换 headers 为 String 类型（提前转换，避免循环内重复）
+            var httpHeaders = new HashMap<String, String>();
+            if (headers != null) {
+                for (var entry : headers.entrySet()) {
+                    httpHeaders.put(entry.getKey(), entry.getValue().toString());
+                }
+            }
 
             // 创建 WebClient 传输层
             var transport = WebClientStreamableHttpTransport.builder(webClientBuilder).build();
-            
-            // 创建 MCP 客户端 (同步 API)
-            try (var client = McpClient.sync(transport).build()) {
+
+            // 创建 MCP 客户端 (同步 API)，设置超时
+            try (var client = McpClient.sync(transport)
+                    .requestTimeout(Duration.ofSeconds(timeout))
+                    .build()) {
                 // 初始化连接
                 client.initialize();
-                
+
                 // 发送 list_tools 请求
                 var response = client.listTools();
-                
+                log.debug("<fromMCPHttp> MCP listTools response | toolCount={}", response.tools() != null ? response.tools().size() : 0);
+
                 // 转换工具列表
                 if (response.tools() != null) {
                     for (var mcpTool : response.tools()) {
                         var builder = Tool.<Map>builder();
-                        
+
                         // 设置基本信息
                         builder.name(mcpTool.name());
                         builder.description(mcpTool.description());
-                        builder.type("mcp-http");
+                        builder.type(Tool.TYPE.MCP_HTTP);
                         builder.url(url);
-                        
-                        // 转换 headers 为 String 类型
-                        var httpHeaders = new HashMap<String, String>();
-                        if (headers != null) {
-                            for (var entry : headers.entrySet()) {
-                                httpHeaders.put(entry.getKey(), entry.getValue().toString());
-                            }
-                        }
                         builder.headers(httpHeaders);
-                        
+
                         // 解析参数
                         var parameters = new ArrayList<Tool.Parameter>();
                         if (mcpTool.inputSchema() != null) {
                             var inputSchema = mcpTool.inputSchema();
                             var properties = inputSchema.properties();
                             var requiredFields = inputSchema.required();
-                            
+
                             if (properties != null) {
                                 for (var entry : properties.entrySet()) {
                                     var paramName = entry.getKey();
                                     var paramValue = entry.getValue();
-                                    
-                                    // 处理 Object 类型的属性值，可能是 Map 或其他结构
+
                                     var paramType = "string";
                                     var paramDesc = "";
-                                    
+
                                     if (paramValue instanceof Map<?, ?> paramMap) {
-                                        // 如果是 Map，尝试提取 type 和 description
                                         if (paramMap.get("type") != null) {
                                             paramType = paramMap.get("type").toString();
                                         }
@@ -483,32 +531,31 @@ public class Loader {
                                             paramDesc = paramMap.get("description").toString();
                                         }
                                     }
-                                    
-                                    var isRequired = requiredFields != null &&
-                                        requiredFields.contains(paramName);
-                                    
+
+                                    var isRequired = requiredFields != null && requiredFields.contains(paramName);
+
                                     parameters.add(new Tool.Parameter(
-                                        paramName,
-                                        paramType,
-                                        paramDesc,
-                                        isRequired,
-                                        null
+                                            paramName,
+                                            paramType,
+                                            paramDesc,
+                                            isRequired,
+                                            null
                                     ));
                                 }
                             }
                         }
-                        
+
                         builder.parameters(parameters);
                         tools.add(builder.build());
                     }
                 }
             }
-            
+
         } catch (Exception e) {
-            System.err.println("Error loading MCP tools from HTTP: " + e.getMessage());
-            e.printStackTrace();
+            log.error("<fromMCPHttp> failed to load MCP tools | {}", ExceptionUtil.stacktraceToString(e));
         }
-        
+
+        log.debug("<fromMCPHttp> done | toolCount={}", tools.size());
         return tools;
     }
 
@@ -529,99 +576,113 @@ public class Loader {
     }
 
     /**
+     * 创建 MCP 通知 JSON（无 id 字段）
+     *
+     * @param method MCP 方法名
+     * @param params 参数
+     * @return JSON 字符串
+     */
+    private String createMCPNotification(String method, HashMap<String, Object> params) throws Exception {
+        var notification = new HashMap<String, Object>();
+        notification.put("jsonrpc", "2.0");
+        notification.put("method", method);
+        notification.put("params", params);
+        return objectMapper.writeValueAsString(notification);
+    }
+
+    /**
      * 解析 MCP tools/list 响应
      *
      * @param responseJson 响应 JSON 字符串
-     * @param type         工具类型 (mcp-cli 或 mcp-http)
+     * @param type         工具类型 (Tool.TYPE.MCP_CLI 或 Tool.TYPE.MCP_HTTP)
      * @param endpoint     端点 (命令或 URL)
      * @param config       配置 (args 或 headers)
      * @return 工具列表
      */
-    private List<Tool> parseMCPToolsResponse(String responseJson, String type, String endpoint, HashMap<String, String> config) {
-        var tools = new ArrayList<Tool>();
-        
+    private ArrayList<Tool<?>> parseMCPToolsResponse(String responseJson, String type, String endpoint, HashMap<String, String> config) {
+        var tools = new ArrayList<Tool<?>>();
+
         try {
             var root = objectMapper.readTree(responseJson);
-            
+
             // 检查是否有错误
             if (root.has("error")) {
-                throw new RuntimeException("MCP error: " + root.get("error").toString());
+                throw ErrorUtil.make("MCP error: %s".formatted(root.get("error").toString()));
             }
-            
+
             // 获取 result.tools 数组
             if (root.has("result") && root.get("result").has("tools")) {
                 var toolsArray = root.get("result").get("tools");
-                
+
                 for (var toolNode : toolsArray) {
                     var builder = Tool.<Map>builder();
-                    
+
                     // 设置基本信息
                     if (toolNode.has("name")) {
                         builder.name(toolNode.get("name").asText());
                     }
-                    
+
                     if (toolNode.has("description")) {
                         builder.description(toolNode.get("description").asText());
                     }
-                    
+
                     // 解析参数
                     var parameters = new ArrayList<Tool.Parameter>();
                     if (toolNode.has("inputSchema")) {
                         var inputSchema = toolNode.get("inputSchema");
-                        
+
                         if (inputSchema.has("properties")) {
                             var properties = inputSchema.get("properties");
                             var requiredFields = new ArrayList<String>();
-                            
+
                             // 获取必需字段列表
                             if (inputSchema.has("required")) {
                                 var required = inputSchema.get("required");
                                 required.forEach(field -> requiredFields.add(field.asText()));
                             }
-                            
+
                             // 遍历属性
                             properties.fields().forEachRemaining(entry -> {
                                 var paramName = entry.getKey();
                                 var paramNode = entry.getValue();
-                                
-                                var paramType = paramNode.has("type") ? 
-                                    paramNode.get("type").asText() : "string";
-                                var paramDesc = paramNode.has("description") ? 
-                                    paramNode.get("description").asText() : "";
+
+                                var paramType = paramNode.has("type") ?
+                                        paramNode.get("type").asText() : "string";
+                                var paramDesc = paramNode.has("description") ?
+                                        paramNode.get("description").asText() : "";
                                 var isRequired = requiredFields.contains(paramName);
-                                
+
                                 parameters.add(new Tool.Parameter(
-                                    paramName,
-                                    paramType,
-                                    paramDesc,
-                                    isRequired,
-                                    null
+                                        paramName,
+                                        paramType,
+                                        paramDesc,
+                                        isRequired,
+                                        null
                                 ));
                             });
                         }
                     }
-                    
+
                     builder.parameters(parameters);
                     builder.type(type);
-                    
+
                     // 设置特定类型的配置
-                    if ("mcp-cli".equals(type)) {
+                    if (Tool.TYPE.MCP_CLI.equals(type)) {
                         builder.command(endpoint);
                         builder.environment(config);
-                    } else if ("mcp-http".equals(type)) {
+                    } else if (Tool.TYPE.MCP_HTTP.equals(type)) {
                         builder.url(endpoint);
                         builder.headers(config);
                     }
-                    
+
                     tools.add(builder.build());
                 }
             }
-            
+
         } catch (Exception e) {
-            System.err.println("Error parsing MCP response: " + e.getMessage());
-            e.printStackTrace();
+            log.error("<parseMCPToolsResponse> failed to parse MCP response | {}", ExceptionUtil.stacktraceToString(e));
         }
-        
+
         return tools;
     }
 

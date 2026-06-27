@@ -83,6 +83,7 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testImplementation("io.projectreactor:reactor-test:3.8.0-RC1")
+    testImplementation("io.projectreactor.netty:reactor-netty:1.2.5")
     testImplementation("tech.tablesaw:tablesaw-core:0.44.4")
 
     testImplementation("ch.qos.logback:logback-classic:1.4.14")
