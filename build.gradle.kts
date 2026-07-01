@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "io.github.karboom"
-version = "0.75.31-alpha"
+version = "0.75.32-alpha"
 
 
 dependencies {
@@ -136,6 +136,10 @@ mavenPublishing {
             developerConnection.set("scm:git:ssh://git@github.com/karboom/iSerf.git")
         }
     }
+}
+
+shadow {
+    addShadowVariantIntoJavaComponent = false
 }
 
 tasks.shadowJar {
