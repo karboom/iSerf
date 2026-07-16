@@ -53,7 +53,7 @@ dependencies {
 
     api("org.apache.pulsar:pulsar-client:4.1.3")
 
-    api("cn.hutool:hutool-all:5.8.43")
+    implementation("cn.hutool:hutool-all:5.8.43")
 
 
     api("io.milvus:milvus-sdk-java:2.6.6")
@@ -63,13 +63,11 @@ dependencies {
     api("net.bramp.ffmpeg:ffmpeg:0.8.0")
 
     api("org.jooq:jooq:3.20.0")
-    api("org.postgresql:postgresql:42.7.5")
+    implementation("org.postgresql:postgresql:42.7.5")
 
     api("org.openjdk.jol:jol-core:0.17")
 
-    api("com.github.oshi:oshi-core:6.6.5")
-
-    api("ch.qos.logback:logback-classic:1.4.14")
+    implementation("com.github.oshi:oshi-core:6.6.5")
 
 
 //    implementation("org.projectlombok:lombok:1.18.42")

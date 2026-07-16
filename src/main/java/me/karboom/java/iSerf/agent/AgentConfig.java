@@ -3,6 +3,7 @@ package me.karboom.java.iSerf.agent;
 import lombok.Data;
 import me.karboom.java.iSerf.agent.llmProvider.ILlmProvider;
 import me.karboom.java.iSerf.persistence.IAgentPersistence;
+import me.karboom.java.iSerf.agent.skill.Skill;
 import me.karboom.java.iSerf.agent.tool.Tool;
 import me.karboom.java.iSerf.billing.ILedger;
 import me.karboom.java.iSerf.schedule.ISchedule;
@@ -34,6 +35,11 @@ public class AgentConfig {
      * 工具列表
      */
     private List<Tool<?>> tools;
+
+    /**
+     * 技能列表
+     */
+    private List<Skill> skills;
 
     /**
      * 持久化实现，null 则使用 NoneAgentPersistence
