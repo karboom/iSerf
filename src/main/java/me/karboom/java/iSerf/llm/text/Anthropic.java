@@ -6,6 +6,7 @@ import com.github.victools.jsonschema.module.jackson.JacksonOption;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.tool.Tool;
+import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.ErrorUtil;
 import me.karboom.java.iSerf.util.HttpUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
@@ -600,7 +601,7 @@ public class Anthropic implements IText {
             if (textContent.length() > 0) {
                 var text = textContent.toString();
                 if (isObject) {
-                    text = cleanJsonContent(text);
+                    text = DataUtil.cleanJsonContent(text);
                 }
                 log.debug("<parseOutput> extract text | content=%s, isObject=%s".formatted(text, isObject));
                 choice.setText(text);
@@ -646,18 +647,4 @@ public class Anthropic implements IText {
         return output;
     }
 
-    /**
-     * 清理 JSON 内容，去除 markdown 代码块标记等多余字符
-     */
-    private String cleanJsonContent(String content) {
-        if (content == null || content.isEmpty()) {
-            return content;
-        }
-        // 去除开头的 ```json 或 ```
-        content = content.replaceAll("^```\\w*\\s*\\n?", "");
-        // 去除结尾的 ```
-        content = content.replaceAll("\\n?```\\s*$", "");
-        // 去除首尾空白
-        return content.trim();
-    }
 }

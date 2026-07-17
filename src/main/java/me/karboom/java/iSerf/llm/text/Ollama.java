@@ -7,6 +7,7 @@ import com.github.victools.jsonschema.generator.SchemaVersion;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.tool.Tool;
+import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.HttpUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import okhttp3.*;
@@ -259,7 +260,7 @@ public class Ollama implements IText {
         if (!contentNode.isMissingNode() && !contentNode.isNull()) {
             var contentText = contentNode.asText();
             if (isObject) {
-                contentText = cleanJsonContent(contentText);
+                contentText = DataUtil.cleanJsonContent(contentText);
             }
             log.debug("<parseOutput> extract content | content=%s, isObject=%s".formatted(contentText, isObject));
             choice.text = contentText;
@@ -292,18 +293,4 @@ public class Ollama implements IText {
         return output;
     }
 
-    /**
-     * 清理 JSON 内容，去除 markdown 代码块标记等多余字符
-     */
-    private String cleanJsonContent(String content) {
-        if (content == null || content.isEmpty()) {
-            return content;
-        }
-        // 去除开头的 ```json 或 ```
-        content = content.replaceAll("^```\\w*\\s*\\n?", "");
-        // 去除结尾的 ```
-        content = content.replaceAll("\\n?```\\s*$", "");
-        // 去除首尾空白
-        return content.trim();
-    }
 }

@@ -3,6 +3,7 @@ package me.karboom.java.iSerf.llm.text;
 import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.AgentMessage;
 import me.karboom.java.iSerf.agent.tool.Tool;
+import me.karboom.java.iSerf.util.DataUtil;
 import me.karboom.java.iSerf.util.HttpUtil;
 import me.karboom.java.iSerf.util.JSONUtil;
 import okhttp3.*;
@@ -377,7 +378,7 @@ public class OpenAI extends AbstractOpenAIText {
                     if (!contentNode.isMissingNode() && !contentNode.isNull()) {
                         var contentText = contentNode.asString();
                         if (isObject) {
-                            contentText = cleanJsonContent(contentText);
+                            contentText = DataUtil.cleanJsonContent(contentText);
                         }
                         log.debug("<parseOutput> extract content | content=%s, isObject=%s".formatted(contentText, isObject));
                         outputChoice.text = contentText;
