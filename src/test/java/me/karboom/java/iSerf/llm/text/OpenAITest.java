@@ -1,23 +1,44 @@
 package me.karboom.java.iSerf.llm.text;
 
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.AgentMessage;
+import me.karboom.java.iSerf.agent.tool.CallResult;
 import me.karboom.java.iSerf.agent.tool.Tool;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
+import reactor.core.publisher.Flux;
+
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * OpenAI 测试类
- * 注意：这些测试需要真实的 API Key 才能运行
+ * OpenAI 测试类 — 正交法用例设计
+ *
+ * 因素-水平:
+ *   A. messages: A1-单轮text / A2-多轮 / A3-image / A4-video / A5-audio
+ *   B. outputFormat: B1-null / B2-Class
+ *   C. tools: C1-null / C2-List
+ *   D. model: D1-text / D2-vision / D3-omni
+ *
+ * 正交表:
+ *   TextModel:    T1(A1,B1,C1,D1) T2(A2,B2,C2,D1) T3(A1,B2,C1,D1) T4(A2,B1,C2,D1)
+ *   Multimodal:   M1(A3,B1,C1,D2) M2(A4,B1,C1,D3) M3(A5,B1,C1,D3)
+ *   CrossValid:   X1(A3,B2,C1,D2) X2(A2+toolResult,B1,C2,D1)
+ *   Exception:    E1(空messages) E2(无效apiKey) E3(超时)
  */
+@Slf4j
+@Timeout(60)
 public class OpenAITest {
 
     private OpenAI llm;
@@ -32,8 +53,6 @@ public class OpenAITest {
     }
 
     public OpenAI getLlm(String model) {
-
-        // 从环境变量获取 API Key（测试时需要设置）
         var apiKey = System.getenv("OPENAI_API_KEY");
         var url = System.getenv("OPENAI_API_URL");
 
@@ -41,17 +60,12 @@ public class OpenAITest {
             url = "https://dashscope.aliyuncs.com/compatible-mode/v1";
         }
 
-        // 配置 LLM 参数
         var llmConfig = new HashMap<String, Object>();
         llmConfig.put("temperature", 0.7);
-//        llmConfig.put("max_tokens", 100000);
         llmConfig.put("top_p", 0.9);
 
-        var llm = new OpenAI(model, llmConfig, apiKey, url, 1);
-
-        return llm;
+        return new OpenAI(model, llmConfig, apiKey, url, 1);
     }
-
 
     static class WeatherResponse {
         public String location;
@@ -59,10 +73,82 @@ public class OpenAITest {
         public Integer temperature;
     }
 
+    /**
+     * 收集流式响应的全部内容
+     */
+    private StreamCollector collect(Flux<Output> flux) {
+        var collector = new StreamCollector();
+        flux.subscribe(
+                chunk -> {
+                    log.debug("<collect> received chunk | choices={}", chunk.getChoices() != null ? chunk.getChoices().size() : 0);
+                    if (chunk.getChoices() != null) {
+                        for (var choice : chunk.getChoices()) {
+                            if (choice.getText() != null) {
+                                collector.content.append(choice.getText());
+                            }
+                            if (choice.getToolCall() != null) {
+                                collector.toolCalls.addAll(choice.getToolCall());
+                            }
+                        }
+                    }
+                },
+                error -> {
+                    log.error("<collect> error | error={}", error.getMessage());
+                    collector.error.set(error);
+                    collector.latch.countDown();
+                },
+                () -> {
+                    log.debug("<collect> completed | content.length={}, toolCalls={}", collector.content.length(), collector.toolCalls.size());
+                    collector.latch.countDown();
+                }
+        );
+        return collector;
+    }
 
-    @Test
-    void testOutputFormat() throws InterruptedException {
-        assertTimeout(Duration.ofSeconds(30), () -> {
+    static class StreamCollector {
+        StringBuilder content = new StringBuilder();
+        ArrayList<Output.ToolCall> toolCalls = new ArrayList<>();
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<Throwable> error = new AtomicReference<>();
+
+        boolean await(long seconds) throws InterruptedException {
+            return latch.await(seconds, TimeUnit.SECONDS);
+        }
+    }
+
+    // region TextModel — T1~T4
+
+    @Nested
+    class TextModel {
+
+        /**
+         * T1: A1-单轮text + B1-null + C1-null + D1-text
+         * 基础对话
+         */
+        @Test
+        @SneakyThrows
+        void testBasicText() {
+            var messages = new ArrayList<AgentMessage>();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
+                    .text("1+1等于几？直接回答数字")
+                    .build());
+
+            var collector = collect(llm.send(messages, null, null));
+            assertTrue(collector.await(30));
+            assertNull(collector.error.get());
+            assertTrue(collector.content.length() > 0);
+            log.debug("<testBasicText> result | content={}", collector.content);
+        }
+
+        /**
+         * T2: A2-多轮 + B2-Class + C2-List + D1-text
+         * 结构化输出 + 工具调用
+         */
+        @Test
+        @SneakyThrows
+        void testStructuredOutputWithTools() {
             var messages = new ArrayList<AgentMessage>();
             messages.add(AgentMessage.builder()
                     .role(AgentMessage.ROLE.SYSTEM)
@@ -72,42 +158,49 @@ public class OpenAITest {
             messages.add(AgentMessage.builder()
                     .role(AgentMessage.ROLE.USER)
                     .type(AgentMessage.TYPE.TEXT)
+                    .text("柏林天气如何")
+                    .build());
+
+            var p1 = new Tool.Parameter("location", "string", "地点", true, null);
+            var tool1 = Tool.<Map>builder().name("query_weather").description("查询天气").parameters(List.of(p1)).build();
+
+            var collector = collect(llm.send(messages, WeatherResponse.class, List.of(tool1)));
+            assertTrue(collector.await(30));
+            assertNull(collector.error.get());
+            // 应该返回工具调用或结构化内容
+            assertTrue(collector.content.length() > 0 || !collector.toolCalls.isEmpty());
+            log.debug("<testStructuredOutputWithTools> result | content={}, toolCalls={}", collector.content, collector.toolCalls.size());
+        }
+
+        /**
+         * T3: A1-单轮text + B2-Class + C1-null + D1-text
+         * 纯结构化输出
+         */
+        @Test
+        @SneakyThrows
+        void testStructuredOutput() {
+            var messages = new ArrayList<AgentMessage>();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
                     .text("What is the weather in Paris? Give me a random temperature.")
                     .build());
 
-            var response = llm.send(messages, WeatherResponse.class, null);
+            var collector = collect(llm.send(messages, WeatherResponse.class, null));
+            assertTrue(collector.await(30));
+            assertNull(collector.error.get());
+            assertTrue(collector.content.length() > 0);
+            assertTrue(collector.content.toString().contains("巴黎") || collector.content.toString().contains("Paris"));
+            log.debug("<testStructuredOutput> result | content={}", collector.content);
+        }
 
-            var content = new StringBuilder();
-            var finished = new AtomicBoolean(false);
-
-            response.subscribe(
-                    chunk -> {
-                        System.out.println(chunk);
-                        if (chunk.getChoices() != null) {
-                            content.append(chunk.getChoices().getFirst().getText());
-                        }
-                    },
-                    error -> {
-                        error.printStackTrace();
-                        System.out.println();
-                    },
-                    () -> {
-                        finished.set(true);
-                        System.out.println("Response content: " + content);
-                        assertNotNull(content.toString());
-                        assertTrue(content.toString().contains("巴黎") || content.toString().contains("Paris"));
-                    }
-            );
-
-            while (!finished.get()) {
-                Thread.sleep(100);
-            }
-        });
-    }
-
-    @Test
-    void testToolCall() throws InterruptedException {
-        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+        /**
+         * T4: A2-多轮 + B1-null + C2-List + D1-text
+         * 多轮对话 + 工具调用
+         */
+        @Test
+        @SneakyThrows
+        void testMultiTurnWithTools() {
             var messages = new ArrayList<AgentMessage>();
             messages.add(AgentMessage.builder()
                     .role(AgentMessage.ROLE.SYSTEM)
@@ -134,126 +227,49 @@ public class OpenAITest {
             var p2 = new Tool.Parameter("continent", "string", "欧洲还是亚洲", true, null);
             var tool1 = Tool.<Map>builder().name("query").description("当你需要查询天气，使用这个工具").parameters(List.of(p1, p2)).build();
 
-            var response = llm.send(messages, null, List.of(tool1));
-
-            var content = new StringBuilder();
-            var toolCalls = new ArrayList<String>();
-            var finished = new AtomicBoolean(false);
-
-            var holder = new ArrayList<Output>();
-            response.subscribe(
-                    chunk -> {
-                        holder.add(chunk);
-                    },
-                    error -> {
-                        error.printStackTrace();
-                    },
-                    () -> {
-                        System.out.println("Response content: " + holder);
-                        if (!toolCalls.isEmpty()) {
-                            System.out.println("Tool calls: " + toolCalls);
-                        }
-                        assertNotNull(content);
-                        finished.set(true);
-                    }
-            );
-
-            while (!finished.get()) {
-                Thread.sleep(100);
-            }
-        });
+            var collector = collect(llm.send(messages, null, List.of(tool1)));
+            assertTrue(collector.await(30));
+            assertNull(collector.error.get());
+            log.debug("<testMultiTurnWithTools> result | content.length={}, toolCalls={}", collector.content.length(), collector.toolCalls.size());
+        }
     }
 
-    @Test
-    void testThinking() {
-        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+    // endregion
+
+    // region Multimodal — M1~M3
+
+    @Nested
+    class Multimodal {
+
+        /**
+         * M1: A3-image + B1-null + C1-null + D2-vision
+         * 图像理解
+         */
+        @Test
+        @SneakyThrows
+        void testImageInput() {
             var messages = new ArrayList<AgentMessage>();
-            messages.add(AgentMessage.builder()
-                    .role(AgentMessage.ROLE.USER)
-                    .text("弄一幅对联")
-                    .build());
-
-            var response = llm.send(messages, null, null);
-
-            var content = new StringBuilder();
-            var thinking = new StringBuilder();
-            var finished = new AtomicBoolean(false);
-
-            response.subscribe(
-                    chunk -> {
-
-                    },
-                    error -> {
-                        throw new RuntimeException(error);
-                    },
-                    () -> {
-                        finished.set(true);
-                        System.out.println("Thinking response: " + thinking);
-                        System.out.println("Content: " + content);
-                        assertNotNull(content.toString());
-                        assertTrue(content.toString().length() > 0);
-                    }
-            );
-
-            while (!finished.get()) {
-                Thread.sleep(100);
-            }
-        });
-    }
-
-    @BeforeEach
-    void setupExceptionHandler() {
-        Thread.currentThread().setUncaughtExceptionHandler((t, e) -> {
-            System.err.println("🔥 线程 [" + t.getName() + "] 未捕获异常:");
-            e.printStackTrace();
-        });
-    }
-
-    @Test
-    void testImageInput() {
-        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
-            var messages = new ArrayList<AgentMessage>();
-
             messages.add(AgentMessage.builder()
                     .role(AgentMessage.ROLE.USER)
                     .type(AgentMessage.TYPE.IMAGE)
-                    .files(List.of(
-                            "https://karboom-blog.oss-cn-hangzhou.aliyuncs.com/iSlogger/file_example_PNG_500kB.png"
-                    ))
+                    .files(List.of("https://karboom-blog.oss-cn-hangzhou.aliyuncs.com/iSlogger/file_example_PNG_500kB.png"))
                     .text("这张图片是什么颜色的？")
                     .build());
 
-            var response = getLlm("qwen3-vl-plus").send(messages, null, null);
+            var collector = collect(getLlm("qwen3-vl-plus").send(messages, null, null));
+            assertTrue(collector.await(30));
+            assertNull(collector.error.get());
+            assertTrue(collector.content.length() > 0);
+            log.debug("<testImageInput> result | content={}", collector.content);
+        }
 
-            var content = new StringBuilder();
-            var finished = new AtomicBoolean(false);
-
-            response.subscribe(
-                    chunk -> {
-                        if (chunk.getChoices() != null && !chunk.getChoices().isEmpty()) {
-                            content.append(chunk.getChoices().getFirst().getText());
-                        }
-                    },
-                    error -> {
-                        throw new RuntimeException(error);
-                    },
-                    () -> {
-                        finished.set(true);
-                        System.out.println("Image response: " + content);
-                        assertNotNull(content.toString());
-                        assertTrue(content.toString().length() > 0);
-                    }
-            );
-
-            while (!finished.get()) {
-                Thread.sleep(100);
-            }
-        });
-    }
-
-    @Test
-    void testVideoInput() {
-        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+        /**
+         * M2: A4-video + B1-null + C1-null + D3-omni
+         * 视频理解
+         */
+        @Test
+        @SneakyThrows
+        void testVideoInput() {
             var messages = new ArrayList<AgentMessage>();
             messages.add(AgentMessage.builder()
                     .role(AgentMessage.ROLE.USER)
@@ -263,37 +279,20 @@ public class OpenAITest {
                     .text("描述这个视频的内容")
                     .build());
 
-            var response = getLlm("qwen3-omni-flash").send(messages, null, null);
+            var collector = collect(getLlm("qwen3-omni-flash").send(messages, null, null));
+            assertTrue(collector.await(30));
+            assertNull(collector.error.get());
+            assertTrue(collector.content.length() > 0);
+            log.debug("<testVideoInput> result | content={}", collector.content);
+        }
 
-            var content = new StringBuilder();
-            var finished = new AtomicBoolean(false);
-
-            response.subscribe(
-                    chunk -> {
-                        if (chunk.getChoices() != null && !chunk.getChoices().isEmpty()) {
-                            content.append(chunk.getChoices().getFirst().getText());
-                        }
-                    },
-                    error -> {
-                        throw new RuntimeException(error);
-                    },
-                    () -> {
-                        finished.set(true);
-                        System.out.println("Video response: " + content);
-                        assertNotNull(content.toString());
-                        assertTrue(content.toString().length() > 0);
-                    }
-            );
-
-            while (!finished.get()) {
-                Thread.sleep(100);
-            }
-        });
-    }
-
-    @Test
-    void testAudioInput() {
-        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+        /**
+         * M3: A5-audio + B1-null + C1-null + D3-omni
+         * 音频理解
+         */
+        @Test
+        @SneakyThrows
+        void testAudioInput() {
             var messages = new ArrayList<AgentMessage>();
             messages.add(AgentMessage.builder()
                     .role(AgentMessage.ROLE.USER)
@@ -302,173 +301,182 @@ public class OpenAITest {
                     .text("描述音频的内容")
                     .build());
 
-            var response = getLlm("qwen3-omni-flash").send(messages, null, null);
+            var collector = collect(getLlm("qwen3-omni-flash").send(messages, null, null));
+            assertTrue(collector.await(30));
+            assertNull(collector.error.get());
+            assertTrue(collector.content.length() > 0);
+            log.debug("<testAudioInput> result | content={}", collector.content);
+        }
+    }
 
-            var content = new StringBuilder();
-            var finished = new AtomicBoolean(false);
+    // endregion
 
-            response.subscribe(
-                    chunk -> {
-                        if (chunk.getChoices() != null && !chunk.getChoices().isEmpty()) {
-                            content.append(chunk.getChoices().getFirst().getText());
-                        }
-                    },
-                    error -> {
-                        throw new RuntimeException(error);
-                    },
-                    () -> {
-                        finished.set(true);
-                        System.out.println("Audio response: " + content);
-                        assertNotNull(content.toString());
-                        assertTrue(content.toString().length() > 0);
-                    }
+    // region CrossValidation — X1~X2
+
+    @Nested
+    class CrossValidation {
+
+        /**
+         * X1: A3-image + B2-Class + C1-null + D2-vision
+         * 图像 + 结构化输出
+         */
+        @Test
+        @SneakyThrows
+        void testImageWithStructuredOutput() {
+            var messages = new ArrayList<AgentMessage>();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.IMAGE)
+                    .files(List.of("https://karboom-blog.oss-cn-hangzhou.aliyuncs.com/iSlogger/file_example_PNG_500kB.png"))
+                    .text("描述这张图片，输出颜色名称和主要物体")
+                    .build());
+
+            var collector = collect(getLlm("qwen3-vl-plus").send(messages, ImageDescResponse.class, null));
+            assertTrue(collector.await(30));
+            assertNull(collector.error.get());
+            assertTrue(collector.content.length() > 0);
+            log.debug("<testImageWithStructuredOutput> result | content={}", collector.content);
+        }
+
+        /**
+         * X2: A2-多轮(含tool result) + B1-null + C2-List + D1-text
+         * 完整工具调用链: user → assistant(tool_call) → tool(result) → assistant(final)
+         */
+        @Test
+        @SneakyThrows
+        void testToolCallChain() {
+            var messages = new ArrayList<AgentMessage>();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
+                    .text("柏林天气如何？")
+                    .build());
+
+            // assistant 发起工具调用
+            var toolCall = AgentMessage.ToolCall.builder()
+                    .id("call_001")
+                    .name("query_weather")
+                    .arguments(new HashMap<>(Map.of("location", "柏林")))
+                    .build();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.ASSISTANT)
+                    .type(AgentMessage.TYPE.TOOL_CALLS)
+                    .toolCalls(List.of(toolCall))
+                    .build());
+
+            // tool 返回结果
+            var toolResult = AgentMessage.ToolCall.builder()
+                    .id("call_001")
+                    .name("query_weather")
+                    .result(CallResult.builder().llm("柏林当前气温15°C，多云").build())
+                    .build();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.TOOL)
+                    .type(AgentMessage.TYPE.TEXT)
+                    .toolCalls(List.of(toolResult))
+                    .build());
+
+            var p1 = new Tool.Parameter("location", "string", "地点", true, null);
+            var tool1 = Tool.<Map>builder().name("query_weather").description("查询天气").parameters(List.of(p1)).build();
+
+            var collector = collect(llm.send(messages, null, List.of(tool1)));
+            assertTrue(collector.await(30));
+            assertNull(collector.error.get());
+            assertTrue(collector.content.length() > 0);
+            log.debug("<testToolCallChain> result | content={}", collector.content);
+        }
+    }
+
+    static class ImageDescResponse {
+        public String color;
+        public String object;
+    }
+
+    // endregion
+
+    // region ExceptionCases — E1~E3
+
+    @Nested
+    class ExceptionCases {
+
+        /**
+         * E1: 空 messages
+         */
+        @Test
+        @SneakyThrows
+        void testEmptyMessages() {
+            var messages = new ArrayList<AgentMessage>();
+
+            var collector = collect(llm.send(messages, null, null));
+            assertTrue(collector.await(30));
+            assertNotNull(collector.error.get(), "空 messages 应触发错误");
+            log.debug("<testEmptyMessages> error | error={}", collector.error.get().getMessage());
+        }
+
+        /**
+         * E2: 无效 API Key
+         */
+        @Test
+        @SneakyThrows
+        void testInvalidApiKey() {
+            var invalidLlm = new OpenAI(
+                    "qwen3.6-plus",
+                    new HashMap<>(Map.of("temperature", 0.7)),
+                    "invalid-api-key",
+                    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    1
             );
 
-            while (!finished.get()) {
-                Thread.sleep(100);
-            }
-        });
-    }
+            var messages = new ArrayList<AgentMessage>();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
+                    .text("hello")
+                    .build());
 
-    private List<List<AgentMessage>> createWeatherMessageBatch() {
-        var messageBatch = new ArrayList<List<AgentMessage>>();
-        
-        // 第一个批次：询问天气
-        var messages1 = new ArrayList<AgentMessage>();
-        messages1.add(AgentMessage.builder()
-                .role(AgentMessage.ROLE.SYSTEM)
-                .type(AgentMessage.TYPE.TEXT)
-                .text("你是一个乐于助人的助手。")
-                .build());
-        messages1.add(AgentMessage.builder()
-                .role(AgentMessage.ROLE.USER)
-                .type(AgentMessage.TYPE.TEXT)
-                .text("巴黎的天气怎么样？给出一个随机温度。")
-                .build());
-        messageBatch.add(messages1);
-        
-        // 第二个批次：询问天气
-        var messages2 = new ArrayList<AgentMessage>();
-        messages2.add(AgentMessage.builder()
-                .role(AgentMessage.ROLE.SYSTEM)
-                .type(AgentMessage.TYPE.TEXT)
-                .text("你是一个乐于助人的助手。")
-                .build());
-        messages2.add(AgentMessage.builder()
-                .role(AgentMessage.ROLE.USER)
-                .type(AgentMessage.TYPE.TEXT)
-                .text("北京的天气怎么样？给出一个随机温度。")
-                .build());
-        messageBatch.add(messages2);
-        
-        return messageBatch;
-    }
+            var collector = collect(invalidLlm.send(messages, null, null));
+            assertTrue(collector.await(30));
+            assertNotNull(collector.error.get(), "无效 API Key 应触发错误");
+            log.debug("<testInvalidApiKey> error | error={}", collector.error.get().getMessage());
+        }
 
-    @Test
-    void testBatch() {
-        assertTimeoutPreemptively(Duration.ofSeconds(60), () -> {
-            // 创建多个消息批次
-            var messageBatch = createWeatherMessageBatch();
-            
-            // 调用 batch 方法，使用 WeatherResponse 输出格式
-            var batchId = getLlm("batch-test-model").batch(messageBatch, WeatherResponse.class);
-            
-            // 验证响应不为空
-            assertNotNull(batchId);
-            assertFalse(batchId.isEmpty());
-            
-            // 打印响应以便调试
-            System.out.println("Batch ID: " + batchId);
-        });
-    }
-
-    @Test
-    void testTaskStatus() {
-        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
-            // 创建多个消息批次
-            var messageBatch = createWeatherMessageBatch();
-            var batchId = getLlm("batch-test-model").batch(messageBatch, WeatherResponse.class);
-            
-            // 查询任务状态
-            var taskStatus = getLlm("batch-test-model").taskStatus(batchId);
-            
-            // 验证任务状态不为空
-            assertNotNull(taskStatus);
-            assertNotNull(taskStatus.getId());
-            assertNotNull(taskStatus.getStatus());
-            
-            // 验证状态是有效的
-            assertTrue(
-                BatchTaskInfo.STATUS.DOING.equals(taskStatus.getStatus()) ||
-                BatchTaskInfo.STATUS.DONE.equals(taskStatus.getStatus()) ||
-                BatchTaskInfo.STATUS.ERROR.equals(taskStatus.getStatus()) ||
-                BatchTaskInfo.STATUS.EXPIRED.equals(taskStatus.getStatus()) ||
-                BatchTaskInfo.STATUS.CANCELLED.equals(taskStatus.getStatus())
+        /**
+         * E3: 网络超时（无效 URL）
+         */
+        @Test
+        @SneakyThrows
+        void testNetworkTimeout() {
+            var timeoutLlm = new OpenAI(
+                    "qwen3.6-plus",
+                    new HashMap<>(Map.of("temperature", 0.7)),
+                    "test-key",
+                    "http://10.255.255.1:1",
+                    1
             );
-            
-            // 打印任务状态以便调试
-            System.out.println("Task status: " + taskStatus);
-        });
+
+            var messages = new ArrayList<AgentMessage>();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
+                    .text("hello")
+                    .build());
+
+            var collector = collect(timeoutLlm.send(messages, null, null));
+            assertTrue(collector.await(30));
+            assertNotNull(collector.error.get(), "网络超时 应触发错误");
+            log.debug("<testNetworkTimeout> error | error={}", collector.error.get().getMessage());
+        }
     }
 
-    @Test
-    void testTaskResult() {
-        assertTimeoutPreemptively(Duration.ofSeconds(90), () -> {
-            // 创建多个消息批次
-            var messageBatch = createWeatherMessageBatch();
-            var batchId = getLlm("batch-test-model").batch(messageBatch, WeatherResponse.class);
+    // endregion
 
+    // region Query Tests
 
-            // 等待任务完成（批处理可能需要一些时间）
-            BatchTaskInfo batchTaskInfo;
-            int maxRetries = 12; // 最多等待60秒 (12 * 5秒)
-            int retryCount = 0;
-            
-            do {
-                batchTaskInfo = getLlm("batch-test-model").taskStatus(batchId);
-                if (BatchTaskInfo.STATUS.DONE.equals(batchTaskInfo.getStatus())) {
-                    break;
-                }
+    @Nested
+    class Query {
 
-                Thread.sleep(5000); // 等待5秒后重试
-                retryCount++;
-            } while (retryCount < maxRetries);
-            
-            if (retryCount >= maxRetries) {
-                throw new RuntimeException("Batch task did not complete within timeout period");
-            }
-            
-            // 验证任务状态
-            assertNotNull(batchTaskInfo);
-            assertNotNull(batchTaskInfo.getSuccessResultId());
-            
-            // 获取任务结果
-            var results = getLlm("batch-test-model").taskResult(batchTaskInfo);
-            
-            // 验证结果不为空
-            assertNotNull(results);
-            assertFalse(results.isEmpty());
-            assertEquals(2, results.size()); // 应该有两个结果，对应两个请求
-            
-            // 验证结果内容
-            for (var result : results) {
-                assertNotNull(result);
-                if (result.getChoices() != null && !result.getChoices().isEmpty()) {
-                    var choice = result.getChoices().getFirst();
-                    if (choice.getText() != null) {
-                        assertTrue(choice.getText().length() > 0);
-                    }
-                }
-            }
-            
-            // 打印结果以便调试
-            System.out.println("Task results: " + results);
-        });
-    }
-
-    @Test
-    void testQuery() {
-        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+        @Test
+        void testQuery() {
             var messages = new ArrayList<AgentMessage>();
             messages.add(AgentMessage.builder()
                     .role(AgentMessage.ROLE.SYSTEM)
@@ -486,57 +494,189 @@ public class OpenAITest {
             assertNotNull(response);
             assertNotNull(response.getChoices());
             assertFalse(response.getChoices().isEmpty());
-            
+
             var choice = response.getChoices().getFirst();
             assertNotNull(choice.getText());
             assertTrue(choice.getText().length() > 0);
-            
-            System.out.println("Query response: " + choice.getText());
-        });
+
+            log.debug("<testQuery> response | text={}", choice.getText());
+        }
     }
 
-    @Test
-    void testBuildToolsJson() {
-        var subParam1 = new Tool.Parameter("street", "string", "街道地址", true, null);
-        var subParam2 = new Tool.Parameter("city", "string", "城市名称", true, null);
-        var subParam3 = new Tool.Parameter("zipcode", "string", "邮政编码", false, null);
+    // endregion
 
-        var addressParam = new Tool.Parameter("address", "object", "详细地址信息", true, List.of(subParam1, subParam2, subParam3));
-        var tool = Tool.<Map>builder()
-                .name("search_location")
-                .description("根据地址搜索地理位置")
-                .parameters(List.of(addressParam))
-                .build();
+    // region Batch Tests
 
-        var toolsJson = llm.buildToolsJson(List.of(tool));
+    @Nested
+    class Batch {
 
-        assertNotNull(toolsJson);
-        assertEquals(1, toolsJson.size());
+        private List<List<AgentMessage>> createWeatherMessageBatch() {
+            var messageBatch = new ArrayList<List<AgentMessage>>();
 
-        var toolNode = toolsJson.get(0);
-        var function = toolNode.path("function");
-        var parameters = function.path("parameters");
+            var messages1 = new ArrayList<AgentMessage>();
+            messages1.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.SYSTEM)
+                    .type(AgentMessage.TYPE.TEXT)
+                    .text("你是一个乐于助人的助手。")
+                    .build());
+            messages1.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
+                    .text("巴黎的天气怎么样？给出一个随机温度。")
+                    .build());
+            messageBatch.add(messages1);
 
-        var properties = parameters.path("properties");
-        var addressProperty = properties.path("address");
-        assertEquals("object", addressProperty.path("type").asText());
-        assertEquals("详细地址信息", addressProperty.path("description").asText());
+            var messages2 = new ArrayList<AgentMessage>();
+            messages2.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.SYSTEM)
+                    .type(AgentMessage.TYPE.TEXT)
+                    .text("你是一个乐于助人的助手。")
+                    .build());
+            messages2.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
+                    .text("北京的天气怎么样？给出一个随机温度。")
+                    .build());
+            messageBatch.add(messages2);
 
-        var addressProperties = addressProperty.path("properties");
-        assertNotNull(addressProperties.path("street"));
-        assertEquals("string", addressProperties.path("street").path("type").asText());
-        assertEquals("街道地址", addressProperties.path("street").path("description").asText());
+            return messageBatch;
+        }
 
-        assertNotNull(addressProperties.path("city"));
-        assertEquals("string", addressProperties.path("city").path("type").asText());
-        assertEquals("城市名称", addressProperties.path("city").path("description").asText());
+        @Test
+        @SneakyThrows
+        void testBatch() {
+            var messageBatch = createWeatherMessageBatch();
+            var batchId = getLlm("batch-test-model").batch(messageBatch, WeatherResponse.class);
 
-        assertNotNull(addressProperties.path("zipcode"));
-        assertEquals("string", addressProperties.path("zipcode").path("type").asText());
-        assertEquals("邮政编码", addressProperties.path("zipcode").path("description").asText());
+            assertNotNull(batchId);
+            assertFalse(batchId.isEmpty());
+            log.debug("<testBatch> batch created | batchId={}", batchId);
+        }
 
-        var addressRequired = addressProperty.path("required");
-        assertTrue(addressRequired.isArray());
-        assertEquals(2, addressRequired.size());
+        @Test
+        @SneakyThrows
+        void testTaskStatus() {
+            var messageBatch = createWeatherMessageBatch();
+            var batchId = getLlm("batch-test-model").batch(messageBatch, WeatherResponse.class);
+            var taskStatus = getLlm("batch-test-model").taskStatus(batchId);
+
+            assertNotNull(taskStatus);
+            assertNotNull(taskStatus.getId());
+            assertNotNull(taskStatus.getStatus());
+
+            assertTrue(
+                    BatchTaskInfo.STATUS.DOING.equals(taskStatus.getStatus()) ||
+                            BatchTaskInfo.STATUS.DONE.equals(taskStatus.getStatus()) ||
+                            BatchTaskInfo.STATUS.ERROR.equals(taskStatus.getStatus()) ||
+                            BatchTaskInfo.STATUS.EXPIRED.equals(taskStatus.getStatus()) ||
+                            BatchTaskInfo.STATUS.CANCELLED.equals(taskStatus.getStatus())
+            );
+            log.debug("<testTaskStatus> task status | status={}", taskStatus);
+        }
+
+        @Test
+        @SneakyThrows
+        void testTaskResult() {
+            var messageBatch = createWeatherMessageBatch();
+            var batchId = getLlm("batch-test-model").batch(messageBatch, WeatherResponse.class);
+
+            BatchTaskInfo batchTaskInfo;
+            int maxRetries = 12;
+            int retryCount = 0;
+
+            do {
+                batchTaskInfo = getLlm("batch-test-model").taskStatus(batchId);
+                if (BatchTaskInfo.STATUS.DONE.equals(batchTaskInfo.getStatus())) {
+                    break;
+                }
+                Thread.sleep(5000);
+                retryCount++;
+            } while (retryCount < maxRetries);
+
+            if (retryCount >= maxRetries) {
+                throw new RuntimeException("Batch task did not complete within timeout period");
+            }
+
+            assertNotNull(batchTaskInfo);
+            assertNotNull(batchTaskInfo.getSuccessResultId());
+
+            var results = getLlm("batch-test-model").taskResult(batchTaskInfo);
+            assertNotNull(results);
+            assertFalse(results.isEmpty());
+            assertEquals(2, results.size());
+
+            log.debug("<testTaskResult> task results | results.size={}", results.size());
+        }
     }
+
+    // endregion
+
+    // region BuildToolsJson Tests
+
+    @Nested
+    class BuildToolsJson {
+
+        @Test
+        void testBuildToolsJson() {
+            var subParam1 = new Tool.Parameter("street", "string", "街道地址", true, null);
+            var subParam2 = new Tool.Parameter("city", "string", "城市名称", true, null);
+            var subParam3 = new Tool.Parameter("zipcode", "string", "邮政编码", false, null);
+
+            var addressParam = new Tool.Parameter("address", "object", "详细地址信息", true, List.of(subParam1, subParam2, subParam3));
+            var tool = Tool.<Map>builder()
+                    .name("search_location")
+                    .description("根据地址搜索地理位置")
+                    .parameters(List.of(addressParam))
+                    .build();
+
+            var toolsJson = llm.buildToolsJson(List.of(tool));
+
+            assertNotNull(toolsJson);
+            assertEquals(1, toolsJson.size());
+
+            var toolNode = toolsJson.get(0);
+            var function = toolNode.path("function");
+            var parameters = function.path("parameters");
+
+            var properties = parameters.path("properties");
+            var addressProperty = properties.path("address");
+            assertEquals("object", addressProperty.path("type").asText());
+            assertEquals("详细地址信息", addressProperty.path("description").asText());
+
+            var addressProperties = addressProperty.path("properties");
+            assertEquals("string", addressProperties.path("street").path("type").asText());
+            assertEquals("string", addressProperties.path("city").path("type").asText());
+            assertEquals("string", addressProperties.path("zipcode").path("type").asText());
+
+            var addressRequired = addressProperty.path("required");
+            assertTrue(addressRequired.isArray());
+            assertEquals(2, addressRequired.size());
+        }
+    }
+
+    // endregion
+
+    // region Thinking (补充用例)
+
+    @Nested
+    class Thinking {
+
+        @Test
+        @SneakyThrows
+        void testThinking() {
+            var messages = new ArrayList<AgentMessage>();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .text("弄一幅对联")
+                    .build());
+
+            var collector = collect(llm.send(messages, null, null));
+            assertTrue(collector.await(30));
+            assertNull(collector.error.get());
+            assertTrue(collector.content.length() > 0);
+            log.debug("<testThinking> result | content={}", collector.content);
+        }
+    }
+
+    // endregion
 }

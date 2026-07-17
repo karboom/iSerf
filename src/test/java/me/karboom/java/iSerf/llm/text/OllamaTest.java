@@ -1,22 +1,41 @@
 package me.karboom.java.iSerf.llm.text;
 
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import me.karboom.java.iSerf.agent.AgentMessage;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
+import reactor.core.publisher.Flux;
+
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Ollama 测试类
- * 注意：这些测试需要本地运行的 Ollama 服务
- * 启动 Ollama: ollama serve
+ * Ollama 测试类 — 正交法用例设计
+ * 注意：这些测试需要本地运行的 Ollama 服务 (ollama serve)
+ *
+ * 因素-水平:
+ *   A. messages: A1-单轮text / A2-多轮
+ *   B. outputFormat: B1-null / B2-Class
+ *   C. tools: 不支持
+ *   D. model: D1-text (qwen2.5:7b)
+ *
+ * 正交表:
+ *   TextModel:    T1(A1,B1) T3(A1,B2) T4'(A2,B1)
+ *   Exception:    E1(空messages)
+ *   Unsupported:  batch/taskStatus/taskResult
  */
+@Slf4j
+@Timeout(60)
 public class OllamaTest {
 
     private Ollama llm;
@@ -26,12 +45,11 @@ public class OllamaTest {
         llm = getLlm();
     }
 
-    public Ollama getLlm() {
+    private Ollama getLlm() {
         return this.getLlm("qwen2.5:7b");
     }
 
-    public Ollama getLlm(String model) {
-        // Ollama 通常不需要 API Key
+    private Ollama getLlm(String model) {
         var apiKey = System.getenv("OLLAMA_API_KEY");
         var url = System.getenv("OLLAMA_URL");
 
@@ -39,15 +57,12 @@ public class OllamaTest {
             url = "http://localhost:11434";
         }
 
-        // 配置 LLM 参数
         var llmConfig = new HashMap<String, Object>();
         llmConfig.put("temperature", 0.7);
         llmConfig.put("max_tokens", 1000);
         llmConfig.put("top_p", 0.9);
 
-        var llm = new Ollama(model, llmConfig, apiKey, url, 1);
-
-        return llm;
+        return new Ollama(model, llmConfig, apiKey, url, 1);
     }
 
     static class WeatherResponse {
@@ -56,9 +71,97 @@ public class OllamaTest {
         public Integer temperature;
     }
 
-    @Test
-    void testSend() {
-        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+    private StreamCollector collect(Flux<Output> flux) {
+        var collector = new StreamCollector();
+        flux.subscribe(
+                chunk -> {
+                    log.debug("<collect> received chunk | choices={}", chunk.getChoices() != null ? chunk.getChoices().size() : 0);
+                    if (chunk.getChoices() != null) {
+                        for (var choice : chunk.getChoices()) {
+                            if (choice.getText() != null) {
+                                collector.content.append(choice.getText());
+                            }
+                        }
+                    }
+                },
+                error -> {
+                    log.error("<collect> error | error={}", error.getMessage());
+                    collector.error.set(error);
+                    collector.latch.countDown();
+                },
+                () -> {
+                    log.debug("<collect> completed | content.length={}", collector.content.length());
+                    collector.latch.countDown();
+                }
+        );
+        return collector;
+    }
+
+    static class StreamCollector {
+        StringBuilder content = new StringBuilder();
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<Throwable> error = new AtomicReference<>();
+
+        boolean await(long seconds) throws InterruptedException {
+            return latch.await(seconds, TimeUnit.SECONDS);
+        }
+    }
+
+    // region TextModel — T1, T3, T4'
+
+    @Nested
+    class TextModel {
+
+        /**
+         * T1: A1-单轮text + B1-null
+         * 基础对话
+         */
+        @Test
+        @SneakyThrows
+        void testBasicText() {
+            var messages = new ArrayList<AgentMessage>();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
+                    .text("What is the capital of France?")
+                    .build());
+
+            var collector = collect(llm.send(messages, null, null));
+            assertTrue(collector.await(30));
+            assertNull(collector.error.get());
+            assertTrue(collector.content.length() > 0);
+            assertTrue(collector.content.toString().toLowerCase().contains("paris"));
+            log.debug("<testBasicText> result | content={}", collector.content);
+        }
+
+        /**
+         * T3: A1-单轮text + B2-Class
+         * 结构化输出 (Ollama 使用 format:json)
+         */
+        @Test
+        @SneakyThrows
+        void testStructuredOutput() {
+            var messages = new ArrayList<AgentMessage>();
+            messages.add(AgentMessage.builder()
+                    .role(AgentMessage.ROLE.USER)
+                    .type(AgentMessage.TYPE.TEXT)
+                    .text("北京的气温是多少度？用 JSON 格式回答。")
+                    .build());
+
+            var collector = collect(llm.send(messages, WeatherResponse.class, null));
+            assertTrue(collector.await(30));
+            assertNull(collector.error.get());
+            assertTrue(collector.content.length() > 0);
+            log.debug("<testStructuredOutput> result | content={}", collector.content);
+        }
+
+        /**
+         * T4': A2-多轮 + B1-null
+         * 多轮对话 (Ollama 不支持 tools)
+         */
+        @Test
+        @SneakyThrows
+        void testMultiTurn() {
             var messages = new ArrayList<AgentMessage>();
             messages.add(AgentMessage.builder()
                     .role(AgentMessage.ROLE.SYSTEM)
@@ -70,87 +173,55 @@ public class OllamaTest {
                     .type(AgentMessage.TYPE.TEXT)
                     .text("What is the capital of France?")
                     .build());
-
-            var response = llm.send(messages, null, null);
-
-            var content = new StringBuilder();
-            var finished = new AtomicBoolean(false);
-
-            response.subscribe(
-                    chunk -> {
-                        System.out.println("Chunk: " + chunk);
-                        if (chunk.getChoices() != null && !chunk.getChoices().isEmpty()) {
-                            var text = chunk.getChoices().getFirst().getText();
-                            if (text != null) {
-                                content.append(text);
-                            }
-                        }
-                    },
-                    error -> {
-                        error.printStackTrace();
-                    },
-                    () -> {
-                        finished.set(true);
-                        System.out.println("Response content: " + content);
-                        assertNotNull(content.toString());
-                        assertTrue(content.toString().toLowerCase().contains("paris"));
-                    }
-            );
-
-            while (!finished.get()) {
-                Thread.sleep(100);
-            }
-        });
-    }
-
-    @Test
-    void testOutputFormat() {
-        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
-            var messages = new ArrayList<AgentMessage>();
             messages.add(AgentMessage.builder()
-                    .role(AgentMessage.ROLE.SYSTEM)
+                    .role(AgentMessage.ROLE.ASSISTANT)
                     .type(AgentMessage.TYPE.TEXT)
-                    .text("You are a helpful assistant.")
+                    .text("The capital of France is Paris.")
                     .build());
             messages.add(AgentMessage.builder()
                     .role(AgentMessage.ROLE.USER)
                     .type(AgentMessage.TYPE.TEXT)
-                    .text("北京的气温是多少度？用 JSON 格式回答。")
+                    .text("What is its population?")
                     .build());
 
-            var response = llm.send(messages, WeatherResponse.class, null);
-
-            var content = new StringBuilder();
-            var finished = new AtomicBoolean(false);
-
-            response.subscribe(
-                    chunk -> {
-                        if (chunk.getChoices() != null && !chunk.getChoices().isEmpty()) {
-                            var text = chunk.getChoices().getFirst().getText();
-                            if (text != null) {
-                                content.append(text);
-                            }
-                        }
-                    },
-                    error -> {
-                        error.printStackTrace();
-                    },
-                    () -> {
-                        finished.set(true);
-                        System.out.println("Response content: " + content);
-                        assertNotNull(content.toString());
-                    }
-            );
-
-            while (!finished.get()) {
-                Thread.sleep(100);
-            }
-        });
+            var collector = collect(llm.send(messages, null, null));
+            assertTrue(collector.await(30));
+            assertNull(collector.error.get());
+            assertTrue(collector.content.length() > 0);
+            log.debug("<testMultiTurn> result | content={}", collector.content);
+        }
     }
 
-    @Test
-    void testQuery() {
-        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+    // endregion
+
+    // region ExceptionCases — E1
+
+    @Nested
+    class ExceptionCases {
+
+        /**
+         * E1: 空 messages
+         */
+        @Test
+        @SneakyThrows
+        void testEmptyMessages() {
+            var messages = new ArrayList<AgentMessage>();
+            var collector = collect(llm.send(messages, null, null));
+            assertTrue(collector.await(30));
+            assertNotNull(collector.error.get(), "空 messages 应触发错误");
+            log.debug("<testEmptyMessages> error | error={}", collector.error.get().getMessage());
+        }
+    }
+
+    // endregion
+
+    // region Query Tests
+
+    @Nested
+    class Query {
+
+        @Test
+        void testQuery() {
             var messages = new ArrayList<AgentMessage>();
             messages.add(AgentMessage.builder()
                     .role(AgentMessage.ROLE.SYSTEM)
@@ -173,13 +244,19 @@ public class OllamaTest {
             assertNotNull(choice.getText());
             assertTrue(choice.getText().length() > 0);
 
-            System.out.println("Query response: " + choice.getText());
-        });
+            log.debug("<testQuery> response | text={}", choice.getText());
+        }
     }
 
-    @Test
-    void testBatchNotSupported() {
-        assertThrows(UnsupportedOperationException.class, () -> {
+    // endregion
+
+    // region Unsupported Operations Tests
+
+    @Nested
+    class UnsupportedOperations {
+
+        @Test
+        void testBatchNotSupported() {
             var messages = new ArrayList<List<AgentMessage>>();
             var msg = new ArrayList<AgentMessage>();
             msg.add(AgentMessage.builder()
@@ -189,30 +266,20 @@ public class OllamaTest {
                     .build());
             messages.add(msg);
 
-            llm.batch(messages, null);
-        });
-    }
+            assertThrows(UnsupportedOperationException.class, () -> llm.batch(messages, null));
+        }
 
-    @Test
-    void testTaskStatusNotSupported() {
-        assertThrows(UnsupportedOperationException.class, () -> {
-            llm.taskStatus("test-id");
-        });
-    }
+        @Test
+        void testTaskStatusNotSupported() {
+            assertThrows(UnsupportedOperationException.class, () -> llm.taskStatus("test-id"));
+        }
 
-    @Test
-    void testTaskResultNotSupported() {
-        assertThrows(UnsupportedOperationException.class, () -> {
+        @Test
+        void testTaskResultNotSupported() {
             var task = BatchTaskInfo.builder().id("test-id").build();
-            llm.taskResult(task);
-        });
+            assertThrows(UnsupportedOperationException.class, () -> llm.taskResult(task));
+        }
     }
 
-    @BeforeEach
-    void setupExceptionHandler() {
-        Thread.currentThread().setUncaughtExceptionHandler((t, e) -> {
-            System.err.println("🔥 线程 [" + t.getName() + "] 未捕获异常:");
-            e.printStackTrace();
-        });
-    }
+    // endregion
 }
