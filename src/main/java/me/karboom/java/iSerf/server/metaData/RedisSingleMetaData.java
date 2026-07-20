@@ -22,15 +22,25 @@ public class RedisSingleMetaData implements IMetaData{
     public RedisClient client;
     public StatefulRedisConnection<String, String> connection;
     public RedisCommands<String, String> commands;
-    private static final String NODES_KEY = "Nodes";
-    private static final String AGENT_STAY_TEMPLATE = "AS:%s";
-    private static final String AGENT_SUBSCRIBE_TEMPLATE = "AN:%s";
-    private static final String TEAM_STAY_TEMPLATE = "TS:%s";
+    private final String NODES_KEY;
+    private final String AGENT_STAY_TEMPLATE;
+    private final String AGENT_SUBSCRIBE_TEMPLATE;
+    private final String TEAM_STAY_TEMPLATE;
 
     public RedisSingleMetaData(String url) {
+        this(url, "");
+    }
+
+    public RedisSingleMetaData(String url, String keyPrefix) {
+        log.debug("<RedisSingleMetaData> 初始化 Redis 连接 | url={},keyPrefix={}", url, keyPrefix);
         this.client = RedisClient.create(url);
         this.connection = client.connect();
         this.commands = connection.sync();
+        var prefix = (keyPrefix == null || keyPrefix.isEmpty()) ? "" : keyPrefix + ":";
+        NODES_KEY = prefix + "Nodes";
+        AGENT_STAY_TEMPLATE = prefix + "AS:%s";
+        AGENT_SUBSCRIBE_TEMPLATE = prefix + "AN:%s";
+        TEAM_STAY_TEMPLATE = prefix + "TS:%s";
     }
 
     @Override
