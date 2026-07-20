@@ -366,23 +366,30 @@ public class Agent {
                         if (thinking != null && !thinking.toString().equals("null")) {
                             thinkingItem.setId(UUID.randomUUID().toString());
                             thinkingItem.setText(thinkingItem.getText() + thinking);
+
+                            var thinkingSegment = AgentMessage.builder().role(AgentMessage.ROLE.ASSISTANT).type(AgentMessage.TYPE.THINKING).text(thinking.toString()).isSegment(1).build();
+
+                            observer.onThinking(thinkingSegment);
                         } else if (toolCalls != null) {
+                            // Todo toolcall返回不及预期的时候，有可能先出问题再出toolCall
+                            // Todo toolcall可能被循环触发
                             if (thinkingItem.getId() != null) {
+                                // thinking阶段结束，更新thinkingItem为非片段并发送
                                 observer.onThinking(thinkingItem);
-                                thinkingItem.setId(null);
                             }
                             toolCall.add(chunk);
                             observer.onToolCalls(toolCall);
                         } else if (content != null) {
                             if (thinkingItem.getId() != null) {
+                                // thinking阶段结束，更新thinkingItem为非片段并发送
                                 observer.onThinking(thinkingItem);
-                                thinkingItem.setId(null);
                             }
 
                             contentItem.setId(UUID.randomUUID().toString());
                             contentItem.setText(contentItem.getText() + content);
                             if (format == null) {
-                                observer.onContentChunk(content.toString());
+                                var contentItemSegment = AgentMessage.builder().id(UUID.randomUUID().toString()).role(contentItem.getRole()).type(AgentMessage.TYPE.TEXT).text(content).isSegment(1).build();
+                                observer.onContent(contentItemSegment);
                             }
                         }
                     } else if (chunk.getUsage() != null) {
@@ -399,7 +406,6 @@ public class Agent {
                                 contentItem.setFormatted(JSONUtil.parse(contentItem.getText(), format));
                             }
                             observer.onContent(contentItem);
-                            contentItem.setId(null);
                         }
                     }
 
@@ -528,6 +534,7 @@ public class Agent {
      * @param event
      */
     private void handleMessage(AgentEvent event) {
+        var self = this;
         var userMessage = event.getMessage();
         userMessage.setEventId(event.getId());
 
@@ -544,29 +551,24 @@ public class Agent {
             @Override
             public void onThinking(AgentMessage message) {
                 sink.tryEmitNext(message);
-                memoryManager.add(message);
-                persistence.addMemory(Agent.this);
+
+                if (message.isSegment.equals(0)) {
+                    memoryManager.add(message);
+                    persistence.addMemory(self);
+                }
             }
 
             @Override
             public void onToolCalls(List<Output> toolCallChunks) {
             }
 
-            @Override
-            public void onContentChunk(String delta) {
-                sink.tryEmitNext(AgentMessage.builder()
-                        .id(UUID.randomUUID().toString())
-                        .role(AgentMessage.ROLE.ASSISTANT)
-                        .type(AgentMessage.TYPE.TEXT)
-                        .text(delta)
-                        .isSegment(1)
-                        .build());
-            }
 
             @Override
             public void onContent(AgentMessage message) {
                 sink.tryEmitNext(message);
-                memoryManager.add(message);
+                if (message.isSegment.equals(0)) {
+                    memoryManager.add(message);
+                }
             }
         };
 
@@ -612,8 +614,20 @@ public class Agent {
                                 // 持久化新增工具调用缓存
                                 persistence.addToolCall(this);
 
+                                // 构造并保存记忆
+                                var customMessage = AgentMessage.builder()
+                                        .role(AgentMessage.ROLE.ASSISTANT)
+                                        .type(AgentMessage.TYPE.CUSTOM)
+                                        .toolCalls(List.of(call))
+                                        .custom(call.getResult().getDirect())
+                                        .isSegment(0)
+                                        .isForgotten(0)
+                                        .eventId(event.getId())
+                                        .build();
+                                memoryManager.add(customMessage);
+
                                 // 触发消息
-                                sink.tryEmitNext(AgentMessage.builder().toolCalls(List.of(call)).custom(call.getResult().getDirect()).type(AgentMessage.TYPE.CUSTOM).isSegment(0).build());
+                                sink.tryEmitNext(customMessage);
                             }
                         }
 

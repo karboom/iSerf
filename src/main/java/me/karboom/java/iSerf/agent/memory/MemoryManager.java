@@ -91,6 +91,7 @@ public class MemoryManager {
         return messages.stream()
                 .filter(item -> item.getIsForgotten() == null || item.getIsForgotten() == 0)
                 .filter(item -> !AgentMessage.TYPE.THINKING.equals(item.getType()))
+                .filter(item -> !AgentMessage.TYPE.CUSTOM.equals(item.getType()))
                 .toList();
     }
 
