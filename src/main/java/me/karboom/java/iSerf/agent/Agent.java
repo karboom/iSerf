@@ -22,8 +22,6 @@ import reactor.core.publisher.Mono;
 
 import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
-import reactor.util.function.Tuple3;
-import reactor.util.function.Tuples;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.file.Path;
@@ -32,6 +30,7 @@ import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.PriorityBlockingQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
@@ -332,31 +331,54 @@ public class Agent {
     }
 
     /**
-     * 处理 LLM 流式响应，纯累积 + 通过 observer 通知生命周期事件
+     * 处理 LLM 流式响应，将 Flux&lt;Output&gt; 转换为 Flux&lt;AgentMessage&gt;
      *
-     * @param flux     LLM 流式输出
-     * @param format   返回格式（可选）
-     * @param event    触发事件
-     * @param observer 流生命周期观察者，决定 emit / 记忆存储等副作用
-     * @return (最终文本消息, 工具调用列表, 最终文本消息) 的三元组
+     * 输出的消息类型：
+     * 1. THINKING 片段（isSegment=1）；thinking 阶段结束（第一个非 thinking 片段到达）时输出一条完整的 THINKING 消息（isSegment=0）
+     * 2. TEXT 片段（isSegment=1，仅在 format 为空时输出）
+     * 3. 上游流结束时的收尾消息，依次为：完整的 TEXT 消息（isSegment=0，收到过 usage 则携带 usage，format 非空时携带 formatted）、
+     *    TOOL_CALLS 消息（携带 merge 之后的全部工具调用，isSegment=0）
+     *
+     * 完整消息的收尾与 usage 解耦：上游未返回 usage 时，流结束同样补齐 thinking / content 的完整消息
+     *
+     * 本方法只负责转换，不做广播、记忆存储、工具调用等副作用，由外层消费方（invoke / handleMessage）决定
+     *
+     * @param flux   LLM 流式输出
+     * @param format 返回格式（可选）
+     * @param event  触发事件（可选）
+     * @return AgentMessage 流
      */
-    private Mono<Tuple3<AgentMessage, List<Output>, AgentMessage>> fluxHandle(Flux<Output> flux, Class format, AgentEvent event, StreamObserver observer) {
-        observer.onStart();
+    private Flux<AgentMessage> fluxTransform(Flux<Output> flux, Class format, AgentEvent event) {
+        var eventId = event != null ? event.getId() : null;
 
-        return flux
-                .publishOn(Schedulers.fromExecutor(this.eventPool))
-                .reduce(Tuples.of(
-                        AgentMessage.builder().role(AgentMessage.ROLE.ASSISTANT).type(AgentMessage.TYPE.THINKING).text("").isSegment(0).build(),
-                        new ArrayList<>(),
-                        AgentMessage.builder().role(AgentMessage.ROLE.ASSISTANT).type(AgentMessage.TYPE.TEXT).text("").isSegment(0).isForgotten(0).eventId(event != null ? event.getId() : null).build()
-                ), (acc, chunk) -> {
-                    var thinkingItem = acc.getT1();
-                    var toolCall = acc.getT2();
-                    var contentItem = acc.getT3();
+        return Flux.<AgentMessage>defer(() -> {
+            var thinkingItem = AgentMessage.builder().role(AgentMessage.ROLE.ASSISTANT).type(AgentMessage.TYPE.THINKING).text("").isSegment(0).build();
+            var contentItem = AgentMessage.builder().role(AgentMessage.ROLE.ASSISTANT).type(AgentMessage.TYPE.TEXT).text("").isSegment(0).isForgotten(0).eventId(eventId).build();
+            var toolCallChunks = new ArrayList<Output>();
+            var thinkingEnded = new AtomicBoolean(false);
 
-                    var choices = chunk.getChoices();
+            log.debug("<fluxTransform> stream handle start | format=%s,eventId=%s".formatted(format, eventId));
 
-                    if (choices != null) {
+            return flux
+                    .publishOn(Schedulers.fromExecutor(this.eventPool))
+                    .concatMap(chunk -> {
+                        var messages = new ArrayList<AgentMessage>();
+                        var choices = chunk.getChoices();
+
+                        if (choices == null) {
+                            if (chunk.getUsage() != null && contentItem.getId() != null) {
+                                var usage = chunk.getUsage();
+                                contentItem.setUsage(AgentMessage.Usage.builder()
+                                        .total(usage.getTotalTokens())
+                                        .promptTotal(usage.getPromptTokens())
+                                        .completionTotal(usage.getCompletionTokens())
+                                        .completionThinking(usage.getThinkingTokens())
+                                        .build());
+                            }
+
+                            return Flux.fromIterable(messages);
+                        }
+
                         var delta = choices.get(0);
 
                         var toolCalls = delta.getToolCall();
@@ -367,50 +389,67 @@ public class Agent {
                             thinkingItem.setId(UUID.randomUUID().toString());
                             thinkingItem.setText(thinkingItem.getText() + thinking);
 
-                            var thinkingSegment = AgentMessage.builder().role(AgentMessage.ROLE.ASSISTANT).type(AgentMessage.TYPE.THINKING).text(thinking.toString()).isSegment(1).build();
+                            messages.add(AgentMessage.builder().role(AgentMessage.ROLE.ASSISTANT).type(AgentMessage.TYPE.THINKING).text(thinking.toString()).isSegment(1).build());
 
-                            observer.onThinking(thinkingSegment);
-                        } else if (toolCalls != null) {
+                            return Flux.fromIterable(messages);
+                        }
+
+                        // 第一个非 thinking 片段到达，thinking 阶段结束，先输出完整的 thinking 消息
+                        if (thinkingItem.getId() != null && thinkingEnded.compareAndSet(false, true)) {
+                            messages.add(thinkingItem);
+                        }
+
+                        if (toolCalls != null) {
                             // Todo toolcall返回不及预期的时候，有可能先出问题再出toolCall
                             // Todo toolcall可能被循环触发
-                            if (thinkingItem.getId() != null) {
-                                // thinking阶段结束，更新thinkingItem为非片段并发送
-                                observer.onThinking(thinkingItem);
-                            }
-                            toolCall.add(chunk);
-                            observer.onToolCalls(toolCall);
+                            toolCallChunks.add(chunk);
                         } else if (content != null) {
-                            if (thinkingItem.getId() != null) {
-                                // thinking阶段结束，更新thinkingItem为非片段并发送
-                                observer.onThinking(thinkingItem);
-                            }
-
                             contentItem.setId(UUID.randomUUID().toString());
                             contentItem.setText(contentItem.getText() + content);
                             if (format == null) {
-                                var contentItemSegment = AgentMessage.builder().id(UUID.randomUUID().toString()).role(contentItem.getRole()).type(AgentMessage.TYPE.TEXT).text(content).isSegment(1).build();
-                                observer.onContent(contentItemSegment);
+                                messages.add(AgentMessage.builder().id(UUID.randomUUID().toString()).role(contentItem.getRole()).type(AgentMessage.TYPE.TEXT).text(content).isSegment(1).build());
                             }
                         }
-                    } else if (chunk.getUsage() != null) {
+
+                        return Flux.fromIterable(messages);
+                    })
+                    .concatWith(Flux.defer(() -> {
+                        var messages = new ArrayList<AgentMessage>();
+
+                        // 收尾：整条 thinking、整条 content（含 formatted）
+                        if (thinkingItem.getId() != null && thinkingEnded.compareAndSet(false, true)) {
+                            messages.add(thinkingItem);
+                        }
+
                         if (contentItem.getId() != null) {
-                            var usage = chunk.getUsage();
-                            var usageBuilder = AgentMessage.Usage.builder()
-                                    .total((int) usage.getTotalTokens())
-                                    .promptTotal((int) usage.getPromptTokens())
-                                    .completionTotal((int) usage.getCompletionTokens())
-                                    .completionThinking(usage.getThinkingTokens())
-                                    .build();
-                            contentItem.setUsage(usageBuilder);
                             if (format != null) {
                                 contentItem.setFormatted(JSONUtil.parse(contentItem.getText(), format));
                             }
-                            observer.onContent(contentItem);
-                        }
-                    }
 
-                    return acc;
-                });
+                            messages.add(contentItem);
+                        }
+
+                        // 收尾：工具调用片段合并成一条 TOOL_CALLS 消息
+                        var calls = toolHandler.merge(toolCallChunks).stream()
+                                .flatMap(Collection::stream)
+                                .toList();
+
+                        if (!calls.isEmpty()) {
+                            log.debug("<fluxTransform> tool calls merged | calls=%s".formatted(JSONUtil.stringify(calls)));
+
+                            messages.add(AgentMessage.builder()
+                                    .id(UUID.randomUUID().toString())
+                                    .role(AgentMessage.ROLE.ASSISTANT)
+                                    .type(AgentMessage.TYPE.TOOL_CALLS)
+                                    .toolCalls(new ArrayList<>(calls))
+                                    .isSegment(0)
+                                    .eventId(eventId)
+                                    .build());
+                        }
+
+                        return Flux.fromIterable(messages);
+                    }));
+        });
     }
 
     /**
@@ -439,17 +478,24 @@ public class Agent {
         // 循环处理工具调用的多轮对话
         while (true) {
             var flux = llmProvider.get(toolHandler.getTools(), format, null).send(messages, format, toolHandler.getTools());
-            var result = fluxHandle(flux, format, null, StreamObserver.SILENT).block();
 
-            var toolCallHolder = result.getT2();
+            var streamMessages = fluxTransform(flux, format, null).collectList().block();
 
-            if (toolCallHolder.isEmpty()) {
+            var calls = streamMessages.stream()
+                    .filter(streamMessage -> AgentMessage.TYPE.TOOL_CALLS.equals(streamMessage.getType()))
+                    .flatMap(streamMessage -> streamMessage.getToolCalls().stream())
+                    .toList();
+
+            if (calls.isEmpty()) {
                 // 最终文本结果
-                return result.getT3();
+                return streamMessages.stream()
+                        .filter(streamMessage -> AgentMessage.TYPE.TEXT.equals(streamMessage.getType())
+                                && Integer.valueOf(0).equals(streamMessage.getIsSegment()))
+                        .reduce((first, second) -> second)
+                        .orElse(null);
             }
 
-            var calls = toolHandler.merge(toolCallHolder);
-            var callResult = toolHandler.invoke(this, calls.getFirst());
+            var callResult = toolHandler.invoke(this, new ArrayList<>(calls));
 
             // 按结果类型分组处理
             var directCalls = new ArrayList<AgentMessage.ToolCall>();
@@ -531,10 +577,13 @@ public class Agent {
     // region ========== 事件处理 ==========
     /**
      * 处理信息输入
-     * @param event
+     * 1.用户消息入记忆并持久化
+     * 2.走一轮 LLM 流式输出
+     * 3.有工具调用则执行，LLM 类型的结果回喂后再问一轮 LLM，如此循环直到没有新的工具调用
+     *
+     * @param event 触发事件
      */
     private void handleMessage(AgentEvent event) {
-        var self = this;
         var userMessage = event.getMessage();
         userMessage.setEventId(event.getId());
 
@@ -545,141 +594,148 @@ public class Agent {
 
         var format = event.getMessage().getFormatted() == null ? null : event.getMessage().getFormatted().getClass();
 
-        var flux = llmProvider.get(toolHandler.getTools(), format, null).send(memoryManager.getMessagesForLLM(), format, toolHandler.getTools());
+        var output = llmProvider.get(toolHandler.getTools(), format, null).send(memoryManager.getMessagesForLLM(), format, toolHandler.getTools());
 
-        var observer = new StreamObserver() {
-            @Override
-            public void onThinking(AgentMessage message) {
-                sink.tryEmitNext(message);
-
-                if (message.isSegment.equals(0)) {
-                    memoryManager.add(message);
-                    persistence.addMemory(self);
-                }
-            }
-
-            @Override
-            public void onToolCalls(List<Output> toolCallChunks) {
-            }
-
-
-            @Override
-            public void onContent(AgentMessage message) {
-                sink.tryEmitNext(message);
-                if (message.isSegment.equals(0)) {
-                    memoryManager.add(message);
-                }
-            }
-        };
-
-        fluxHandle(flux, format, event, observer)
-                .flatMapMany(holder -> {
-                    var toolCallHolder = holder.getT2();
-
-                    if (!toolCallHolder.isEmpty()) {
-                        var calls = toolHandler.merge(toolCallHolder);
-
-                        // 通过cli调用MCP函数
-                        // Todo 普通函数调用报错了，如何传导
-                        var callResult = toolHandler.invoke(this, calls.getFirst());
-
-                        // 按结果类型分组处理
-                        var directCalls = new ArrayList<AgentMessage.ToolCall>();
-                        var errorCalls = new ArrayList<AgentMessage.ToolCall>();
-                        var llmCalls = new ArrayList<AgentMessage.ToolCall>();
-
-                        for (var call : callResult) {
-                            if (call.result.getDirect() != null) {
-                                directCalls.add(call);
-                            } else if (call.result.getError() != null) {
-                                errorCalls.add(call);
-                            } else if (call.result.getLlm() != null) {
-                                llmCalls.add(call);
-                            }
-                        }
-
-
-                        // 处理DIRECT类型
-                        if (!directCalls.isEmpty()) {
-
-                            for (AgentMessage.ToolCall call : directCalls) {
-                                // 缓存工具调用参数，结果不管
-                                var cache = CallCache.builder()
-                                        .callId(call.getId())
-                                        .toolName(call.getName())
-                                        .params(call.getArguments())
-                                        .build();
-                                toolHandler.addCache(cache);
-
-                                // 持久化新增工具调用缓存
-                                persistence.addToolCall(this);
-
-                                // 构造并保存记忆
-                                var customMessage = AgentMessage.builder()
-                                        .role(AgentMessage.ROLE.ASSISTANT)
-                                        .type(AgentMessage.TYPE.CUSTOM)
-                                        .toolCalls(List.of(call))
-                                        .custom(call.getResult().getDirect())
-                                        .isSegment(0)
-                                        .isForgotten(0)
-                                        .eventId(event.getId())
-                                        .build();
-                                memoryManager.add(customMessage);
-
-                                // 触发消息
-                                sink.tryEmitNext(customMessage);
-                            }
-                        }
-
-                        // 处理ERROR类型
-                        if (!errorCalls.isEmpty()) {
-                            sink.tryEmitNext(AgentMessage.builder().type(AgentMessage.TYPE.ERROR).text("我正在更新代码，请您稍后").build());
-                            // Todo 判断IFunction
-
-                            for (var toolCall : errorCalls) {
-                                toolHandler.updateWithRetry(this, toolCall, 1).subscribe();
-                                toolHandler.invoke(this, List.of(toolCall));
-                            }
-                        }
-
-                        // 处理LLM类型
-                        if (!llmCalls.isEmpty()) {
-                            var messageInvoke = AgentMessage.builder()
-                                    .role(AgentMessage.ROLE.ASSISTANT)
-                                    .type(AgentMessage.TYPE.TEXT)
-                                    .toolCalls(llmCalls)
-                                    .isForgotten(0)
-                                    .eventId(event.getId())
-                                    .build();
-
-                            var messageRes = AgentMessage.builder()
-                                    .role(AgentMessage.ROLE.TOOL)
-                                    .eventId(event.getId())
-                                    .isForgotten(0)
-                                    .toolCalls(llmCalls)
-                                    .build();
-
-                            memoryManager.add(messageInvoke);
-                            memoryManager.add(messageRes);
-
-                            // Todo 这里的 tools 参数是否可以去掉，节省 token
-                            var newFlux = llmProvider.get(toolHandler.getTools(), null, null).send(memoryManager.getMessagesForLLM(), null, toolHandler.getTools());
-
-                            return fluxHandle(newFlux, format, event, observer).thenMany(Flux.empty());
-                        } else {
-                            return Flux.empty();
-                        }
-                    } else {
-                        return Flux.empty();
-                    }
-                })
-                .blockLast()
-        ;
+        consumeStream(fluxTransform(output, format, event), event).blockLast();
 
         // 持久化新增记忆
         persistence.addMemory(this);
 
         memoryManager.checkAndOrganize(this);
+    }
+
+    /**
+     * 消费转换后的消息流，消息逐条处理：
+     * 1.THINKING / TEXT：广播给订阅方，完整消息（isSegment=0）入记忆，thinking 完成后立即刷盘
+     * 2.TOOL_CALLS：不广播、不入记忆，就地执行工具调用；需要再问 LLM 时递归消费下一轮的消息流
+     *
+     * 冷流，必须被订阅才会真正执行广播、记忆与工具调用
+     *
+     * @param stream 已转换的 AgentMessage 流
+     * @param event  触发事件
+     * @return 面向订阅方的消息流
+     */
+    private Flux<AgentMessage> consumeStream(Flux<AgentMessage> stream, AgentEvent event) {
+        return stream.concatMap(message -> {
+            if (AgentMessage.TYPE.TOOL_CALLS.equals(message.getType())) {
+                return consumeStream(doToolCall(event, message.getToolCalls()), event);
+            }
+
+            sink.tryEmitNext(message);
+
+            if (Integer.valueOf(0).equals(message.getIsSegment())) {
+                memoryManager.add(message);
+
+                if (AgentMessage.TYPE.THINKING.equals(message.getType())) {
+                    // thinking 完成后立即入库，避免后续 assistant 消息覆盖
+                    persistence.addMemory(this);
+                }
+            }
+
+            return Flux.just(message);
+        });
+    }
+
+    /**
+     * 执行一轮工具调用，并按结果类型分发处理
+     * 1.DIRECT：缓存调用参数，写入 CUSTOM 记忆并广播
+     * 2.ERROR：广播提示，触发自进化并重试
+     * 3.LLM：写入调用与结果的记忆，再问一轮 LLM
+     *
+     * @param event 触发事件
+     * @param calls 待执行的工具调用列表
+     * @return 需要再问一轮 LLM 时返回其转换后的消息流，否则为空流
+     */
+    private Flux<AgentMessage> doToolCall(AgentEvent event, List<AgentMessage.ToolCall> calls) {
+        // 通过cli调用MCP函数
+        // Todo 普通函数调用报错了，如何传导
+        var callResult = toolHandler.invoke(this, calls);
+
+        // 按结果类型分组处理
+        var directCalls = new ArrayList<AgentMessage.ToolCall>();
+        var errorCalls = new ArrayList<AgentMessage.ToolCall>();
+        var llmCalls = new ArrayList<AgentMessage.ToolCall>();
+
+        for (var call : callResult) {
+            if (call.result.getDirect() != null) {
+                directCalls.add(call);
+            } else if (call.result.getError() != null) {
+                errorCalls.add(call);
+            } else if (call.result.getLlm() != null) {
+                llmCalls.add(call);
+            }
+        }
+
+        // 处理DIRECT类型
+        if (!directCalls.isEmpty()) {
+            for (AgentMessage.ToolCall call : directCalls) {
+                // 缓存工具调用参数，结果不管
+                var cache = CallCache.builder()
+                        .callId(call.getId())
+                        .toolName(call.getName())
+                        .params(call.getArguments())
+                        .build();
+                toolHandler.addCache(cache);
+
+                // 持久化新增工具调用缓存
+                persistence.addToolCall(this);
+
+                // 构造并保存记忆
+                var customMessage = AgentMessage.builder()
+                        .role(AgentMessage.ROLE.ASSISTANT)
+                        .type(AgentMessage.TYPE.CUSTOM)
+                        .toolCalls(List.of(call))
+                        .custom(call.getResult().getDirect())
+                        .isSegment(0)
+                        .isForgotten(0)
+                        .eventId(event.getId())
+                        .build();
+                memoryManager.add(customMessage);
+
+                // 触发消息
+                sink.tryEmitNext(customMessage);
+            }
+        }
+
+        // 处理ERROR类型
+        if (!errorCalls.isEmpty()) {
+            sink.tryEmitNext(AgentMessage.builder().type(AgentMessage.TYPE.ERROR).text("我正在更新代码，请您稍后").build());
+            // Todo 判断IFunction
+
+            for (var toolCall : errorCalls) {
+                toolHandler.updateWithRetry(this, toolCall, 1).subscribe();
+                toolHandler.invoke(this, List.of(toolCall));
+            }
+        }
+
+        // 没有需要回喂给 LLM 的结果，DIRECT 的结果已经以 CUSTOM 消息呈现，本轮结束
+        if (llmCalls.isEmpty()) {
+            return Flux.empty();
+        }
+
+        var messageInvoke = AgentMessage.builder()
+                .role(AgentMessage.ROLE.ASSISTANT)
+                .type(AgentMessage.TYPE.TEXT)
+                .toolCalls(llmCalls)
+                .isForgotten(0)
+                .eventId(event.getId())
+                .build();
+
+        var messageRes = AgentMessage.builder()
+                .role(AgentMessage.ROLE.TOOL)
+                .eventId(event.getId())
+                .isForgotten(0)
+                .toolCalls(llmCalls)
+                .build();
+
+        memoryManager.add(messageInvoke);
+        memoryManager.add(messageRes);
+
+        // Todo 这里的 tools 参数是否可以去掉，节省 token
+        // 回喂之后的这一轮不再要求结构化输出，format 传 null，答案按普通文本流式输出
+        var newFlux = llmProvider.get(toolHandler.getTools(), null, null).send(memoryManager.getMessagesForLLM(), null, toolHandler.getTools());
+
+        return fluxTransform(newFlux, null, event);
     }
 
     /**
